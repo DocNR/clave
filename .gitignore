@@ -1,0 +1,6 @@
+*.p8
+tokens.json
+.DS_Store
+relay-proxy/node_modules/
+xcuserdata/
+*.xcuserdatad/

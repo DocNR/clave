@@ -6,6 +6,22 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		EF3D7A442F8BCC5C005A6545 /* ClaveNSE.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = EF3D7A3D2F8BCC5C005A6545 /* ClaveNSE.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		EF3D7A502F8BCE15005A6545 /* NostrSDK in Frameworks */ = {isa = PBXBuildFile; productRef = EF3D7A4F2F8BCE15005A6545 /* NostrSDK */; };
+		EF3D7A532F8BCE6A005A6545 /* P256K in Frameworks */ = {isa = PBXBuildFile; productRef = EF3D7A522F8BCE6A005A6545 /* P256K */; };
+		EF3D7A612F8BD020005A6545 /* SharedConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF3D7A5D2F8BD020005A6545 /* SharedConstants.swift */; };
+		EF3D7A682F8BD0B8005A6545 /* SharedConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF3D7A5D2F8BD020005A6545 /* SharedConstants.swift */; };
+		EF3D7A692F8BD0C5005A6545 /* SharedKeychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF3D7A5E2F8BD020005A6545 /* SharedKeychain.swift */; };
+		EF3D7A6A2F8BD0D1005A6545 /* Bech32.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF3D7A582F8BD020005A6545 /* Bech32.swift */; };
+		EF3D7A6B2F8BD0FD005A6545 /* LightCrypto.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF3D7A592F8BD020005A6545 /* LightCrypto.swift */; };
+		EF3D7A6C2F8BD107005A6545 /* LightEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF3D7A5A2F8BD020005A6545 /* LightEvent.swift */; };
+		EF3D7A6D2F8BD139005A6545 /* LightRelay.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF3D7A5B2F8BD020005A6545 /* LightRelay.swift */; };
+		EF3D7A6E2F8BD146005A6545 /* LightSigner.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF3D7A5C2F8BD020005A6545 /* LightSigner.swift */; };
+		EF3D7A702F8BD189005A6545 /* SignerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF3D7A5F2F8BD020005A6545 /* SignerService.swift */; };
+		EF3D7A722F8BD1C4005A6545 /* SharedKeychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF3D7A5E2F8BD020005A6545 /* SharedKeychain.swift */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		EF3D7A1D2F8BCAE6005A6545 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -21,17 +37,67 @@
 			remoteGlobalIDString = EF3D7A0E2F8BCAE3005A6545;
 			remoteInfo = Clave;
 		};
+		EF3D7A422F8BCC5C005A6545 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = EF3D7A072F8BCAE3005A6545 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = EF3D7A3C2F8BCC5C005A6545;
+			remoteInfo = ClaveNSE;
+		};
 /* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		EF3D7A492F8BCC5C005A6545 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				EF3D7A442F8BCC5C005A6545 /* ClaveNSE.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		EF3D7A0F2F8BCAE3005A6545 /* Clave.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Clave.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		EF3D7A1C2F8BCAE6005A6545 /* ClaveTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ClaveTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		EF3D7A262F8BCAE6005A6545 /* ClaveUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ClaveUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		EF3D7A3D2F8BCC5C005A6545 /* ClaveNSE.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ClaveNSE.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		EF3D7A582F8BD020005A6545 /* Bech32.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Bech32.swift; sourceTree = "<group>"; };
+		EF3D7A592F8BD020005A6545 /* LightCrypto.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LightCrypto.swift; sourceTree = "<group>"; };
+		EF3D7A5A2F8BD020005A6545 /* LightEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LightEvent.swift; sourceTree = "<group>"; };
+		EF3D7A5B2F8BD020005A6545 /* LightRelay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LightRelay.swift; sourceTree = "<group>"; };
+		EF3D7A5C2F8BD020005A6545 /* LightSigner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LightSigner.swift; sourceTree = "<group>"; };
+		EF3D7A5D2F8BD020005A6545 /* SharedConstants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedConstants.swift; sourceTree = "<group>"; };
+		EF3D7A5E2F8BD020005A6545 /* SharedKeychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedKeychain.swift; sourceTree = "<group>"; };
+		EF3D7A5F2F8BD020005A6545 /* SignerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignerService.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		EF3D7A452F8BCC5C005A6545 /* Exceptions for "ClaveNSE" folder in "ClaveNSE" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = EF3D7A3C2F8BCC5C005A6545 /* ClaveNSE */;
+		};
+		EF3D7A4D2F8BCDB5005A6545 /* Exceptions for "Clave" folder in "Clave" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = EF3D7A0E2F8BCAE3005A6545 /* Clave */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		EF3D7A112F8BCAE3005A6545 /* Clave */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				EF3D7A4D2F8BCDB5005A6545 /* Exceptions for "Clave" folder in "Clave" target */,
+			);
 			path = Clave;
 			sourceTree = "<group>";
 		};
@@ -45,6 +111,14 @@
 			path = ClaveUITests;
 			sourceTree = "<group>";
 		};
+		EF3D7A3E2F8BCC5C005A6545 /* ClaveNSE */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				EF3D7A452F8BCC5C005A6545 /* Exceptions for "ClaveNSE" folder in "ClaveNSE" target */,
+			);
+			path = ClaveNSE;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -52,6 +126,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				EF3D7A502F8BCE15005A6545 /* NostrSDK in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -69,15 +144,25 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		EF3D7A3A2F8BCC5C005A6545 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				EF3D7A532F8BCE6A005A6545 /* P256K in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
 		EF3D7A062F8BCAE3005A6545 = {
 			isa = PBXGroup;
 			children = (
+				EF3D7A572F8BD011005A6545 /* Shared */,
 				EF3D7A112F8BCAE3005A6545 /* Clave */,
 				EF3D7A1F2F8BCAE6005A6545 /* ClaveTests */,
 				EF3D7A292F8BCAE6005A6545 /* ClaveUITests */,
+				EF3D7A3E2F8BCC5C005A6545 /* ClaveNSE */,
 				EF3D7A102F8BCAE3005A6545 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -88,8 +173,24 @@
 				EF3D7A0F2F8BCAE3005A6545 /* Clave.app */,
 				EF3D7A1C2F8BCAE6005A6545 /* ClaveTests.xctest */,
 				EF3D7A262F8BCAE6005A6545 /* ClaveUITests.xctest */,
+				EF3D7A3D2F8BCC5C005A6545 /* ClaveNSE.appex */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		EF3D7A572F8BD011005A6545 /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				EF3D7A582F8BD020005A6545 /* Bech32.swift */,
+				EF3D7A592F8BD020005A6545 /* LightCrypto.swift */,
+				EF3D7A5A2F8BD020005A6545 /* LightEvent.swift */,
+				EF3D7A5B2F8BD020005A6545 /* LightRelay.swift */,
+				EF3D7A5C2F8BD020005A6545 /* LightSigner.swift */,
+				EF3D7A5D2F8BD020005A6545 /* SharedConstants.swift */,
+				EF3D7A5E2F8BD020005A6545 /* SharedKeychain.swift */,
+				EF3D7A5F2F8BD020005A6545 /* SignerService.swift */,
+			);
+			path = Shared;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -102,16 +203,19 @@
 				EF3D7A0B2F8BCAE3005A6545 /* Sources */,
 				EF3D7A0C2F8BCAE3005A6545 /* Frameworks */,
 				EF3D7A0D2F8BCAE3005A6545 /* Resources */,
+				EF3D7A492F8BCC5C005A6545 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				EF3D7A432F8BCC5C005A6545 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				EF3D7A112F8BCAE3005A6545 /* Clave */,
 			);
 			name = Clave;
 			packageProductDependencies = (
+				EF3D7A4F2F8BCE15005A6545 /* NostrSDK */,
 			);
 			productName = Clave;
 			productReference = EF3D7A0F2F8BCAE3005A6545 /* Clave.app */;
@@ -163,6 +267,29 @@
 			productReference = EF3D7A262F8BCAE6005A6545 /* ClaveUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
+		EF3D7A3C2F8BCC5C005A6545 /* ClaveNSE */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = EF3D7A462F8BCC5C005A6545 /* Build configuration list for PBXNativeTarget "ClaveNSE" */;
+			buildPhases = (
+				EF3D7A392F8BCC5C005A6545 /* Sources */,
+				EF3D7A3A2F8BCC5C005A6545 /* Frameworks */,
+				EF3D7A3B2F8BCC5C005A6545 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				EF3D7A3E2F8BCC5C005A6545 /* ClaveNSE */,
+			);
+			name = ClaveNSE;
+			packageProductDependencies = (
+				EF3D7A522F8BCE6A005A6545 /* P256K */,
+			);
+			productName = ClaveNSE;
+			productReference = EF3D7A3D2F8BCC5C005A6545 /* ClaveNSE.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -184,6 +311,9 @@
 						CreatedOnToolsVersion = 26.4;
 						TestTargetID = EF3D7A0E2F8BCAE3005A6545;
 					};
+					EF3D7A3C2F8BCC5C005A6545 = {
+						CreatedOnToolsVersion = 26.4;
+					};
 				};
 			};
 			buildConfigurationList = EF3D7A0A2F8BCAE3005A6545 /* Build configuration list for PBXProject "Clave" */;
@@ -195,6 +325,10 @@
 			);
 			mainGroup = EF3D7A062F8BCAE3005A6545;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				EF3D7A4E2F8BCE15005A6545 /* XCRemoteSwiftPackageReference "nostr-sdk-swift" */,
+				EF3D7A512F8BCE6A005A6545 /* XCRemoteSwiftPackageReference "swift-secp256k1" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = EF3D7A102F8BCAE3005A6545 /* Products */;
 			projectDirPath = "";
@@ -203,6 +337,7 @@
 				EF3D7A0E2F8BCAE3005A6545 /* Clave */,
 				EF3D7A1B2F8BCAE6005A6545 /* ClaveTests */,
 				EF3D7A252F8BCAE6005A6545 /* ClaveUITests */,
+				EF3D7A3C2F8BCC5C005A6545 /* ClaveNSE */,
 			);
 		};
 /* End PBXProject section */
@@ -229,6 +364,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		EF3D7A3B2F8BCC5C005A6545 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -236,6 +378,9 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				EF3D7A722F8BD1C4005A6545 /* SharedKeychain.swift in Sources */,
+				EF3D7A612F8BD020005A6545 /* SharedConstants.swift in Sources */,
+				EF3D7A702F8BD189005A6545 /* SignerService.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -253,6 +398,20 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		EF3D7A392F8BCC5C005A6545 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				EF3D7A682F8BD0B8005A6545 /* SharedConstants.swift in Sources */,
+				EF3D7A6C2F8BD107005A6545 /* LightEvent.swift in Sources */,
+				EF3D7A6B2F8BD0FD005A6545 /* LightCrypto.swift in Sources */,
+				EF3D7A6E2F8BD146005A6545 /* LightSigner.swift in Sources */,
+				EF3D7A6A2F8BD0D1005A6545 /* Bech32.swift in Sources */,
+				EF3D7A692F8BD0C5005A6545 /* SharedKeychain.swift in Sources */,
+				EF3D7A6D2F8BD139005A6545 /* LightRelay.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -265,6 +424,11 @@
 			isa = PBXTargetDependency;
 			target = EF3D7A0E2F8BCAE3005A6545 /* Clave */;
 			targetProxy = EF3D7A272F8BCAE6005A6545 /* PBXContainerItemProxy */;
+		};
+		EF3D7A432F8BCC5C005A6545 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = EF3D7A3C2F8BCC5C005A6545 /* ClaveNSE */;
+			targetProxy = EF3D7A422F8BCC5C005A6545 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -395,16 +559,19 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Clave/Clave.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 944AF56S27;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Clave/Info.plist;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -427,16 +594,19 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Clave/Clave.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 944AF56S27;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Clave/Info.plist;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -538,6 +708,66 @@
 			};
 			name = Release;
 		};
+		EF3D7A472F8BCC5C005A6545 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = ClaveNSE/ClaveNSE.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 944AF56S27;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = ClaveNSE/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = ClaveNSE;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.nostr.Clave.ClaveNSE;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		EF3D7A482F8BCC5C005A6545 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = ClaveNSE/ClaveNSE.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 944AF56S27;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = ClaveNSE/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = ClaveNSE;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.nostr.Clave.ClaveNSE;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -577,7 +807,48 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		EF3D7A462F8BCC5C005A6545 /* Build configuration list for PBXNativeTarget "ClaveNSE" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				EF3D7A472F8BCC5C005A6545 /* Debug */,
+				EF3D7A482F8BCC5C005A6545 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		EF3D7A4E2F8BCE15005A6545 /* XCRemoteSwiftPackageReference "nostr-sdk-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/rust-nostr/nostr-sdk-swift.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.44.2;
+			};
+		};
+		EF3D7A512F8BCE6A005A6545 /* XCRemoteSwiftPackageReference "swift-secp256k1" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/21-DOT-DEV/swift-secp256k1.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.23.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		EF3D7A4F2F8BCE15005A6545 /* NostrSDK */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = EF3D7A4E2F8BCE15005A6545 /* XCRemoteSwiftPackageReference "nostr-sdk-swift" */;
+			productName = NostrSDK;
+		};
+		EF3D7A522F8BCE6A005A6545 /* P256K */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = EF3D7A512F8BCE6A005A6545 /* XCRemoteSwiftPackageReference "swift-secp256k1" */;
+			productName = P256K;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = EF3D7A072F8BCAE3005A6545 /* Project object */;
 }

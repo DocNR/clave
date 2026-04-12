@@ -1,0 +1,24 @@
+{
+  "originHash" : "a4c96b0f19fcc1ee4806b429a319c50541c4e50fe4b16a62037e1449e393ccb9",
+  "pins" : [
+    {
+      "identity" : "nostr-sdk-swift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/rust-nostr/nostr-sdk-swift.git",
+      "state" : {
+        "revision" : "0c60d43fe0a92f6e8e3dbde29093a799d5ee6c8c",
+        "version" : "0.44.2"
+      }
+    },
+    {
+      "identity" : "swift-secp256k1",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/21-DOT-DEV/swift-secp256k1.git",
+      "state" : {
+        "revision" : "21d46dd1d11737b77d15bd23468f989b24bc7f40",
+        "version" : "0.23.0"
+      }
+    }
+  ],
+  "version" : 3
+}
