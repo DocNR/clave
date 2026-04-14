@@ -25,7 +25,6 @@ class NotificationService: UNNotificationServiceExtension {
         }
     }
 
-    /// Suppress notification on success, show error on failure
     private func deliverContent(error: String? = nil) {
         deliverLock.lock()
         defer { deliverLock.unlock() }
@@ -37,11 +36,12 @@ class NotificationService: UNNotificationServiceExtension {
             content.body = error
             contentHandler?(content)
         } else if let content = bestAttemptContent {
-            // Success — clear the alert to suppress notification
             content.title = ""
             content.body = ""
             content.sound = nil
             content.badge = nil
+            content.interruptionLevel = .passive
+            content.relevanceScore = 0
             contentHandler?(content)
         } else {
             let empty = UNMutableNotificationContent()
@@ -49,7 +49,6 @@ class NotificationService: UNNotificationServiceExtension {
         }
     }
 
-    /// Returns nil on success, error string on failure
     private func handleSigningRequest(userInfo: [AnyHashable: Any]) async -> String? {
         guard let nsec = SharedKeychain.loadNsec() else {
             logger.error("[ClaveNSE] No nsec in Keychain")
@@ -78,8 +77,10 @@ class NotificationService: UNNotificationServiceExtension {
             try await relay.connect()
 
             let now = Int(Date().timeIntervalSince1970)
+            // NIP-46 spec: clients MUST include ["p", <signer-pubkey>] on kind:24133
             let filter: [String: Any] = [
                 "kinds": [24133],
+                "#p": [signerPubkey],
                 "since": now - 60,
                 "limit": 5
             ]
@@ -90,6 +91,7 @@ class NotificationService: UNNotificationServiceExtension {
                 try await Task.sleep(nanoseconds: 2_000_000_000)
                 let retryFilter: [String: Any] = [
                     "kinds": [24133],
+                    "#p": [signerPubkey],
                     "since": now - 120,
                     "limit": 5
                 ]
@@ -99,10 +101,9 @@ class NotificationService: UNNotificationServiceExtension {
             relay.disconnect()
 
             if events.isEmpty {
-                return "No signing requests found"
+                return nil // No events to process — suppress notification
             }
 
-            // Track processed event IDs to avoid duplicate handling
             let processedKey = "processedEventIDs"
             var processedIDs = Set(SharedConstants.sharedDefaults.stringArray(forKey: processedKey) ?? [])
 
@@ -115,19 +116,26 @@ class NotificationService: UNNotificationServiceExtension {
                       !processedIDs.contains(eventId) else { continue }
 
                 do {
-                    try await LightSigner.handleRequest(
+                    let result = try await LightSigner.handleRequest(
                         privateKey: privateKey,
                         requestEvent: event
                     )
                     processedIDs.insert(eventId)
+                    // Decrypt failures mean "not for us" — skip silently
+                    if result.status == "error" && result.errorMessage == "Decrypt failed" {
+                        continue
+                    }
                     handledCount += 1
+                    if result.status == "error" {
+                        lastError = result.errorMessage
+                    }
                 } catch {
-                    lastError = error.localizedDescription
-                    logger.error("[ClaveNSE] Failed: \(error.localizedDescription)")
+                    // Treat errors as non-fatal — event may not be for us
+                    processedIDs.insert(eventId)
+                    logger.notice("[ClaveNSE] Skipping event: \(error.localizedDescription)")
                 }
             }
 
-            // Save processed IDs (keep last 50 to prevent unbounded growth)
             let trimmed = Array(processedIDs.suffix(50))
             SharedConstants.sharedDefaults.set(trimmed, forKey: processedKey)
 

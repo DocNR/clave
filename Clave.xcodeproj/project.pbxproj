@@ -7,6 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		EF1963B89F3A6472380F1E0A /* LightRelay.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF3D7A5B2F8BD020005A6545 /* LightRelay.swift */; };
+		EF251FEC744434349FD7256D /* P256K in Frameworks */ = {isa = PBXBuildFile; productRef = EF609A96DAD7E5693CA7EE4D /* P256K */; };
+		EF304CFAA8D958E7CCDF01AD /* LightCrypto.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF3D7A592F8BD020005A6545 /* LightCrypto.swift */; };
 		EF3D7A442F8BCC5C005A6545 /* ClaveNSE.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = EF3D7A3D2F8BCC5C005A6545 /* ClaveNSE.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		EF3D7A502F8BCE15005A6545 /* NostrSDK in Frameworks */ = {isa = PBXBuildFile; productRef = EF3D7A4F2F8BCE15005A6545 /* NostrSDK */; };
 		EF3D7A532F8BCE6A005A6545 /* P256K in Frameworks */ = {isa = PBXBuildFile; productRef = EF3D7A522F8BCE6A005A6545 /* P256K */; };
@@ -20,6 +23,13 @@
 		EF3D7A6E2F8BD146005A6545 /* LightSigner.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF3D7A5C2F8BD020005A6545 /* LightSigner.swift */; };
 		EF3D7A702F8BD189005A6545 /* SignerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF3D7A5F2F8BD020005A6545 /* SignerService.swift */; };
 		EF3D7A722F8BD1C4005A6545 /* SharedKeychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF3D7A5E2F8BD020005A6545 /* SharedKeychain.swift */; };
+		EF56291E7860E39D54142281 /* SharedModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFCA55B463A619311A35AF3C /* SharedModels.swift */; };
+		EF6058BFB67AD8970BBE8953 /* LightEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF3D7A5A2F8BD020005A6545 /* LightEvent.swift */; };
+		EF85F076F6C02095C4B6D9C4 /* LightSigner.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF3D7A5C2F8BD020005A6545 /* LightSigner.swift */; };
+		EFAF49B35F7A4241A65DCD89 /* SharedStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFEE4316AC522CDDA35AFAC1 /* SharedStorage.swift */; };
+		EFBF443D3DA775A267700410 /* Bech32.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF3D7A582F8BD020005A6545 /* Bech32.swift */; };
+		EFC7FD75109694C0A7F86D26 /* SharedModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFCA55B463A619311A35AF3C /* SharedModels.swift */; };
+		EFE12D1EC4CE48622767D427 /* SharedStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFEE4316AC522CDDA35AFAC1 /* SharedStorage.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -73,6 +83,8 @@
 		EF3D7A5D2F8BD020005A6545 /* SharedConstants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedConstants.swift; sourceTree = "<group>"; };
 		EF3D7A5E2F8BD020005A6545 /* SharedKeychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedKeychain.swift; sourceTree = "<group>"; };
 		EF3D7A5F2F8BD020005A6545 /* SignerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignerService.swift; sourceTree = "<group>"; };
+		EFCA55B463A619311A35AF3C /* SharedModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedModels.swift; sourceTree = "<group>"; };
+		EFEE4316AC522CDDA35AFAC1 /* SharedStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedStorage.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -127,6 +139,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				EF3D7A502F8BCE15005A6545 /* NostrSDK in Frameworks */,
+				EF251FEC744434349FD7256D /* P256K in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -188,6 +201,8 @@
 				EF3D7A5C2F8BD020005A6545 /* LightSigner.swift */,
 				EF3D7A5D2F8BD020005A6545 /* SharedConstants.swift */,
 				EF3D7A5E2F8BD020005A6545 /* SharedKeychain.swift */,
+				EFCA55B463A619311A35AF3C /* SharedModels.swift */,
+				EFEE4316AC522CDDA35AFAC1 /* SharedStorage.swift */,
 				EF3D7A5F2F8BD020005A6545 /* SignerService.swift */,
 			);
 			path = Shared;
@@ -216,6 +231,7 @@
 			name = Clave;
 			packageProductDependencies = (
 				EF3D7A4F2F8BCE15005A6545 /* NostrSDK */,
+				EF609A96DAD7E5693CA7EE4D /* P256K */,
 			);
 			productName = Clave;
 			productReference = EF3D7A0F2F8BCAE3005A6545 /* Clave.app */;
@@ -381,6 +397,13 @@
 				EF3D7A722F8BD1C4005A6545 /* SharedKeychain.swift in Sources */,
 				EF3D7A612F8BD020005A6545 /* SharedConstants.swift in Sources */,
 				EF3D7A702F8BD189005A6545 /* SignerService.swift in Sources */,
+				EFC7FD75109694C0A7F86D26 /* SharedModels.swift in Sources */,
+				EFE12D1EC4CE48622767D427 /* SharedStorage.swift in Sources */,
+				EFBF443D3DA775A267700410 /* Bech32.swift in Sources */,
+				EF304CFAA8D958E7CCDF01AD /* LightCrypto.swift in Sources */,
+				EF6058BFB67AD8970BBE8953 /* LightEvent.swift in Sources */,
+				EF1963B89F3A6472380F1E0A /* LightRelay.swift in Sources */,
+				EF85F076F6C02095C4B6D9C4 /* LightSigner.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -409,6 +432,8 @@
 				EF3D7A6A2F8BD0D1005A6545 /* Bech32.swift in Sources */,
 				EF3D7A692F8BD0C5005A6545 /* SharedKeychain.swift in Sources */,
 				EF3D7A6D2F8BD139005A6545 /* LightRelay.swift in Sources */,
+				EF56291E7860E39D54142281 /* SharedModels.swift in Sources */,
+				EFAF49B35F7A4241A65DCD89 /* SharedStorage.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -560,6 +585,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Clave/Clave.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 944AF56S27;
@@ -579,6 +605,7 @@
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = dev.nostr.Clave;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
@@ -595,9 +622,12 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Clave/Clave.entitlements;
-				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "iPhone Distribution";
+				CODE_SIGN_STYLE = Manual;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 944AF56S27;
+				DEVELOPMENT_TEAM = "";
+				"DEVELOPMENT_TEAM[sdk=iphoneos*]" = 944AF56S27;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Clave/Info.plist;
@@ -614,6 +644,8 @@
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = dev.nostr.Clave;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				"PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]" = "Clave Distribution";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
@@ -742,9 +774,11 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = ClaveNSE/ClaveNSE.entitlements;
-				CODE_SIGN_STYLE = Automatic;
+				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "iPhone Distribution";
+				CODE_SIGN_STYLE = Manual;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 944AF56S27;
+				DEVELOPMENT_TEAM = "";
+				"DEVELOPMENT_TEAM[sdk=iphoneos*]" = 944AF56S27;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = ClaveNSE/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = ClaveNSE;
@@ -758,6 +792,8 @@
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = dev.nostr.Clave.ClaveNSE;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				"PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]" = "ClaveNSE Distribution";
 				SKIP_INSTALL = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -844,6 +880,11 @@
 			productName = NostrSDK;
 		};
 		EF3D7A522F8BCE6A005A6545 /* P256K */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = EF3D7A512F8BCE6A005A6545 /* XCRemoteSwiftPackageReference "swift-secp256k1" */;
+			productName = P256K;
+		};
+		EF609A96DAD7E5693CA7EE4D /* P256K */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = EF3D7A512F8BCE6A005A6545 /* XCRemoteSwiftPackageReference "swift-secp256k1" */;
 			productName = P256K;

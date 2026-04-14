@@ -5,16 +5,26 @@ private let logger = Logger(subsystem: "dev.nostr.clave", category: "signer")
 
 enum LightSigner {
 
-    static func handleRequest(privateKey: Data, requestEvent: [String: Any]) async throws {
+    struct RequestResult {
+        let method: String
+        let eventKind: Int?
+        let clientPubkey: String
+        let status: String          // "signed", "blocked", "pending", "error"
+        let errorMessage: String?
+    }
+
+    static func handleRequest(privateKey: Data, requestEvent: [String: Any], skipProtection: Bool = false) async throws -> RequestResult {
         guard let senderPubkey = requestEvent["pubkey"] as? String,
               let encryptedContent = requestEvent["content"] as? String else {
             logger.error("[LightSigner] Invalid event: missing pubkey or content")
-            return
+            return RequestResult(method: "unknown", eventKind: nil, clientPubkey: "unknown",
+                                 status: "error", errorMessage: "Invalid event")
         }
 
         guard let senderPubkeyData = Data(hexString: senderPubkey) else {
             logger.error("[LightSigner] Invalid sender pubkey hex")
-            return
+            return RequestResult(method: "unknown", eventKind: nil, clientPubkey: senderPubkey,
+                                 status: "error", errorMessage: "Invalid sender pubkey")
         }
 
         let isNip04 = encryptedContent.contains("?iv=")
@@ -27,7 +37,10 @@ enum LightSigner {
             )
         } catch {
             logger.error("[LightSigner] Decrypt failed: \(error.localizedDescription, privacy: .public)")
-            return
+            let result = RequestResult(method: "unknown", eventKind: nil, clientPubkey: senderPubkey,
+                                       status: "error", errorMessage: "Decrypt failed")
+            logAndTrack(result: result)
+            return result
         }
 
         guard let data = decrypted.data(using: .utf8),
@@ -35,26 +48,131 @@ enum LightSigner {
               let requestId = json["id"] as? String,
               let method = json["method"] as? String else {
             logger.error("[LightSigner] Failed to parse JSON-RPC")
-            return
+            let result = RequestResult(method: "unknown", eventKind: nil, clientPubkey: senderPubkey,
+                                       status: "error", errorMessage: "Invalid JSON-RPC")
+            logAndTrack(result: result)
+            return result
         }
 
         let params = json["params"] as? [String] ?? []
         logger.notice("[LightSigner] Method: \(method, privacy: .public)")
 
-        let (result, error) = processRequest(method: method, params: params, privateKey: privateKey)
+        // Extract event kind for sign_event
+        let eventKind = extractEventKind(method: method, params: params)
+
+        // Extract client name for connect
+        let clientName = (method == "connect" && !params.isEmpty) ? extractConnectName(params: params) : nil
+
+        // --- Secret-based pairing ---
+        if method == "connect" {
+            // connect params: [remote-signer-pubkey, optional-secret, optional-perms]
+            let providedSecret = params.count >= 2 ? params[1] : ""
+            let expectedSecret = SharedStorage.getBunkerSecret()
+
+            if !providedSecret.isEmpty && providedSecret == expectedSecret {
+                // Valid secret — pair this client and invalidate the secret
+                SharedStorage.pairClient(senderPubkey)
+                _ = SharedStorage.rotateBunkerSecret()
+                logger.notice("[LightSigner] Client paired with valid secret")
+            } else if SharedStorage.isClientPaired(senderPubkey) {
+                // Already paired — allow reconnect without secret
+                logger.notice("[LightSigner] Already-paired client reconnecting")
+            } else {
+                // Wrong or missing secret — reject
+                logger.notice("[LightSigner] Connect rejected: invalid secret")
+                let result = RequestResult(method: method, eventKind: nil, clientPubkey: senderPubkey,
+                                           status: "blocked", errorMessage: "Invalid or missing secret")
+                logAndTrack(result: result, clientName: clientName)
+                try await sendErrorResponse(
+                    requestId: requestId, error: "Invalid or missing bunker secret",
+                    privateKey: privateKey, senderPubkeyData: senderPubkeyData,
+                    senderPubkey: senderPubkey, isNip04: isNip04
+                )
+                return result
+            }
+        } else if !skipProtection && !SharedStorage.isClientPaired(senderPubkey) {
+            // NIP-42 relay auth (kind 22242) is a chicken-and-egg: clients need to sign
+            // the auth challenge before they can publish anything (including connect) to
+            // an auth-required relay. Allow kind 22242 sign_event through without pairing.
+            let isRelayAuthSign = (method == "sign_event" && eventKind == 22242)
+            if !isRelayAuthSign {
+                // Non-connect method from an unpaired client — reject
+                logger.notice("[LightSigner] Rejecting unpaired client for method \(method, privacy: .public)")
+                let result = RequestResult(method: method, eventKind: eventKind, clientPubkey: senderPubkey,
+                                           status: "blocked", errorMessage: "Client not paired")
+                logAndTrack(result: result, clientName: clientName)
+                try await sendErrorResponse(
+                    requestId: requestId, error: "Client not paired — send connect with valid bunker secret first",
+                    privateKey: privateKey, senderPubkeyData: senderPubkeyData,
+                    senderPubkey: senderPubkey, isNip04: isNip04
+                )
+                return result
+            }
+            logger.notice("[LightSigner] Allowing kind 22242 (NIP-42 relay auth) from unpaired client")
+        }
+
+        // Check auto-sign and blocked kinds
+        if method == "sign_event" {
+            if !SharedStorage.isAutoSignEnabled() {
+                logger.notice("[LightSigner] Auto-sign disabled, blocking request")
+                let result = RequestResult(method: method, eventKind: eventKind, clientPubkey: senderPubkey,
+                                           status: "blocked", errorMessage: "Auto-sign disabled")
+                logAndTrack(result: result, clientName: clientName)
+                try await sendErrorResponse(
+                    requestId: requestId, error: "Auto-sign is disabled",
+                    privateKey: privateKey, senderPubkeyData: senderPubkeyData,
+                    senderPubkey: senderPubkey, isNip04: isNip04
+                )
+                return result
+            }
+
+            if !skipProtection, let kind = eventKind, SharedStorage.getProtectedKinds().contains(kind) {
+                logger.notice("[LightSigner] Protected kind \(kind) — queuing for in-app approval")
+
+                // Serialize the full request event so the app can process it later
+                if let eventData = try? JSONSerialization.data(withJSONObject: requestEvent),
+                   let eventJSON = String(data: eventData, encoding: .utf8) {
+                    let pending = PendingRequest(
+                        id: UUID().uuidString,
+                        requestEventJSON: eventJSON,
+                        method: method,
+                        eventKind: kind,
+                        clientPubkey: senderPubkey,
+                        timestamp: Date().timeIntervalSince1970
+                    )
+                    SharedStorage.queuePendingRequest(pending)
+                }
+
+                let result = RequestResult(method: method, eventKind: eventKind, clientPubkey: senderPubkey,
+                                           status: "pending", errorMessage: "Queued for approval")
+                logAndTrack(result: result, clientName: clientName)
+                try await sendErrorResponse(
+                    requestId: requestId, error: "Protected event kind — open Clave to approve",
+                    privateKey: privateKey, senderPubkeyData: senderPubkeyData,
+                    senderPubkey: senderPubkey, isNip04: isNip04
+                )
+                return result
+            }
+        }
+
+        // Process the request
+        let (responseResult, responseError) = processRequest(method: method, params: params, privateKey: privateKey)
 
         var responseDict: [String: Any] = ["id": requestId]
-        if let result = result {
-            responseDict["result"] = result
+        if let responseResult {
+            responseDict["result"] = responseResult
         }
-        if let error = error {
-            responseDict["error"] = error
+        if let responseError {
+            responseDict["error"] = responseError
         }
 
         guard let responseData = try? JSONSerialization.data(withJSONObject: responseDict),
               let responseJSON = String(data: responseData, encoding: .utf8) else {
             logger.error("[LightSigner] Failed to serialize response")
-            return
+            let result = RequestResult(method: method, eventKind: eventKind, clientPubkey: senderPubkey,
+                                       status: "error", errorMessage: "Serialization failed")
+            logAndTrack(result: result, clientName: clientName)
+            return result
         }
 
         // Respond with same encryption the client used
@@ -88,17 +206,37 @@ enum LightSigner {
               let eventDict = try? JSONSerialization.jsonObject(with: eventData) as? [String: Any] else {
             logger.error("[LightSigner] Failed to serialize event for publish")
             relay.disconnect()
-            return
+            let result = RequestResult(method: method, eventKind: eventKind, clientPubkey: senderPubkey,
+                                       status: "error", errorMessage: "Publish serialization failed")
+            logAndTrack(result: result, clientName: clientName)
+            return result
         }
 
         let accepted = try await relay.publishEvent(event: eventDict)
-        if accepted {
+        relay.disconnect()
+
+        let status: String
+        let errorMsg: String?
+        if let responseError {
+            status = "error"
+            errorMsg = responseError
+        } else if accepted {
+            status = "signed"
+            errorMsg = nil
             logger.notice("[LightSigner] Response published successfully")
         } else {
+            status = "error"
+            errorMsg = "Relay rejected response"
             logger.error("[LightSigner] Relay did not accept response event")
         }
-        relay.disconnect()
+
+        let result = RequestResult(method: method, eventKind: eventKind, clientPubkey: senderPubkey,
+                                   status: status, errorMessage: errorMsg)
+        logAndTrack(result: result, clientName: clientName)
+        return result
     }
+
+    // MARK: - Request Processing
 
     private static func processRequest(method: String, params: [String], privateKey: Data) -> (String?, String?) {
         switch method {
@@ -125,17 +263,117 @@ enum LightSigner {
             }
 
         case "connect":
-            // Return the secret if provided in params
             if params.count >= 2, !params[1].isEmpty {
                 return (params[1], nil)
             }
             return ("ack", nil)
 
+        case "nip04_encrypt":
+            guard params.count >= 2 else { return (nil, "Missing params") }
+            guard let pubkeyData = Data(hexString: params[0]) else { return (nil, "Invalid pubkey") }
+            do {
+                let ciphertext = try LightCrypto.nip04Encrypt(privateKey: privateKey, publicKey: pubkeyData, plaintext: params[1])
+                return (ciphertext, nil)
+            } catch {
+                return (nil, "nip04_encrypt failed: \(error.localizedDescription)")
+            }
+
+        case "nip04_decrypt":
+            guard params.count >= 2 else { return (nil, "Missing params") }
+            guard let pubkeyData = Data(hexString: params[0]) else { return (nil, "Invalid pubkey") }
+            do {
+                let plaintext = try LightCrypto.nip04Decrypt(privateKey: privateKey, publicKey: pubkeyData, payload: params[1])
+                return (plaintext, nil)
+            } catch {
+                return (nil, "nip04_decrypt failed: \(error.localizedDescription)")
+            }
+
+        case "nip44_encrypt":
+            guard params.count >= 2 else { return (nil, "Missing params") }
+            guard let pubkeyData = Data(hexString: params[0]) else { return (nil, "Invalid pubkey") }
+            do {
+                let ciphertext = try LightCrypto.nip44Encrypt(privateKey: privateKey, publicKey: pubkeyData, plaintext: params[1])
+                return (ciphertext, nil)
+            } catch {
+                return (nil, "nip44_encrypt failed: \(error.localizedDescription)")
+            }
+
+        case "nip44_decrypt":
+            guard params.count >= 2 else { return (nil, "Missing params") }
+            guard let pubkeyData = Data(hexString: params[0]) else { return (nil, "Invalid pubkey") }
+            do {
+                let plaintext = try LightCrypto.nip44Decrypt(privateKey: privateKey, publicKey: pubkeyData, payload: params[1])
+                return (plaintext, nil)
+            } catch {
+                return (nil, "nip44_decrypt failed: \(error.localizedDescription)")
+            }
+
         case "describe":
-            return ("[\"connect\",\"sign_event\",\"get_public_key\",\"ping\",\"describe\"]", nil)
+            return ("[\"connect\",\"sign_event\",\"get_public_key\",\"ping\",\"nip04_encrypt\",\"nip04_decrypt\",\"nip44_encrypt\",\"nip44_decrypt\",\"describe\"]", nil)
 
         default:
             return (nil, "Unsupported method: \(method)")
         }
+    }
+
+    // MARK: - Helpers
+
+    private static func extractEventKind(method: String, params: [String]) -> Int? {
+        guard method == "sign_event", let eventJson = params.first,
+              let data = eventJson.data(using: .utf8),
+              let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let kind = dict["kind"] as? Int else {
+            return nil
+        }
+        return kind
+    }
+
+    private static func extractConnectName(params: [String]) -> String? {
+        // connect params: [pubkey, secret?, perms?] — name might be in the URI or absent
+        // The client name comes from the nostrconnect URI which isn't in params directly
+        nil
+    }
+
+    private static func logAndTrack(result: RequestResult, clientName: String? = nil) {
+        let entry = ActivityEntry(
+            id: UUID().uuidString,
+            method: result.method,
+            eventKind: result.eventKind,
+            clientPubkey: result.clientPubkey,
+            timestamp: Date().timeIntervalSince1970,
+            status: result.status,
+            errorMessage: result.errorMessage
+        )
+        SharedStorage.logActivity(entry)
+        if result.clientPubkey != "unknown" {
+            SharedStorage.updateClient(pubkey: result.clientPubkey, name: clientName)
+        }
+    }
+
+    private static func sendErrorResponse(
+        requestId: String, error: String,
+        privateKey: Data, senderPubkeyData: Data,
+        senderPubkey: String, isNip04: Bool
+    ) async throws {
+        let responseDict: [String: Any] = ["id": requestId, "error": error]
+        guard let responseData = try? JSONSerialization.data(withJSONObject: responseDict),
+              let responseJSON = String(data: responseData, encoding: .utf8) else { return }
+
+        let encrypted: String
+        if isNip04 {
+            encrypted = try LightCrypto.nip04Encrypt(privateKey: privateKey, publicKey: senderPubkeyData, plaintext: responseJSON)
+        } else {
+            encrypted = try LightCrypto.nip44Encrypt(privateKey: privateKey, publicKey: senderPubkeyData, plaintext: responseJSON)
+        }
+
+        let event = try LightEvent.sign(privateKey: privateKey, kind: 24133, content: encrypted, tags: [["p", senderPubkey]])
+        let relay = LightRelay(url: SharedConstants.relayURL)
+        try await relay.connect(timeout: 5.0)
+
+        if let eventData = event.toJSON().data(using: .utf8),
+           let eventDict = try? JSONSerialization.jsonObject(with: eventData) as? [String: Any] {
+            _ = try await relay.publishEvent(event: eventDict)
+        }
+        relay.disconnect()
     }
 }

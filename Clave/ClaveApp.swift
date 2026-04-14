@@ -1,6 +1,9 @@
 import SwiftUI
 import UIKit
 import NostrSDK
+import os.log
+
+private let logger = Logger(subsystem: "dev.nostr.clave", category: "app")
 
 @main
 struct ClaveApp: App {
@@ -21,7 +24,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     ) -> Bool {
         UNUserNotificationCenter.current().delegate = self
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
-            print("[APNs] Authorization granted: \(granted), error: \(String(describing: error))")
+            logger.notice("[APNs] Authorization granted: \(granted), error: \(String(describing: error))")
             if granted {
                 DispatchQueue.main.async {
                     application.registerForRemoteNotifications()
@@ -36,17 +39,20 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
     ) {
         let token = deviceToken.map { String(format: "%02x", $0) }.joined()
-        print("[APNs] Device token: \(token)")
+        logger.notice("[APNs] Device token: \(token, privacy: .public)")
         SharedConstants.sharedDefaults.set(token, forKey: SharedConstants.deviceTokenKey)
-
-        // Auto-register with proxy if URL is saved
         autoRegisterWithProxy(token: token)
     }
 
     private func autoRegisterWithProxy(token: String, attempt: Int = 1) {
-        guard let proxyURL = SharedConstants.sharedDefaults.string(forKey: SharedConstants.proxyURLKey),
-              !proxyURL.isEmpty,
-              let url = URL(string: "\(proxyURL)/register") else {
+        let proxyURL = SharedConstants.sharedDefaults.string(forKey: SharedConstants.proxyURLKey)
+            ?? SharedConstants.defaultProxyURL
+        let hasSecret = SharedConstants.sharedDefaults.string(forKey: SharedConstants.proxyRegisterSecretKey)?.isEmpty == false
+
+        logger.notice("[APNs] Auto-register attempt \(attempt): url=\(proxyURL, privacy: .public) hasSecret=\(hasSecret)")
+
+        guard let url = URL(string: "\(proxyURL)/register") else {
+            logger.error("[APNs] Invalid proxy URL: \(proxyURL, privacy: .public)")
             return
         }
 
@@ -54,18 +60,33 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.timeoutInterval = 10
+
+        let secret = SharedConstants.sharedDefaults.string(forKey: SharedConstants.proxyRegisterSecretKey)
+            ?? SharedConstants.defaultProxyRegisterSecret
+        if !secret.isEmpty {
+            request.setValue("Bearer \(secret)", forHTTPHeaderField: "Authorization")
+        }
+
         request.httpBody = try? JSONSerialization.data(withJSONObject: ["token": token])
 
         URLSession.shared.dataTask(with: request) { [weak self] _, response, error in
-            if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
-                print("[APNs] Auto-registered with proxy")
-            } else if attempt < 3 {
-                print("[APNs] Proxy registration attempt \(attempt) failed, retrying...")
+            if let httpResponse = response as? HTTPURLResponse {
+                logger.notice("[APNs] Proxy response: \(httpResponse.statusCode)")
+                if httpResponse.statusCode == 200 {
+                    logger.notice("[APNs] Auto-registered with proxy")
+                    return
+                }
+            }
+            if let error {
+                logger.error("[APNs] Proxy error: \(error.localizedDescription, privacy: .public)")
+            }
+            if attempt < 3 {
+                logger.notice("[APNs] Retrying in \(attempt * 2)s...")
                 DispatchQueue.main.asyncAfter(deadline: .now() + Double(attempt * 2)) {
                     self?.autoRegisterWithProxy(token: token, attempt: attempt + 1)
                 }
             } else {
-                print("[APNs] Proxy registration failed after 3 attempts: \(error?.localizedDescription ?? "unknown")")
+                logger.error("[APNs] Proxy registration failed after 3 attempts")
             }
         }.resume()
     }
@@ -74,14 +95,122 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         _ application: UIApplication,
         didFailToRegisterForRemoteNotificationsWithError error: Error
     ) {
-        print("[APNs] Failed to register: \(error.localizedDescription)")
+        logger.error("[APNs] Failed to register: \(error.localizedDescription)")
     }
+
+    // MARK: - Foreground Push Handling
 
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
+        logger.notice("[App] Foreground push received — processing signing request")
+        let userInfo = notification.request.content.userInfo
+
+        Task {
+            await handleForegroundSigningRequest(userInfo: userInfo)
+        }
+
         completionHandler([])  // suppress display
     }
+
+    private func handleForegroundSigningRequest(userInfo: [AnyHashable: Any]) async {
+        guard let nsec = SharedKeychain.loadNsec() else {
+            logger.error("[App] No nsec in Keychain")
+            return
+        }
+
+        let privateKey: Data
+        do {
+            privateKey = try Bech32.decodeNsec(nsec)
+        } catch {
+            logger.error("[App] Failed to decode nsec")
+            return
+        }
+
+        let signerPubkey: String
+        do {
+            signerPubkey = try LightEvent.pubkeyHex(from: privateKey)
+        } catch {
+            logger.error("[App] Failed to derive pubkey")
+            return
+        }
+
+        let relayUrlString = (userInfo["relay_url"] as? String) ?? SharedConstants.relayURL
+
+        do {
+            let relay = LightRelay(url: relayUrlString)
+            try await relay.connect()
+
+            let now = Int(Date().timeIntervalSince1970)
+            // NIP-46 spec: clients MUST include ["p", <signer-pubkey>] on kind:24133
+            let filter: [String: Any] = [
+                "kinds": [24133],
+                "#p": [signerPubkey],
+                "since": now - 60,
+                "limit": 5
+            ]
+
+            var events = try await relay.fetchEvents(filter: filter, timeout: 10.0)
+
+            if events.isEmpty {
+                try await Task.sleep(nanoseconds: 2_000_000_000)
+                let retryFilter: [String: Any] = [
+                    "kinds": [24133],
+                    "#p": [signerPubkey],
+                    "since": now - 120,
+                    "limit": 5
+                ]
+                events = try await relay.fetchEvents(filter: retryFilter, timeout: 10.0)
+            }
+
+            relay.disconnect()
+
+            let processedKey = "processedEventIDs"
+            var processedIDs = Set(SharedConstants.sharedDefaults.stringArray(forKey: processedKey) ?? [])
+
+            var handledCount = 0
+            for event in events {
+                guard let eventPubkey = event["pubkey"] as? String,
+                      eventPubkey != signerPubkey,
+                      let eventId = event["id"] as? String,
+                      !processedIDs.contains(eventId) else { continue }
+
+                do {
+                    let result = try await LightSigner.handleRequest(
+                        privateKey: privateKey,
+                        requestEvent: event
+                    )
+                    processedIDs.insert(eventId)
+                    if result.status == "error" && result.errorMessage == "Decrypt failed" {
+                        continue
+                    }
+                    handledCount += 1
+                } catch {
+                    processedIDs.insert(eventId)
+                    logger.notice("[App] Skipping event: \(error.localizedDescription)")
+                }
+            }
+
+            let trimmed = Array(processedIDs.suffix(50))
+            SharedConstants.sharedDefaults.set(trimmed, forKey: processedKey)
+
+            logger.notice("[App] Foreground handled \(handledCount) requests")
+
+            // Notify views to refresh
+            if handledCount > 0 {
+                await MainActor.run {
+                    NotificationCenter.default.post(name: .signingCompleted, object: nil)
+                }
+            }
+
+        } catch {
+            logger.error("[App] Foreground signing error: \(error.localizedDescription)")
+        }
+    }
+}
+
+extension Notification.Name {
+    static let signingCompleted = Notification.Name("signingCompleted")
 }
