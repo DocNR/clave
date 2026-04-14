@@ -41,7 +41,16 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         let token = deviceToken.map { String(format: "%02x", $0) }.joined()
         logger.notice("[APNs] Device token: \(token, privacy: .public)")
         SharedConstants.sharedDefaults.set(token, forKey: SharedConstants.deviceTokenKey)
-        autoRegisterWithProxy(token: token)
+
+        // Only register with the proxy if the user has set up a key. Registering
+        // before a key exists means the device gets pushes for other users' events
+        // and the NSE fires with no key → was causing "Signing Failed" spam for
+        // fresh installs that never completed onboarding.
+        if SharedKeychain.loadNsec() != nil {
+            autoRegisterWithProxy(token: token)
+        } else {
+            logger.notice("[APNs] Skipping proxy registration — no signer key yet")
+        }
     }
 
     private func autoRegisterWithProxy(token: String, attempt: Int = 1) {

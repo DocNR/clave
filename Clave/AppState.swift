@@ -84,54 +84,88 @@ final class AppState {
         }
     }
 
-    /// Fetch kind 0 profile from relay. Call once on appear, throttled by cache age.
+    /// Fetch kind 0 profile from multiple relays in parallel. First valid result wins.
     func fetchProfileIfNeeded() {
         guard !signerPubkeyHex.isEmpty else { return }
 
         // Only refetch if cache is older than 1 hour
         if let existing = profile, Date().timeIntervalSince1970 - existing.fetchedAt < 3600 { return }
 
+        let relays = [
+            "wss://relay.powr.build",
+            "wss://relay.damus.io",
+            "wss://nos.lol",
+            "wss://relay.primal.net",
+            "wss://purplepag.es"
+        ]
+
         Task {
-            do {
-                let relay = LightRelay(url: SharedConstants.relayURL)
-                try await relay.connect(timeout: 5.0)
-
-                let filter: [String: Any] = [
-                    "kinds": [0],
-                    "authors": [signerPubkeyHex],
-                    "limit": 1
-                ]
-
-                let events = try await relay.fetchEvents(filter: filter, timeout: 10.0)
-                relay.disconnect()
-
-                guard let event = events.first,
-                      let content = event["content"] as? String,
-                      let contentData = content.data(using: .utf8),
-                      let json = try? JSONSerialization.jsonObject(with: contentData) as? [String: Any] else {
-                    return
+            await withTaskGroup(of: CachedProfile?.self) { group in
+                for url in relays {
+                    group.addTask { [signerPubkeyHex] in
+                        await Self.fetchProfile(from: url, pubkey: signerPubkeyHex)
+                    }
                 }
 
-                let displayName = (json["display_name"] as? String) ?? (json["name"] as? String)
-                let pictureURL = json["picture"] as? String
+                // Pick the most-recent profile across all relays (kind:0 is replaceable, latest wins)
+                var newest: CachedProfile?
+                for await result in group {
+                    guard let result else { continue }
+                    if newest == nil { newest = result; continue }
+                    // Prefer the one with a picture if the other doesn't have one
+                    if newest?.pictureURL == nil && result.pictureURL != nil { newest = result }
+                }
 
-                let cached = CachedProfile(
-                    displayName: displayName,
-                    pictureURL: pictureURL,
-                    fetchedAt: Date().timeIntervalSince1970
-                )
+                guard let cached = newest else { return }
 
                 await MainActor.run {
                     self.profile = cached
                     self.saveCachedProfile(cached)
                 }
 
-                if let pic = pictureURL, !pic.isEmpty {
+                if let pic = cached.pictureURL, !pic.isEmpty {
                     await cacheImage(from: pic)
                 }
-            } catch {
-                // Silently fail — keep showing gradient avatar + npub
             }
+        }
+    }
+
+    private static func fetchProfile(from relayURL: String, pubkey: String) async -> CachedProfile? {
+        do {
+            let relay = LightRelay(url: relayURL)
+            try await relay.connect(timeout: 5.0)
+            defer { relay.disconnect() }
+
+            let filter: [String: Any] = [
+                "kinds": [0],
+                "authors": [pubkey],
+                "limit": 1
+            ]
+
+            let events = try await relay.fetchEvents(filter: filter, timeout: 5.0)
+
+            guard let event = events.first,
+                  let content = event["content"] as? String,
+                  let contentData = content.data(using: .utf8),
+                  let json = try? JSONSerialization.jsonObject(with: contentData) as? [String: Any] else {
+                return nil
+            }
+
+            let displayName = (json["display_name"] as? String) ?? (json["name"] as? String)
+            let pictureURL = json["picture"] as? String
+
+            // Skip empty profiles (no name AND no picture)
+            if (displayName?.isEmpty ?? true) && (pictureURL?.isEmpty ?? true) {
+                return nil
+            }
+
+            return CachedProfile(
+                displayName: displayName,
+                pictureURL: pictureURL,
+                fetchedAt: Date().timeIntervalSince1970
+            )
+        } catch {
+            return nil
         }
     }
 
@@ -146,6 +180,10 @@ final class AppState {
         signerPubkeyHex = keys.publicKey().toHex()
         SharedConstants.sharedDefaults.set(signerPubkeyHex, forKey: SharedConstants.signerPubkeyHexKey)
         isKeyImported = true
+        // Now that a key exists, register with the proxy so we start receiving
+        // push-wake for signing requests. AppDelegate skips this on launch when
+        // no key is present.
+        registerWithProxy()
     }
 
     func generateKey() throws {
@@ -155,6 +193,7 @@ final class AppState {
         signerPubkeyHex = keys.publicKey().toHex()
         SharedConstants.sharedDefaults.set(signerPubkeyHex, forKey: SharedConstants.signerPubkeyHexKey)
         isKeyImported = true
+        registerWithProxy()
     }
 
     func deleteKey() {

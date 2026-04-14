@@ -34,6 +34,11 @@ class NotificationService: UNNotificationServiceExtension {
         if let error = error, let content = bestAttemptContent {
             content.title = "Signing Failed"
             content.body = error
+            // Override payload-level passive so real errors still banner-pop.
+            // The proxy sets interruption-level: passive on the push payload to
+            // suppress success notifications; we need to restore active interruption
+            // here so users actually see when something goes wrong.
+            content.interruptionLevel = .active
             contentHandler?(content)
         } else if let content = bestAttemptContent {
             content.title = ""
@@ -51,8 +56,12 @@ class NotificationService: UNNotificationServiceExtension {
 
     private func handleSigningRequest(userInfo: [AnyHashable: Any]) async -> String? {
         guard let nsec = SharedKeychain.loadNsec() else {
-            logger.error("[ClaveNSE] No nsec in Keychain")
-            return "No signer key configured"
+            // No key set up yet — silently drop. User hasn't onboarded; they
+            // should never see a "Signing Failed" banner for events that aren't
+            // for them. The proxy broadcasts pushes to all registered tokens
+            // (multi-signer refactor is a separate backlog item).
+            logger.notice("[ClaveNSE] No nsec in Keychain — silently dropping push")
+            return nil
         }
 
         let privateKey: Data
