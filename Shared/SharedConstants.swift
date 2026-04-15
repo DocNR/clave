@@ -6,8 +6,6 @@ enum SharedConstants {
     static let keychainAccount = "signer-nsec"
     static let relayURL = "wss://relay.powr.build"
     static let defaultProxyURL = "https://proxy.clave.casa"
-    static let proxyRegisterSecretKey = "proxyRegisterSecret"
-    static let defaultProxyRegisterSecret = "9790fbe5278dbf7c0aa139a19e7c6e755f26ec1dcf55a63fa7649ac345bb1571" // TODO: replace with signed registration before App Store
 
     // UserDefaults keys
     static let signerPubkeyHexKey = "signerPubkeyHex"

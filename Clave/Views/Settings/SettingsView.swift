@@ -7,7 +7,6 @@ struct SettingsView: View {
     @State private var showExportSheet = false
     @State private var autoSign = true
     @State private var proxyURL = ""
-    @State private var proxySecret = ""
     @State private var registrationStatus = ""
 
     var body: some View {
@@ -115,14 +114,6 @@ struct SettingsView: View {
                     SharedConstants.sharedDefaults.set(proxyURL, forKey: SharedConstants.proxyURLKey)
                 }
 
-            SecureField("Register Secret", text: $proxySecret)
-                .autocorrectionDisabled()
-                .textInputAutocapitalization(.never)
-                .font(.system(.body, design: .monospaced))
-                .onSubmit {
-                    SharedConstants.sharedDefaults.set(proxySecret, forKey: SharedConstants.proxyRegisterSecretKey)
-                }
-
             HStack {
                 Text("Status")
                 Spacer()
@@ -139,7 +130,6 @@ struct SettingsView: View {
 
             Button("Register") {
                 SharedConstants.sharedDefaults.set(proxyURL, forKey: SharedConstants.proxyURLKey)
-                SharedConstants.sharedDefaults.set(proxySecret, forKey: SharedConstants.proxyRegisterSecretKey)
                 registrationStatus = "Registering..."
                 appState.registerWithProxy { success, message in
                     registrationStatus = success ? "Registered ✓" : message
@@ -183,6 +173,5 @@ struct SettingsView: View {
         autoSign = SharedStorage.isAutoSignEnabled()
         proxyURL = SharedConstants.sharedDefaults.string(forKey: SharedConstants.proxyURLKey)
             ?? SharedConstants.defaultProxyURL
-        proxySecret = SharedConstants.sharedDefaults.string(forKey: SharedConstants.proxyRegisterSecretKey) ?? ""
     }
 }
