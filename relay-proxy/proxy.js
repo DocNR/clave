@@ -14,7 +14,6 @@ const APNS_TOPIC = "dev.nostr.Clave";
 const APNS_HOST = process.env.APNS_HOST || "api.push.apple.com";
 const TOKEN_FILE = "./tokens.json";
 const HTTP_PORT = process.env.PORT || 3000;
-const REGISTER_SECRET = process.env.REGISTER_SECRET;
 const FILTER_BY_PTAG = (process.env.FILTER_BY_PTAG || "false").toLowerCase() === "true";
 const MAX_BODY_SIZE = 1024; // 1KB limit for registration requests
 
@@ -26,20 +25,24 @@ if (!APNS_KEY_ID || !APNS_TEAM_ID) {
   console.error("APNS_KEY_ID and APNS_TEAM_ID env vars required");
   process.exit(1);
 }
-if (!REGISTER_SECRET) {
-  console.error("REGISTER_SECRET env var required");
-  process.exit(1);
-}
 
 const PING_INTERVAL = 30000; // 30 seconds
 const PONG_TIMEOUT = 10000; // 10 seconds to respond
 const PUBLIC_RELAY_URL = process.env.PUBLIC_RELAY_URL || RELAY_URL;
 
+// --- NIP-98 auth + multi-signer storage ---
+const { parseAuthHeader, verifyNip98, sha256Hex } = require("./nip98");
+const { createStorage } = require("./storage");
+
+const storage = createStorage(TOKEN_FILE);
+const migrationResult = storage.migrateIfLegacy();
+if (migrationResult.migrated) {
+  console.log(
+    `[Storage] Migrated legacy tokens.json — backed up ${migrationResult.legacyCount} entries to .legacy-backup and wiped active storage. All testers must re-register.`
+  );
+}
+
 // --- State ---
-let deviceTokens = [];
-try {
-  deviceTokens = JSON.parse(fs.readFileSync(TOKEN_FILE, "utf8"));
-} catch {}
 let cachedJwt = null;
 let cachedJwtTime = 0;
 let lastEventReceivedAt = null;
@@ -249,37 +252,58 @@ function connectRelay() {
 // --- HTTP Server for token registration ---
 const server = http.createServer((req, res) => {
   if (req.method === "POST" && req.url === "/register") {
-    const auth = req.headers["authorization"];
-    if (auth !== `Bearer ${REGISTER_SECRET}`) {
-      res.writeHead(401);
-      res.end("Unauthorized");
-      return;
-    }
     let body = "";
-    let size = 0;
-    req.on("data", (d) => {
-      size += d.length;
-      if (size > MAX_BODY_SIZE) {
-        res.writeHead(413);
-        res.end("Payload too large");
-        req.destroy();
-        return;
-      }
-      body += d;
-    });
-    req.on("end", () => {
+    req.on("data", (d) => (body += d));
+    req.on("end", async () => {
       try {
-        const { token } = JSON.parse(body);
-        if (token && !deviceTokens.includes(token)) {
-          deviceTokens.push(token);
-          fs.writeFileSync(TOKEN_FILE, JSON.stringify(deviceTokens, null, 2));
-          console.log(`[HTTP] Registered token: ${token.slice(0, 8)}...`);
+        const authHeader = req.headers.authorization;
+        if (!authHeader) {
+          res.writeHead(401, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: "Missing Authorization header" }));
         }
+
+        let authEvent;
+        try {
+          authEvent = parseAuthHeader(authHeader);
+        } catch (e) {
+          res.writeHead(401, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: e.message }));
+        }
+
+        const expectedUrl = `https://proxy.clave.casa/register`;
+        const bodyHash = sha256Hex(Buffer.from(body));
+        const result = await verifyNip98(authEvent, expectedUrl, "POST", bodyHash);
+        if (!result.valid) {
+          console.log(`[HTTP] /register auth failed: ${result.error}`);
+          res.writeHead(401, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: result.error }));
+        }
+
+        let parsed;
+        try {
+          parsed = JSON.parse(body);
+        } catch {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: "Invalid JSON body" }));
+        }
+
+        const { token } = parsed;
+        if (!token || typeof token !== "string") {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: "Missing or invalid token" }));
+        }
+
+        storage.upsertToken({ token, pubkey: result.pubkey });
+        console.log(
+          `[HTTP] Registered ${token.slice(0, 8)}... for pubkey ${result.pubkey.slice(0, 8)}...`
+        );
+
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ ok: true }));
-      } catch {
-        res.writeHead(400);
-        res.end("Bad request");
+      } catch (e) {
+        console.error("[HTTP] /register error:", e.message);
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Internal error" }));
       }
     });
   } else if (req.method === "GET" && req.url === "/health") {
