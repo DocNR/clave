@@ -56,9 +56,15 @@ function createStorage(filePath) {
     } catch {
       return { migrated: false };
     }
-    // Legacy format: flat array of hex strings
-    if (Array.isArray(raw) && raw.every((e) => typeof e === "string")) {
-      fs.copyFileSync(filePath, filePath + ".legacy-backup");
+    // Legacy format: non-empty flat array of hex strings. Empty arrays are
+    // the normal clean state after tokens get unregistered — do NOT treat
+    // them as legacy (would false-positive the migration and clobber the
+    // real legacy-backup file on every restart).
+    if (Array.isArray(raw) && raw.length > 0 && raw.every((e) => typeof e === "string")) {
+      // Don't overwrite an existing backup — the first migration is the real one.
+      if (!fs.existsSync(filePath + ".legacy-backup")) {
+        fs.copyFileSync(filePath, filePath + ".legacy-backup");
+      }
       writeFile([]);
       return { migrated: true, legacyCount: raw.length };
     }

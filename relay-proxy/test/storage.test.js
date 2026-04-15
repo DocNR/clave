@@ -126,3 +126,32 @@ test("migrateIfLegacy is a no-op when file doesn't exist", () => {
   const result = storage.migrateIfLegacy();
   assert.equal(result.migrated, false);
 });
+
+test("migrateIfLegacy is a no-op when file is an empty array", () => {
+  // Regression: [].every(x => typeof x === "string") returns true (vacuous),
+  // which used to falsely identify an empty tokens.json as legacy format
+  // and clobber the real .legacy-backup on every restart.
+  const file = tmpFile();
+  fs.writeFileSync(file, JSON.stringify([]));
+  const { createStorage } = require("../storage");
+  const storage = createStorage(file);
+  const result = storage.migrateIfLegacy();
+  assert.equal(result.migrated, false);
+  assert.ok(!fs.existsSync(file + ".legacy-backup"), "should not create backup for empty array");
+});
+
+test("migrateIfLegacy does not overwrite an existing legacy-backup", () => {
+  // Regression: first legacy migration should be preserved. If someone
+  // manually restores tokens.json to legacy format for a second migration,
+  // the original backup must not be clobbered.
+  const file = tmpFile();
+  fs.writeFileSync(file, JSON.stringify(["legacytoken1", "legacytoken2"]));
+  fs.writeFileSync(file + ".legacy-backup", JSON.stringify(["originalbackup"]));
+  const { createStorage } = require("../storage");
+  const storage = createStorage(file);
+  const result = storage.migrateIfLegacy();
+  assert.equal(result.migrated, true);
+  const backupContent = JSON.parse(fs.readFileSync(file + ".legacy-backup", "utf8"));
+  assert.deepEqual(backupContent, ["originalbackup"], "should preserve original backup");
+  fs.unlinkSync(file + ".legacy-backup");
+});

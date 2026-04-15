@@ -274,6 +274,7 @@ const server = http.createServer((req, res) => {
       try {
         const authHeader = req.headers.authorization;
         if (!authHeader) {
+          console.log(`[HTTP] /register 401: Missing Authorization header`);
           res.writeHead(401, { "Content-Type": "application/json" });
           return res.end(JSON.stringify({ error: "Missing Authorization header" }));
         }
@@ -282,6 +283,7 @@ const server = http.createServer((req, res) => {
         try {
           authEvent = parseAuthHeader(authHeader);
         } catch (e) {
+          console.log(`[HTTP] /register 401: ${e.message}`);
           res.writeHead(401, { "Content-Type": "application/json" });
           return res.end(JSON.stringify({ error: e.message }));
         }
@@ -329,6 +331,7 @@ const server = http.createServer((req, res) => {
       try {
         const authHeader = req.headers.authorization;
         if (!authHeader) {
+          console.log(`[HTTP] /unregister 401: Missing Authorization header`);
           res.writeHead(401, { "Content-Type": "application/json" });
           return res.end(JSON.stringify({ error: "Missing Authorization header" }));
         }
@@ -337,6 +340,7 @@ const server = http.createServer((req, res) => {
         try {
           authEvent = parseAuthHeader(authHeader);
         } catch (e) {
+          console.log(`[HTTP] /unregister 401: ${e.message}`);
           res.writeHead(401, { "Content-Type": "application/json" });
           return res.end(JSON.stringify({ error: e.message }));
         }
