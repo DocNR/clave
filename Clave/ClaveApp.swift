@@ -41,63 +41,10 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         let token = deviceToken.map { String(format: "%02x", $0) }.joined()
         logger.notice("[APNs] Device token: \(token, privacy: .public)")
         SharedConstants.sharedDefaults.set(token, forKey: SharedConstants.deviceTokenKey)
-
-        // Only register with the proxy if the user has set up a key. Registering
-        // before a key exists means the device gets pushes for other users' events
-        // and the NSE fires with no key → was causing "Signing Failed" spam for
-        // fresh installs that never completed onboarding.
-        if SharedKeychain.loadNsec() != nil {
-            autoRegisterWithProxy(token: token)
-        } else {
-            logger.notice("[APNs] Skipping proxy registration — no signer key yet")
-        }
-    }
-
-    private func autoRegisterWithProxy(token: String, attempt: Int = 1) {
-        let proxyURL = SharedConstants.sharedDefaults.string(forKey: SharedConstants.proxyURLKey)
-            ?? SharedConstants.defaultProxyURL
-        let hasSecret = SharedConstants.sharedDefaults.string(forKey: SharedConstants.proxyRegisterSecretKey)?.isEmpty == false
-
-        logger.notice("[APNs] Auto-register attempt \(attempt): url=\(proxyURL, privacy: .public) hasSecret=\(hasSecret)")
-
-        guard let url = URL(string: "\(proxyURL)/register") else {
-            logger.error("[APNs] Invalid proxy URL: \(proxyURL, privacy: .public)")
-            return
-        }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.timeoutInterval = 10
-
-        let secret = SharedConstants.sharedDefaults.string(forKey: SharedConstants.proxyRegisterSecretKey)
-            ?? SharedConstants.defaultProxyRegisterSecret
-        if !secret.isEmpty {
-            request.setValue("Bearer \(secret)", forHTTPHeaderField: "Authorization")
-        }
-
-        request.httpBody = try? JSONSerialization.data(withJSONObject: ["token": token])
-
-        URLSession.shared.dataTask(with: request) { [weak self] _, response, error in
-            if let httpResponse = response as? HTTPURLResponse {
-                logger.notice("[APNs] Proxy response: \(httpResponse.statusCode)")
-                if httpResponse.statusCode == 200 {
-                    logger.notice("[APNs] Auto-registered with proxy")
-                    return
-                }
-            }
-            if let error {
-                logger.error("[APNs] Proxy error: \(error.localizedDescription, privacy: .public)")
-            }
-            if attempt < 3 {
-                logger.notice("[APNs] Retrying in \(attempt * 2)s...")
-                DispatchQueue.main.asyncAfter(deadline: .now() + Double(attempt * 2)) {
-                    self?.autoRegisterWithProxy(token: token, attempt: attempt + 1)
-                }
-            } else {
-                logger.error("[APNs] Proxy registration failed after 3 attempts")
-            }
-        }.resume()
+        // Registration with the proxy is handled by AppState.importKey/generateKey
+        // (on first-time setup) and by the Settings → Register button (on demand).
+        // The AppDelegate doesn't have access to the signer nsec without duplicating
+        // LightEvent.signNip98 logic, so we no longer register from here.
     }
 
     func application(
