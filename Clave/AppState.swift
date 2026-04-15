@@ -318,7 +318,7 @@ final class AppState {
         request.httpMethod = "POST"
         request.timeoutInterval = 10
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue(authHeader, forHTTPHeaderField: "Authorization")
+        request.setValue(authHeader, forHTTPHeaderField: "X-Clave-Auth")
         request.httpBody = bodyData
 
         URLSession.shared.dataTask(with: request) { _, response, error in
@@ -376,7 +376,7 @@ final class AppState {
         request.httpMethod = "POST"
         request.timeoutInterval = 10
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue(authHeader, forHTTPHeaderField: "Authorization")
+        request.setValue(authHeader, forHTTPHeaderField: "X-Clave-Auth")
         request.httpBody = bodyData
 
         URLSession.shared.dataTask(with: request) { _, response, _ in
