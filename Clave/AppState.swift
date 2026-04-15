@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import NostrSDK
 import Observation
 import UIKit
@@ -269,10 +270,45 @@ final class AppState {
             completion?(false, "No device token")
             return
         }
+
+        guard let nsec = SharedKeychain.loadNsec() else {
+            completion?(false, "No signer key")
+            return
+        }
+
+        let privateKey: Data
+        do {
+            privateKey = try Bech32.decodeNsec(nsec)
+        } catch {
+            completion?(false, "Invalid signer key")
+            return
+        }
+
         let proxyURL = SharedConstants.sharedDefaults.string(forKey: SharedConstants.proxyURLKey)
             ?? SharedConstants.defaultProxyURL
-        guard let url = URL(string: "\(proxyURL)/register") else {
+        let registerURL = "\(proxyURL)/register"
+        guard let url = URL(string: registerURL) else {
             completion?(false, "Invalid proxy URL")
+            return
+        }
+
+        let bodyDict = ["token": deviceToken]
+        guard let bodyData = try? JSONSerialization.data(withJSONObject: bodyDict) else {
+            completion?(false, "Body serialization failed")
+            return
+        }
+        let bodyHash = SHA256.hash(data: bodyData).map { String(format: "%02x", $0) }.joined()
+
+        let authHeader: String
+        do {
+            authHeader = try LightEvent.signNip98(
+                privateKey: privateKey,
+                url: registerURL,
+                method: "POST",
+                bodySha256Hex: bodyHash
+            )
+        } catch {
+            completion?(false, "Auth signing failed: \(error.localizedDescription)")
             return
         }
 
@@ -280,22 +316,16 @@ final class AppState {
         request.httpMethod = "POST"
         request.timeoutInterval = 10
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
-        let secret = SharedConstants.sharedDefaults.string(forKey: SharedConstants.proxyRegisterSecretKey)
-            ?? SharedConstants.defaultProxyRegisterSecret
-        if !secret.isEmpty {
-            request.setValue("Bearer \(secret)", forHTTPHeaderField: "Authorization")
-        }
-
-        request.httpBody = try? JSONSerialization.data(withJSONObject: ["token": deviceToken])
+        request.setValue(authHeader, forHTTPHeaderField: "Authorization")
+        request.httpBody = bodyData
 
         URLSession.shared.dataTask(with: request) { _, response, error in
             DispatchQueue.main.async {
                 if let http = response as? HTTPURLResponse, http.statusCode == 200 {
-                    print("[Clave] Registered with proxy")
+                    print("[Clave] Registered with proxy (NIP-98)")
                     completion?(true, "Registered")
                 } else if let http = response as? HTTPURLResponse {
-                    print("[Clave] Proxy registration failed: \(http.statusCode)")
+                    print("[Clave] Proxy registration failed: HTTP \(http.statusCode)")
                     completion?(false, "Failed: HTTP \(http.statusCode)")
                 } else {
                     completion?(false, error?.localizedDescription ?? "Connection failed")
