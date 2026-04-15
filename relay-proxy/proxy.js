@@ -306,6 +306,61 @@ const server = http.createServer((req, res) => {
         res.end(JSON.stringify({ error: "Internal error" }));
       }
     });
+  } else if (req.method === "POST" && req.url === "/unregister") {
+    let body = "";
+    req.on("data", (d) => (body += d));
+    req.on("end", async () => {
+      try {
+        const authHeader = req.headers.authorization;
+        if (!authHeader) {
+          res.writeHead(401, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: "Missing Authorization header" }));
+        }
+
+        let authEvent;
+        try {
+          authEvent = parseAuthHeader(authHeader);
+        } catch (e) {
+          res.writeHead(401, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: e.message }));
+        }
+
+        const expectedUrl = `https://proxy.clave.casa/unregister`;
+        const bodyHash = sha256Hex(Buffer.from(body));
+        const result = await verifyNip98(authEvent, expectedUrl, "POST", bodyHash);
+        if (!result.valid) {
+          console.log(`[HTTP] /unregister auth failed: ${result.error}`);
+          res.writeHead(401, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: result.error }));
+        }
+
+        let parsed;
+        try {
+          parsed = JSON.parse(body);
+        } catch {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: "Invalid JSON body" }));
+        }
+
+        const { token } = parsed;
+        if (!token || typeof token !== "string") {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: "Missing or invalid token" }));
+        }
+
+        storage.removeToken({ token, pubkey: result.pubkey });
+        console.log(
+          `[HTTP] Unregistered ${token.slice(0, 8)}... for pubkey ${result.pubkey.slice(0, 8)}...`
+        );
+
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: true }));
+      } catch (e) {
+        console.error("[HTTP] /unregister error:", e.message);
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Internal error" }));
+      }
+    });
   } else if (req.method === "GET" && req.url === "/health") {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(
