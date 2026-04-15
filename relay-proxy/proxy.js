@@ -11,9 +11,12 @@ const APNS_KEY_PATH = process.env.APNS_KEY_PATH || "./AuthKey.p8";
 const APNS_KEY_ID = process.env.APNS_KEY_ID;
 const APNS_TEAM_ID = process.env.APNS_TEAM_ID;
 const APNS_TOPIC = "dev.nostr.Clave";
-const APNS_HOST = "api.sandbox.push.apple.com";
+const APNS_HOST = process.env.APNS_HOST || "api.push.apple.com";
 const TOKEN_FILE = "./tokens.json";
 const HTTP_PORT = process.env.PORT || 3000;
+const REGISTER_SECRET = process.env.REGISTER_SECRET;
+const FILTER_BY_PTAG = (process.env.FILTER_BY_PTAG || "false").toLowerCase() === "true";
+const MAX_BODY_SIZE = 1024; // 1KB limit for registration requests
 
 if (!SIGNER_PUBKEY) {
   console.error("SIGNER_PUBKEY env var required");
@@ -23,6 +26,14 @@ if (!APNS_KEY_ID || !APNS_TEAM_ID) {
   console.error("APNS_KEY_ID and APNS_TEAM_ID env vars required");
   process.exit(1);
 }
+if (!REGISTER_SECRET) {
+  console.error("REGISTER_SECRET env var required");
+  process.exit(1);
+}
+
+const PING_INTERVAL = 30000; // 30 seconds
+const PONG_TIMEOUT = 10000; // 10 seconds to respond
+const PUBLIC_RELAY_URL = process.env.PUBLIC_RELAY_URL || RELAY_URL;
 
 // --- State ---
 let deviceTokens = [];
@@ -31,6 +42,7 @@ try {
 } catch {}
 let cachedJwt = null;
 let cachedJwtTime = 0;
+let lastEventReceivedAt = null;
 
 // --- APNs JWT (ES256) ---
 function derToRaw(derSig) {
@@ -127,20 +139,44 @@ function connectRelay() {
   console.log(`[Relay] Connecting to ${RELAY_URL}...`);
   const ws = new WebSocket(RELAY_URL);
 
+  let pingTimer = null;
+  let pongTimer = null;
+
+  function startHeartbeat() {
+    pingTimer = setInterval(() => {
+      if (ws.readyState !== WebSocket.OPEN) return;
+      ws.ping();
+      pongTimer = setTimeout(() => {
+        console.error("[Relay] Pong timeout — connection stale, forcing reconnect");
+        ws.terminate();
+      }, PONG_TIMEOUT);
+    }, PING_INTERVAL);
+  }
+
+  function stopHeartbeat() {
+    if (pingTimer) clearInterval(pingTimer);
+    if (pongTimer) clearTimeout(pongTimer);
+  }
+
+  ws.on("pong", () => {
+    if (pongTimer) clearTimeout(pongTimer);
+  });
+
   ws.on("open", () => {
     console.log("[Relay] Connected");
-    const sub = JSON.stringify([
-      "REQ",
-      "clave-watch",
-      {
-        kinds: [24133],
-        since: Math.floor(Date.now() / 1000),
-      },
-    ]);
+    const filter = {
+      kinds: [24133],
+      since: Math.floor(Date.now() / 1000),
+    };
+    if (FILTER_BY_PTAG) {
+      filter["#p"] = [SIGNER_PUBKEY];
+    }
+    const sub = JSON.stringify(["REQ", "clave-watch", filter]);
     ws.send(sub);
     console.log(
-      `[Relay] Watching kind:24133 for ${SIGNER_PUBKEY.slice(0, 8)}...`
+      `[Relay] Watching kind:24133 for ${SIGNER_PUBKEY.slice(0, 8)}... (p-tag filter: ${FILTER_BY_PTAG})`
     );
+    startHeartbeat();
   });
 
   ws.on("message", async (data) => {
@@ -148,6 +184,7 @@ function connectRelay() {
       const msg = JSON.parse(data.toString());
       if (msg[0] === "EVENT" && msg[1] === "clave-watch") {
         const event = msg[2];
+        lastEventReceivedAt = new Date().toISOString();
         // Skip our own responses (from the signer)
         if (event.pubkey === SIGNER_PUBKEY) return;
         console.log(
@@ -162,9 +199,10 @@ function connectRelay() {
         const pushPayload = {
           aps: {
             "mutable-content": 1,
-            alert: { title: "Clave", body: "Signing request" },
+            "interruption-level": "passive",
+            alert: { title: " ", body: " " },
           },
-          relay_url: RELAY_URL,
+          relay_url: PUBLIC_RELAY_URL,
           event_id: event.id,
         };
 
@@ -192,10 +230,13 @@ function connectRelay() {
           }
         }
       }
-    } catch {}
+    } catch (e) {
+      console.error("[Relay] Message processing error:", e.message);
+    }
   });
 
   ws.on("close", () => {
+    stopHeartbeat();
     console.log("[Relay] Disconnected. Reconnecting in 5s...");
     setTimeout(connectRelay, 5000);
   });
@@ -208,8 +249,24 @@ function connectRelay() {
 // --- HTTP Server for token registration ---
 const server = http.createServer((req, res) => {
   if (req.method === "POST" && req.url === "/register") {
+    const auth = req.headers["authorization"];
+    if (auth !== `Bearer ${REGISTER_SECRET}`) {
+      res.writeHead(401);
+      res.end("Unauthorized");
+      return;
+    }
     let body = "";
-    req.on("data", (d) => (body += d));
+    let size = 0;
+    req.on("data", (d) => {
+      size += d.length;
+      if (size > MAX_BODY_SIZE) {
+        res.writeHead(413);
+        res.end("Payload too large");
+        req.destroy();
+        return;
+      }
+      body += d;
+    });
     req.on("end", () => {
       try {
         const { token } = JSON.parse(body);
@@ -231,7 +288,10 @@ const server = http.createServer((req, res) => {
       JSON.stringify({
         tokens: deviceTokens.length,
         relay: RELAY_URL,
+        public_relay: PUBLIC_RELAY_URL,
         signer: SIGNER_PUBKEY.slice(0, 8) + "...",
+        last_event_received_at: lastEventReceivedAt,
+        uptime_seconds: Math.floor(process.uptime()),
       })
     );
   } else {
