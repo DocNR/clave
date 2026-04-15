@@ -268,16 +268,15 @@ function connectRelay() {
 // --- HTTP Server for token registration ---
 const server = http.createServer((req, res) => {
   if (req.method === "POST" && req.url === "/register") {
-    console.log(`[HTTP] /register headers: ${JSON.stringify(req.headers)}`);
     let body = "";
     req.on("data", (d) => (body += d));
     req.on("end", async () => {
       try {
-        const authHeader = req.headers.authorization;
+        const authHeader = req.headers["x-clave-auth"];
         if (!authHeader) {
-          console.log(`[HTTP] /register 401: Missing Authorization header`);
+          console.log(`[HTTP] /register 401: Missing X-Clave-Auth header`);
           res.writeHead(401, { "Content-Type": "application/json" });
-          return res.end(JSON.stringify({ error: "Missing Authorization header" }));
+          return res.end(JSON.stringify({ error: "Missing X-Clave-Auth header" }));
         }
 
         let authEvent;
@@ -326,16 +325,15 @@ const server = http.createServer((req, res) => {
       }
     });
   } else if (req.method === "POST" && req.url === "/unregister") {
-    console.log(`[HTTP] /unregister headers: ${JSON.stringify(req.headers)}`);
     let body = "";
     req.on("data", (d) => (body += d));
     req.on("end", async () => {
       try {
-        const authHeader = req.headers.authorization;
+        const authHeader = req.headers["x-clave-auth"];
         if (!authHeader) {
-          console.log(`[HTTP] /unregister 401: Missing Authorization header`);
+          console.log(`[HTTP] /unregister 401: Missing X-Clave-Auth header`);
           res.writeHead(401, { "Content-Type": "application/json" });
-          return res.end(JSON.stringify({ error: "Missing Authorization header" }));
+          return res.end(JSON.stringify({ error: "Missing X-Clave-Auth header" }));
         }
 
         let authEvent;
