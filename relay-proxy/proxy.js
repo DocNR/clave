@@ -35,25 +35,19 @@ if (migrationResult.migrated) {
   );
 }
 
-// Per-pubkey push debounce. Map<pubkey, lastPushMs>. Entries older than DEBOUNCE_MS * 2
-// are pruned on each access to prevent unbounded growth from ephemeral client pubkeys.
-const DEBOUNCE_MS = 3000;
-const pushDebounce = new Map();
+// Dedupe by event id to guard against relay-level duplicate delivery.
+// TTL is deliberately short; distinct events (even in rapid bursts from the
+// same signer) must all reach the device — that's the whole point of push.
+const SEEN_EVENT_TTL_MS = 60 * 1000;
+const seenEvents = new Map();
 
-function shouldDebounce(pubkey) {
+function alreadySeen(eventId) {
   const now = Date.now();
-  // Opportunistic cleanup: prune any entries that are no longer relevant.
-  // Cheap because the map stays small in practice (only active signers).
-  for (const [k, ts] of pushDebounce) {
-    if (now - ts > DEBOUNCE_MS * 2) {
-      pushDebounce.delete(k);
-    }
+  for (const [k, exp] of seenEvents) {
+    if (exp < now) seenEvents.delete(k);
   }
-  const last = pushDebounce.get(pubkey);
-  if (last && now - last < DEBOUNCE_MS) {
-    return true;
-  }
-  pushDebounce.set(pubkey, now);
+  if (seenEvents.has(eventId)) return true;
+  seenEvents.set(eventId, now + SEEN_EVENT_TTL_MS);
   return false;
 }
 
@@ -221,8 +215,8 @@ function connectRelay() {
         return;
       }
 
-      if (shouldDebounce(targetPubkey)) {
-        console.log(`[Relay] Debounced — push for ${targetPubkey.slice(0, 8)}... sent recently`);
+      if (alreadySeen(event.id)) {
+        console.log(`[Relay] Duplicate event ${event.id.slice(0, 8)}..., skipping`);
         return;
       }
 
