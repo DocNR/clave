@@ -22,7 +22,6 @@ if (!APNS_KEY_ID || !APNS_TEAM_ID) {
 
 const PING_INTERVAL = 30000; // 30 seconds
 const PONG_TIMEOUT = 10000; // 10 seconds to respond
-const PUBLIC_RELAY_URL = process.env.PUBLIC_RELAY_URL || RELAY_URL;
 
 // --- NIP-98 auth + multi-signer storage ---
 const { parseAuthHeader, verifyNip98, sha256Hex } = require("./nip98");
@@ -61,7 +60,6 @@ function shouldDebounce(pubkey) {
 // --- State ---
 let cachedJwt = null;
 let cachedJwtTime = 0;
-let lastEventReceivedAt = null;
 
 // --- APNs JWT (ES256) ---
 function derToRaw(derSig) {
@@ -386,14 +384,17 @@ const server = http.createServer((req, res) => {
       }
     });
   } else if (req.method === "GET" && req.url === "/health") {
+    const allTokens = storage.loadTokens();
+    const pubkeys = new Set(allTokens.map((t) => t.pubkey));
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(
       JSON.stringify({
-        tokens: storage.loadTokens().length,
-        relay: RELAY_URL,
-        public_relay: PUBLIC_RELAY_URL,
-        last_event_received_at: lastEventReceivedAt,
+        ok: true,
+        total_tokens: allTokens.length,
+        unique_pubkeys: pubkeys.size,
+        last_event_received_at: global.lastEventReceivedAt || null,
         uptime_seconds: Math.floor(process.uptime()),
+        public_relay: process.env.PUBLIC_RELAY_URL || RELAY_URL,
       })
     );
   } else {
