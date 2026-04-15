@@ -198,6 +198,8 @@ final class AppState {
     }
 
     func deleteKey() {
+        // Unregister BEFORE wiping the keychain — needs the nsec to sign the NIP-98 header.
+        unregisterWithProxy()
         SharedKeychain.deleteNsec()
         SharedConstants.sharedDefaults.removeObject(forKey: SharedConstants.signerPubkeyHexKey)
         SharedConstants.sharedDefaults.removeObject(forKey: SharedConstants.cachedProfileKey)
@@ -330,6 +332,56 @@ final class AppState {
                 } else {
                     completion?(false, error?.localizedDescription ?? "Connection failed")
                 }
+            }
+        }.resume()
+    }
+
+    /// Unregister the current device token with the proxy. Called from `deleteKey()`
+    /// before clearing the keychain, so we still have access to the nsec for NIP-98 signing.
+    /// Fire-and-forget — we don't block deleteKey on the result.
+    func unregisterWithProxy() {
+        let token = SharedConstants.sharedDefaults.string(forKey: SharedConstants.deviceTokenKey) ?? ""
+        guard !token.isEmpty else { return }
+
+        guard let nsec = SharedKeychain.loadNsec() else { return }
+        let privateKey: Data
+        do {
+            privateKey = try Bech32.decodeNsec(nsec)
+        } catch {
+            return
+        }
+
+        let proxyURL = SharedConstants.sharedDefaults.string(forKey: SharedConstants.proxyURLKey)
+            ?? SharedConstants.defaultProxyURL
+        let unregisterURL = "\(proxyURL)/unregister"
+        guard let url = URL(string: unregisterURL) else { return }
+
+        let bodyDict = ["token": token]
+        guard let bodyData = try? JSONSerialization.data(withJSONObject: bodyDict) else { return }
+        let bodyHash = SHA256.hash(data: bodyData).map { String(format: "%02x", $0) }.joined()
+
+        let authHeader: String
+        do {
+            authHeader = try LightEvent.signNip98(
+                privateKey: privateKey,
+                url: unregisterURL,
+                method: "POST",
+                bodySha256Hex: bodyHash
+            )
+        } catch {
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 10
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(authHeader, forHTTPHeaderField: "Authorization")
+        request.httpBody = bodyData
+
+        URLSession.shared.dataTask(with: request) { _, response, _ in
+            if let http = response as? HTTPURLResponse, http.statusCode == 200 {
+                print("[Clave] Unregistered with proxy (NIP-98)")
             }
         }.resume()
     }
