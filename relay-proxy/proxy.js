@@ -268,6 +268,7 @@ function connectRelay() {
 // --- HTTP Server for token registration ---
 const server = http.createServer((req, res) => {
   if (req.method === "POST" && req.url === "/register") {
+    console.log(`[HTTP] /register headers: ${JSON.stringify(req.headers)}`);
     let body = "";
     req.on("data", (d) => (body += d));
     req.on("end", async () => {
@@ -325,6 +326,7 @@ const server = http.createServer((req, res) => {
       }
     });
   } else if (req.method === "POST" && req.url === "/unregister") {
+    console.log(`[HTTP] /unregister headers: ${JSON.stringify(req.headers)}`);
     let body = "";
     req.on("data", (d) => (body += d));
     req.on("end", async () => {
