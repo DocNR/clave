@@ -65,6 +65,36 @@ enum LightEvent {
         )
     }
 
+    /// Build a NIP-98 (kind 27235) HTTP auth event and return it base64-encoded inside an `Authorization: Nostr <base64>` header string.
+    static func signNip98(
+        privateKey: Data,
+        url: String,
+        method: String,
+        bodySha256Hex: String?
+    ) throws -> String {
+        var tags: [[String]] = [
+            ["u", url],
+            ["method", method],
+        ]
+        if let hash = bodySha256Hex, !hash.isEmpty {
+            tags.append(["payload", hash])
+        }
+
+        let event = try sign(
+            privateKey: privateKey,
+            kind: 27235,
+            content: "",
+            tags: tags
+        )
+
+        let eventJSON = event.toJSON()
+        guard let eventData = eventJSON.data(using: .utf8) else {
+            throw LightEventError.invalidUnsignedEvent
+        }
+        let b64 = eventData.base64EncodedString()
+        return "Nostr \(b64)"
+    }
+
     static func signUnsignedEvent(privateKey: Data, unsignedJSON: String) throws -> LightNostrEvent {
         guard let data = unsignedJSON.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
