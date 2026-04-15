@@ -6,7 +6,6 @@ const fs = require("fs");
 
 // --- Configuration (set via env vars) ---
 const RELAY_URL = process.env.RELAY_URL || "wss://relay.powr.build";
-const SIGNER_PUBKEY = process.env.SIGNER_PUBKEY;
 const APNS_KEY_PATH = process.env.APNS_KEY_PATH || "./AuthKey.p8";
 const APNS_KEY_ID = process.env.APNS_KEY_ID;
 const APNS_TEAM_ID = process.env.APNS_TEAM_ID;
@@ -14,13 +13,8 @@ const APNS_TOPIC = "dev.nostr.Clave";
 const APNS_HOST = process.env.APNS_HOST || "api.push.apple.com";
 const TOKEN_FILE = "./tokens.json";
 const HTTP_PORT = process.env.PORT || 3000;
-const FILTER_BY_PTAG = (process.env.FILTER_BY_PTAG || "false").toLowerCase() === "true";
 const MAX_BODY_SIZE = 1024; // 1KB limit for registration requests
 
-if (!SIGNER_PUBKEY) {
-  console.error("SIGNER_PUBKEY env var required");
-  process.exit(1);
-}
 if (!APNS_KEY_ID || !APNS_TEAM_ID) {
   console.error("APNS_KEY_ID and APNS_TEAM_ID env vars required");
   process.exit(1);
@@ -40,6 +34,28 @@ if (migrationResult.migrated) {
   console.log(
     `[Storage] Migrated legacy tokens.json — backed up ${migrationResult.legacyCount} entries to .legacy-backup and wiped active storage. All testers must re-register.`
   );
+}
+
+// Per-pubkey push debounce. Map<pubkey, lastPushMs>. Entries older than DEBOUNCE_MS * 2
+// are pruned on each access to prevent unbounded growth from ephemeral client pubkeys.
+const DEBOUNCE_MS = 3000;
+const pushDebounce = new Map();
+
+function shouldDebounce(pubkey) {
+  const now = Date.now();
+  // Opportunistic cleanup: prune any entries that are no longer relevant.
+  // Cheap because the map stays small in practice (only active signers).
+  for (const [k, ts] of pushDebounce) {
+    if (now - ts > DEBOUNCE_MS * 2) {
+      pushDebounce.delete(k);
+    }
+  }
+  const last = pushDebounce.get(pubkey);
+  if (last && now - last < DEBOUNCE_MS) {
+    return true;
+  }
+  pushDebounce.set(pubkey, now);
+  return false;
 }
 
 // --- State ---
@@ -171,70 +187,78 @@ function connectRelay() {
       kinds: [24133],
       since: Math.floor(Date.now() / 1000),
     };
-    if (FILTER_BY_PTAG) {
-      filter["#p"] = [SIGNER_PUBKEY];
-    }
     const sub = JSON.stringify(["REQ", "clave-watch", filter]);
     ws.send(sub);
-    console.log(
-      `[Relay] Watching kind:24133 for ${SIGNER_PUBKEY.slice(0, 8)}... (p-tag filter: ${FILTER_BY_PTAG})`
-    );
+    console.log("[Relay] Watching kind:24133 events for all registered signer pubkeys");
     startHeartbeat();
   });
 
   ws.on("message", async (data) => {
     try {
       const msg = JSON.parse(data.toString());
-      if (msg[0] === "EVENT" && msg[1] === "clave-watch") {
-        const event = msg[2];
-        lastEventReceivedAt = new Date().toISOString();
-        // Skip our own responses (from the signer)
-        if (event.pubkey === SIGNER_PUBKEY) return;
+      if (msg[0] !== "EVENT" || msg[1] !== "clave-watch") return;
+
+      global.lastEventReceivedAt = new Date().toISOString();
+
+      const event = msg[2];
+
+      // Extract the signer pubkey from the p-tag on the kind:24133 event
+      const pTag = (event.tags || []).find((t) => t[0] === "p");
+      if (!pTag || !pTag[1]) {
+        console.log(`[Relay] Event ${event.id.slice(0, 8)}... has no p-tag, skipping`);
+        return;
+      }
+      const targetPubkey = pTag[1];
+
+      // Skip responses from the signer themselves (pubkey === targetPubkey means the
+      // signer is p-tagging themselves, which doesn't happen in practice since responses
+      // are p-tagged to the client, but skip for safety)
+      if (event.pubkey === targetPubkey) return;
+
+      const matchingTokens = storage.findByPubkey(targetPubkey);
+      if (matchingTokens.length === 0) {
         console.log(
-          `[Relay] Signing request from ${event.pubkey.slice(0, 8)}...`
+          `[Relay] Event for pubkey ${targetPubkey.slice(0, 8)}... — no registered tokens, skipping`
         );
+        return;
+      }
 
-        if (deviceTokens.length === 0) {
-          console.log("[Relay] No device tokens registered — skipping push");
-          return;
-        }
+      if (shouldDebounce(targetPubkey)) {
+        console.log(`[Relay] Debounced — push for ${targetPubkey.slice(0, 8)}... sent recently`);
+        return;
+      }
 
-        const pushPayload = {
-          aps: {
-            "mutable-content": 1,
-            "interruption-level": "passive",
-            alert: { title: " ", body: " " },
-          },
-          relay_url: PUBLIC_RELAY_URL,
-          event_id: event.id,
-        };
+      console.log(
+        `[Relay] Event for pubkey ${targetPubkey.slice(0, 8)}... — pushing to ${matchingTokens.length} device(s)`
+      );
 
-        // Debounce: skip push if we sent one within the last 3 seconds
-        const now = Date.now();
-        if (global.lastPushTime && now - global.lastPushTime < 3000) {
-          console.log("[Relay] Debounced — push sent recently");
-          return;
-        }
-        global.lastPushTime = now;
+      const pushPayload = {
+        aps: {
+          "mutable-content": 1,
+          "interruption-level": "passive",
+          alert: { title: " ", body: " " },
+        },
+        relay_url: process.env.PUBLIC_RELAY_URL || RELAY_URL,
+        event_id: event.id,
+      };
 
-        for (let i = deviceTokens.length - 1; i >= 0; i--) {
-          const token = deviceTokens[i];
-          try {
-            const status = await sendPush(token, pushPayload);
-            if (status === 410) {
-              deviceTokens.splice(i, 1);
-              fs.writeFileSync(TOKEN_FILE, JSON.stringify(deviceTokens, null, 2));
-              console.log(`[APNs] Removed stale token: ${token.slice(0, 8)}...`);
-            }
-          } catch (e) {
-            console.error(
-              `[APNs] Failed for ${token.slice(0, 8)}...: ${e.message}`
+      for (const entry of matchingTokens) {
+        try {
+          const status = await sendPush(entry.token, pushPayload);
+          if (status === 410) {
+            storage.removeToken({ token: entry.token, pubkey: entry.pubkey });
+            console.log(
+              `[APNs] Removed stale token: ${entry.token.slice(0, 8)}... for ${entry.pubkey.slice(0, 8)}...`
             );
           }
+        } catch (e) {
+          console.error(
+            `[APNs] Push failed for ${entry.token.slice(0, 8)}...: ${e.message}`
+          );
         }
       }
     } catch (e) {
-      console.error("[Relay] Message processing error:", e.message);
+      console.error("[Relay] Message handler error:", e.message);
     }
   });
 
@@ -365,10 +389,9 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(
       JSON.stringify({
-        tokens: deviceTokens.length,
+        tokens: storage.loadTokens().length,
         relay: RELAY_URL,
         public_relay: PUBLIC_RELAY_URL,
-        signer: SIGNER_PUBKEY.slice(0, 8) + "...",
         last_event_received_at: lastEventReceivedAt,
         uptime_seconds: Math.floor(process.uptime()),
       })
