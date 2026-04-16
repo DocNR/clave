@@ -331,7 +331,10 @@ final class AppState {
 
         if let eventData = connectEvent.toJSON().data(using: .utf8),
            let eventDict = try? JSONSerialization.jsonObject(with: eventData) as? [String: Any] {
-            _ = try await relay.publishEvent(event: eventDict)
+            let accepted = try await relay.publishEvent(event: eventDict)
+            print("[Clave] Connect response published to \(relayURL) — accepted: \(accepted)")
+        } else {
+            print("[Clave] Failed to serialize connect event for publishing")
         }
 
         // Brief listen for switch_relays (3s wait + 5s fetch, then disconnect)

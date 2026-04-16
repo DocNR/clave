@@ -93,7 +93,9 @@ struct HomeView: View {
             .onReceive(NotificationCenter.default.publisher(for: .signingCompleted)) { _ in
                 refreshData()
             }
-            .sheet(isPresented: $showConnectSheet) {
+            .sheet(isPresented: $showConnectSheet, onDismiss: {
+                refreshData()
+            }) {
                 ConnectSheet()
             }
             .alert("Unpair Client?", isPresented: Binding(

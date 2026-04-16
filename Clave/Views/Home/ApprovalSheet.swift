@@ -246,6 +246,7 @@ struct ApprovalSheet: View {
             requestCount: 0
         )
         onApprove(permissions)
-        dismiss()
+        // Don't call dismiss() here — ConnectSheet handles dismissal
+        // by setting parsedURI = nil on the .sheet(item:) binding.
     }
 }
