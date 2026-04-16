@@ -160,6 +160,76 @@ enum SharedStorage {
         return bytes.map { String(format: "%02x", $0) }.joined()
     }
 
+    // MARK: - Client Permissions
+
+    static func getClientPermissions() -> [ClientPermissions] {
+        load(forKey: SharedConstants.clientPermissionsKey) ?? []
+    }
+
+    static func getClientPermissions(for pubkey: String) -> ClientPermissions? {
+        getClientPermissions().first { $0.pubkey == pubkey }
+    }
+
+    static func saveClientPermissions(_ permissions: ClientPermissions) {
+        var all = getClientPermissions()
+        if let idx = all.firstIndex(where: { $0.pubkey == permissions.pubkey }) {
+            all[idx] = permissions
+        } else {
+            all.append(permissions)
+        }
+        save(all, forKey: SharedConstants.clientPermissionsKey)
+        logger.notice("[Storage] saveClientPermissions: \(permissions.pubkey.prefix(8), privacy: .public) trust=\(permissions.trustLevel.rawValue, privacy: .public)")
+    }
+
+    static func removeClientPermissions(for pubkey: String) {
+        var all = getClientPermissions()
+        all.removeAll { $0.pubkey == pubkey }
+        save(all, forKey: SharedConstants.clientPermissionsKey)
+        // Also remove from legacy stores
+        unpairClient(pubkey)
+    }
+
+    /// Migrate legacy paired clients to ClientPermissions (one-time, on first launch after update)
+    static func migrateIfNeeded() {
+        // Skip if already migrated (clientPermissions key exists with data)
+        if defaults.data(forKey: SharedConstants.clientPermissionsKey) != nil {
+            return
+        }
+        let paired = getPairedClients()
+        guard !paired.isEmpty else { return }
+
+        let existingClients = getConnectedClients()
+        var migrated: [ClientPermissions] = []
+
+        for pubkey in paired {
+            let existing = existingClients.first { $0.pubkey == pubkey }
+            let permissions = ClientPermissions(
+                pubkey: pubkey,
+                trustLevel: .medium,
+                kindOverrides: [:],
+                methodPermissions: ClientPermissions.defaultMethodPermissions,
+                name: existing?.name,
+                url: nil,
+                imageURL: nil,
+                connectedAt: existing?.firstSeen ?? Date().timeIntervalSince1970,
+                lastSeen: existing?.lastSeen ?? Date().timeIntervalSince1970,
+                requestCount: existing?.requestCount ?? 0
+            )
+            migrated.append(permissions)
+        }
+
+        save(migrated, forKey: SharedConstants.clientPermissionsKey)
+        logger.notice("[Storage] Migrated \(migrated.count) paired clients to ClientPermissions")
+    }
+
+    /// Update lastSeen and requestCount for a client after a successful request
+    static func touchClient(pubkey: String) {
+        guard var perms = getClientPermissions(for: pubkey) else { return }
+        perms.lastSeen = Date().timeIntervalSince1970
+        perms.requestCount += 1
+        saveClientPermissions(perms)
+    }
+
     // MARK: - Helpers
 
     private static func save<T: Encodable>(_ value: T, forKey key: String) {

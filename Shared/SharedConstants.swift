@@ -19,6 +19,7 @@ enum SharedConstants {
     static let pendingRequestsKey = "pendingRequests"
     static let bunkerSecretKey = "bunkerSecret"
     static let pairedClientsKey = "pairedClients"
+    static let clientPermissionsKey = "clientPermissions"
     static let cachedProfileKey = "cachedProfile"
 
     static var sharedDefaults: UserDefaults {
