@@ -334,7 +334,9 @@ final class AppState {
             _ = try await relay.publishEvent(event: eventDict)
         }
 
-        // Listen briefly for switch_relays from client (up to 15s)
+        // Brief listen for switch_relays (3s wait + 5s fetch, then disconnect)
+        // Don't block too long — the client will discover relay.powr.build
+        // via the proxy's existing push path even without switch_relays.
         let now = Int(Date().timeIntervalSince1970)
         let filter: [String: Any] = [
             "kinds": [24133],
@@ -343,9 +345,8 @@ final class AppState {
             "limit": 5
         ]
 
-        for _ in 0..<3 {
-            try await Task.sleep(nanoseconds: 5_000_000_000)
-            let events = try await relay.fetchEvents(filter: filter, timeout: 5.0)
+        try? await Task.sleep(nanoseconds: 3_000_000_000)
+        if let events = try? await relay.fetchEvents(filter: filter, timeout: 5.0) {
             for event in events {
                 guard let pubkey = event["pubkey"] as? String,
                       pubkey == parsedURI.clientPubkey,
@@ -359,8 +360,7 @@ final class AppState {
                         privateKey: privateKey,
                         requestEvent: event
                     )
-                    relay.disconnect()
-                    return
+                    break
                 }
             }
         }

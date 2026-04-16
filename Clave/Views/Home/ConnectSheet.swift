@@ -6,7 +6,7 @@ struct ConnectSheet: View {
     @State private var nostrConnectInput = ""
     @State private var parseError: String?
     @State private var parsedURI: NostrConnectParser.ParsedURI?
-    @State private var showApproval = false
+    // showApproval removed — using .sheet(item:) with parsedURI instead
     @State private var showQR = false
     @State private var copiedBunker = false
     @State private var isConnecting = false
@@ -31,23 +31,22 @@ struct ConnectSheet: View {
             .sheet(isPresented: $showQR) {
                 QRCodeView(content: appState.bunkerURI)
             }
-            .sheet(isPresented: $showApproval) {
-                if let uri = parsedURI {
-                    ApprovalSheet(parsedURI: uri) { permissions in
-                        isConnecting = true
-                        connectionError = nil
-                        Task {
-                            do {
-                                try await appState.handleNostrConnect(parsedURI: uri, permissions: permissions)
-                                await MainActor.run {
-                                    isConnecting = false
-                                    dismiss()
-                                }
-                            } catch {
-                                await MainActor.run {
-                                    connectionError = error.localizedDescription
-                                    isConnecting = false
-                                }
+            .sheet(item: $parsedURI) { uri in
+                ApprovalSheet(parsedURI: uri) { permissions in
+                    parsedURI = nil // dismiss approval sheet
+                    isConnecting = true
+                    connectionError = nil
+                    Task {
+                        do {
+                            try await appState.handleNostrConnect(parsedURI: uri, permissions: permissions)
+                            await MainActor.run {
+                                isConnecting = false
+                                dismiss()
+                            }
+                        } catch {
+                            await MainActor.run {
+                                connectionError = error.localizedDescription
+                                isConnecting = false
                             }
                         }
                     }
@@ -191,7 +190,6 @@ struct ConnectSheet: View {
         do {
             parsedURI = try NostrConnectParser.parse(nostrConnectInput.trimmingCharacters(in: .whitespacesAndNewlines))
             parseError = nil
-            showApproval = true
         } catch let error as NostrConnectParser.ParseError {
             switch error {
             case .invalidScheme: parseError = "URI must start with nostrconnect://"

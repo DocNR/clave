@@ -10,7 +10,8 @@ enum NostrConnectParser {
         case invalidURL
     }
 
-    struct ParsedURI {
+    struct ParsedURI: Identifiable {
+        var id: String { clientPubkey + secret }
         let clientPubkey: String
         let relays: [String]
         let secret: String
