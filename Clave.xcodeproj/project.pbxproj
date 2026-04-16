@@ -25,6 +25,8 @@
 		EF3D7A722F8BD1C4005A6545 /* SharedKeychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF3D7A5E2F8BD020005A6545 /* SharedKeychain.swift */; };
 		EF56291E7860E39D54142281 /* SharedModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFCA55B463A619311A35AF3C /* SharedModels.swift */; };
 		EF6058BFB67AD8970BBE8953 /* LightEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF3D7A5A2F8BD020005A6545 /* LightEvent.swift */; };
+		DD90DE0C2D8944D08B23C606 /* ClientPermissions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 894FE9FF88CD485ABCD31C05 /* ClientPermissions.swift */; };
+		BD247C1AD3A7497E8DF29530 /* ClientPermissions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 894FE9FF88CD485ABCD31C05 /* ClientPermissions.swift */; };
 		EF85F076F6C02095C4B6D9C4 /* LightSigner.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF3D7A5C2F8BD020005A6545 /* LightSigner.swift */; };
 		EFAF49B35F7A4241A65DCD89 /* SharedStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFEE4316AC522CDDA35AFAC1 /* SharedStorage.swift */; };
 		EFBF443D3DA775A267700410 /* Bech32.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF3D7A582F8BD020005A6545 /* Bech32.swift */; };
@@ -85,6 +87,7 @@
 		EF3D7A5F2F8BD020005A6545 /* SignerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignerService.swift; sourceTree = "<group>"; };
 		EFCA55B463A619311A35AF3C /* SharedModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedModels.swift; sourceTree = "<group>"; };
 		EFEE4316AC522CDDA35AFAC1 /* SharedStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedStorage.swift; sourceTree = "<group>"; };
+		894FE9FF88CD485ABCD31C05 /* ClientPermissions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClientPermissions.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -195,6 +198,7 @@
 			isa = PBXGroup;
 			children = (
 				EF3D7A582F8BD020005A6545 /* Bech32.swift */,
+				894FE9FF88CD485ABCD31C05 /* ClientPermissions.swift */,
 				EF3D7A592F8BD020005A6545 /* LightCrypto.swift */,
 				EF3D7A5A2F8BD020005A6545 /* LightEvent.swift */,
 				EF3D7A5B2F8BD020005A6545 /* LightRelay.swift */,
@@ -400,6 +404,7 @@
 				EFC7FD75109694C0A7F86D26 /* SharedModels.swift in Sources */,
 				EFE12D1EC4CE48622767D427 /* SharedStorage.swift in Sources */,
 				EFBF443D3DA775A267700410 /* Bech32.swift in Sources */,
+				DD90DE0C2D8944D08B23C606 /* ClientPermissions.swift in Sources */,
 				EF304CFAA8D958E7CCDF01AD /* LightCrypto.swift in Sources */,
 				EF6058BFB67AD8970BBE8953 /* LightEvent.swift in Sources */,
 				EF1963B89F3A6472380F1E0A /* LightRelay.swift in Sources */,
@@ -434,6 +439,7 @@
 				EF3D7A6D2F8BD139005A6545 /* LightRelay.swift in Sources */,
 				EF56291E7860E39D54142281 /* SharedModels.swift in Sources */,
 				EFAF49B35F7A4241A65DCD89 /* SharedStorage.swift in Sources */,
+				BD247C1AD3A7497E8DF29530 /* ClientPermissions.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
