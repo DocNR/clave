@@ -5,7 +5,6 @@ struct SettingsView: View {
     @Environment(AppState.self) private var appState
     @State private var showDeleteConfirmation = false
     @State private var showExportSheet = false
-    @State private var autoSign = true
     @State private var proxyURL = ""
     @State private var registrationStatus = ""
 
@@ -79,11 +78,6 @@ struct SettingsView: View {
 
     private var permissionsSection: some View {
         Section("Permissions") {
-            Toggle("Auto-sign requests", isOn: $autoSign)
-                .onChange(of: autoSign) { _, value in
-                    SharedStorage.setAutoSign(value)
-                }
-
             NavigationLink {
                 ProtectedKindsEditor()
             } label: {
@@ -96,7 +90,7 @@ struct SettingsView: View {
                 }
             }
 
-            Text("Protected kinds require your approval in the app before signing.")
+            Text("These event kinds require in-app approval for clients set to Medium Trust.")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
         }
@@ -170,7 +164,6 @@ struct SettingsView: View {
     }
 
     private func loadSettings() {
-        autoSign = SharedStorage.isAutoSignEnabled()
         proxyURL = SharedConstants.sharedDefaults.string(forKey: SharedConstants.proxyURLKey)
             ?? SharedConstants.defaultProxyURL
     }

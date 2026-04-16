@@ -222,6 +222,7 @@ final class AppState {
         SharedStorage.clearActivityLog()
         SharedStorage.clearPendingRequests()
         SharedStorage.unpairAllClients()
+        SharedConstants.sharedDefaults.removeObject(forKey: SharedConstants.clientPermissionsKey)
         // Clear connected clients
         SharedConstants.sharedDefaults.removeObject(forKey: SharedConstants.connectedClientsKey)
         // Rotate bunker secret for the new key

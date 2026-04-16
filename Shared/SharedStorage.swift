@@ -98,17 +98,6 @@ enum SharedStorage {
         defaults.set(Array(kinds), forKey: SharedConstants.blockedKindsKey)
     }
 
-    // MARK: - Auto-Sign
-
-    static func isAutoSignEnabled() -> Bool {
-        guard defaults.object(forKey: SharedConstants.autoSignKey) != nil else { return true }
-        return defaults.bool(forKey: SharedConstants.autoSignKey)
-    }
-
-    static func setAutoSign(_ enabled: Bool) {
-        defaults.set(enabled, forKey: SharedConstants.autoSignKey)
-    }
-
     // MARK: - Bunker Secret & Paired Clients
 
     static func getBunkerSecret() -> String {

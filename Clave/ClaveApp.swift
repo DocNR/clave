@@ -31,6 +31,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                 }
             }
         }
+        SharedStorage.migrateIfNeeded()
         return true
     }
 
