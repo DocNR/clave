@@ -19,6 +19,7 @@ class NotificationService: UNNotificationServiceExtension {
     var bestAttemptContent: UNMutableNotificationContent?
     private var hasDelivered = false
     private let deliverLock = NSLock()
+    private var requestIdentifier: String?
 
     override func didReceive(
         _ request: UNNotificationRequest,
@@ -26,6 +27,7 @@ class NotificationService: UNNotificationServiceExtension {
     ) {
         self.contentHandler = contentHandler
         bestAttemptContent = (request.content.mutableCopy() as? UNMutableNotificationContent)
+        requestIdentifier = request.identifier
 
         logger.notice("[ClaveNSE] didReceive called")
 
@@ -74,6 +76,9 @@ class NotificationService: UNNotificationServiceExtension {
             content.interruptionLevel = .passive
             content.relevanceScore = 0
             contentHandler?(content)
+            if let id = requestIdentifier {
+                UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [id])
+            }
         }
     }
 
