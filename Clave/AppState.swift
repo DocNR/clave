@@ -320,7 +320,7 @@ final class AppState {
         var handshakeComplete = false
         var activityLogged = false
 
-        for attempt in 1...3 {
+        for _ in 1...3 {
             // Build a fresh event each attempt (new created_at = new event ID)
             let responseId = UUID().uuidString
             let responseDict: [String: Any] = ["id": responseId, "result": parsedURI.secret]
