@@ -158,8 +158,15 @@ struct ApprovalSheet: View {
         )
 
         return Toggle(isOn: binding) {
-            Text(KnownKinds.label(for: kind))
-                .font(.subheadline)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Kind \(kind)")
+                    .font(.subheadline.weight(.medium))
+                if let name = KnownKinds.names[kind] {
+                    Text(name)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
         .padding(.vertical, 4)
     }

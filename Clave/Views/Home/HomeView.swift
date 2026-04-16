@@ -213,19 +213,33 @@ struct HomeView: View {
     // MARK: - Connected Clients
 
     private var emptyClientsView: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "person.crop.circle.badge.plus")
-                .font(.system(size: 40))
-                .foregroundStyle(.tertiary)
-            Text("No clients connected")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            Button("Connect a Client") {
-                showConnectSheet = true
+        HStack {
+            Spacer()
+            VStack(spacing: 16) {
+                Image(systemName: "person.crop.circle.badge.plus")
+                    .font(.system(size: 48))
+                    .foregroundStyle(.tertiary)
+                Text("No clients connected")
+                    .font(.headline)
+                    .foregroundStyle(.secondary)
+                Text("Connect a Nostr client like Nostur or noStrudel to start signing events remotely.")
+                    .font(.subheadline)
+                    .foregroundStyle(.tertiary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 16)
+                Button {
+                    showConnectSheet = true
+                } label: {
+                    Label("Connect a Client", systemImage: "plus.circle.fill")
+                        .font(.body.bold())
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .padding(.horizontal, 32)
             }
-            .buttonStyle(.borderedProminent)
+            .padding(.vertical, 40)
+            Spacer()
         }
-        .padding(.vertical, 32)
     }
 
     private func clientRow(_ client: ClientPermissions) -> some View {
