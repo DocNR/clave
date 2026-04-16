@@ -145,6 +145,9 @@ enum SharedStorage {
         var paired = getPairedClients()
         paired.remove(pubkey)
         defaults.set(Array(paired), forKey: SharedConstants.pairedClientsKey)
+        var clients = getConnectedClients()
+        clients.removeAll { $0.pubkey == pubkey }
+        save(clients, forKey: SharedConstants.connectedClientsKey)
     }
 
     static func unpairAllClients() {

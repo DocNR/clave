@@ -308,8 +308,11 @@ enum LightSigner {
                 return (nil, "nip44_decrypt failed: \(error.localizedDescription)")
             }
 
+        case "switch_relays":
+            return ("[\"\(SharedConstants.relayURL)\"]", nil)
+
         case "describe":
-            return ("[\"connect\",\"sign_event\",\"get_public_key\",\"ping\",\"nip04_encrypt\",\"nip04_decrypt\",\"nip44_encrypt\",\"nip44_decrypt\",\"describe\"]", nil)
+            return ("[\"connect\",\"sign_event\",\"get_public_key\",\"ping\",\"nip04_encrypt\",\"nip04_decrypt\",\"nip44_encrypt\",\"nip44_decrypt\",\"switch_relays\",\"describe\"]", nil)
 
         default:
             return (nil, "Unsupported method: \(method)")
@@ -345,7 +348,7 @@ enum LightSigner {
             errorMessage: result.errorMessage
         )
         SharedStorage.logActivity(entry)
-        if result.clientPubkey != "unknown" {
+        if result.clientPubkey != "unknown" && result.status != "blocked" {
             SharedStorage.updateClient(pubkey: result.clientPubkey, name: clientName)
         }
     }
