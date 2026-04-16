@@ -63,22 +63,38 @@ enum LightSigner {
         // Extract client name for connect
         let clientName = (method == "connect" && !params.isEmpty) ? extractConnectName(params: params) : nil
 
-        // --- Secret-based pairing ---
+        // --- Per-client permission checks ---
         if method == "connect" {
             // connect params: [remote-signer-pubkey, optional-secret, optional-perms]
             let providedSecret = params.count >= 2 ? params[1] : ""
             let expectedSecret = SharedStorage.getBunkerSecret()
 
             if !providedSecret.isEmpty && providedSecret == expectedSecret {
-                // Valid secret — pair this client and invalidate the secret
-                SharedStorage.pairClient(senderPubkey)
+                // Valid secret — create permissions if new, then rotate secret
+                if SharedStorage.getClientPermissions(for: senderPubkey) == nil {
+                    let perms = ClientPermissions(
+                        pubkey: senderPubkey,
+                        trustLevel: .medium,
+                        kindOverrides: [:],
+                        methodPermissions: ClientPermissions.defaultMethodPermissions,
+                        name: clientName,
+                        url: nil,
+                        imageURL: nil,
+                        connectedAt: Date().timeIntervalSince1970,
+                        lastSeen: Date().timeIntervalSince1970,
+                        requestCount: 0
+                    )
+                    SharedStorage.saveClientPermissions(perms)
+                    logger.notice("[LightSigner] New client paired with valid secret")
+                } else {
+                    logger.notice("[LightSigner] Existing client re-paired with valid secret")
+                }
                 _ = SharedStorage.rotateBunkerSecret()
-                logger.notice("[LightSigner] Client paired with valid secret")
-            } else if SharedStorage.isClientPaired(senderPubkey) {
-                // Already paired — allow reconnect without secret
+            } else if SharedStorage.getClientPermissions(for: senderPubkey) != nil {
+                // Already has permissions — allow reconnect without secret
                 logger.notice("[LightSigner] Already-paired client reconnecting")
             } else {
-                // Wrong or missing secret — reject
+                // Wrong or missing secret and no permissions — reject
                 logger.notice("[LightSigner] Connect rejected: invalid secret")
                 let result = RequestResult(method: method, eventKind: nil, clientPubkey: senderPubkey,
                                            status: "blocked", errorMessage: "Invalid or missing secret")
@@ -90,13 +106,16 @@ enum LightSigner {
                 )
                 return result
             }
-        } else if !skipProtection && !SharedStorage.isClientPaired(senderPubkey) {
+        } else {
+            let perms = SharedStorage.getClientPermissions(for: senderPubkey)
+
             // NIP-42 relay auth (kind 22242) is a chicken-and-egg: clients need to sign
             // the auth challenge before they can publish anything (including connect) to
             // an auth-required relay. Allow kind 22242 sign_event through without pairing.
             let isRelayAuthSign = (method == "sign_event" && eventKind == 22242)
-            if !isRelayAuthSign {
-                // Non-connect method from an unpaired client — reject
+
+            if perms == nil && !isRelayAuthSign {
+                // Non-connect method from an unknown client — reject
                 logger.notice("[LightSigner] Rejecting unpaired client for method \(method, privacy: .public)")
                 let result = RequestResult(method: method, eventKind: eventKind, clientPubkey: senderPubkey,
                                            status: "blocked", errorMessage: "Client not paired")
@@ -108,50 +127,55 @@ enum LightSigner {
                 )
                 return result
             }
-            logger.notice("[LightSigner] Allowing kind 22242 (NIP-42 relay auth) from unpaired client")
-        }
 
-        // Check auto-sign and blocked kinds
-        if method == "sign_event" {
-            if !SharedStorage.isAutoSignEnabled() {
-                logger.notice("[LightSigner] Auto-sign disabled, blocking request")
-                let result = RequestResult(method: method, eventKind: eventKind, clientPubkey: senderPubkey,
-                                           status: "blocked", errorMessage: "Auto-sign disabled")
-                logAndTrack(result: result, clientName: clientName)
-                try await sendErrorResponse(
-                    requestId: requestId, error: "Auto-sign is disabled",
-                    privateKey: privateKey, senderPubkeyData: senderPubkeyData,
-                    senderPubkey: senderPubkey, isNip04: isNip04
-                )
-                return result
+            if isRelayAuthSign && perms == nil {
+                logger.notice("[LightSigner] Allowing kind 22242 (NIP-42 relay auth) from unpaired client")
             }
 
-            if !skipProtection, let kind = eventKind, SharedStorage.getProtectedKinds().contains(kind) {
-                logger.notice("[LightSigner] Protected kind \(kind) — queuing for in-app approval")
+            // Per-client permission enforcement
+            if let perms, !skipProtection {
+                var allowed = true
 
-                // Serialize the full request event so the app can process it later
-                if let eventData = try? JSONSerialization.data(withJSONObject: requestEvent),
-                   let eventJSON = String(data: eventData, encoding: .utf8) {
-                    let pending = PendingRequest(
-                        id: UUID().uuidString,
-                        requestEventJSON: eventJSON,
-                        method: method,
-                        eventKind: kind,
-                        clientPubkey: senderPubkey,
-                        timestamp: Date().timeIntervalSince1970
-                    )
-                    SharedStorage.queuePendingRequest(pending)
+                switch method {
+                case "sign_event":
+                    if let kind = eventKind {
+                        allowed = perms.isKindAllowed(kind, protectedKinds: SharedStorage.getProtectedKinds())
+                    }
+                case "nip04_encrypt", "nip04_decrypt", "nip44_encrypt", "nip44_decrypt":
+                    allowed = perms.isMethodAllowed(method)
+                case "connect", "ping", "get_public_key", "describe", "switch_relays":
+                    allowed = true
+                default:
+                    allowed = true
                 }
 
-                let result = RequestResult(method: method, eventKind: eventKind, clientPubkey: senderPubkey,
-                                           status: "pending", errorMessage: "Queued for approval")
-                logAndTrack(result: result, clientName: clientName)
-                try await sendErrorResponse(
-                    requestId: requestId, error: "Protected event kind — open Clave to approve",
-                    privateKey: privateKey, senderPubkeyData: senderPubkeyData,
-                    senderPubkey: senderPubkey, isNip04: isNip04
-                )
-                return result
+                if !allowed {
+                    logger.notice("[LightSigner] Permission denied for \(method, privacy: .public) — queuing for approval")
+
+                    // Serialize the full request event so the app can process it later
+                    if let eventData = try? JSONSerialization.data(withJSONObject: requestEvent),
+                       let eventJSON = String(data: eventData, encoding: .utf8) {
+                        let pending = PendingRequest(
+                            id: UUID().uuidString,
+                            requestEventJSON: eventJSON,
+                            method: method,
+                            eventKind: eventKind ?? 0,
+                            clientPubkey: senderPubkey,
+                            timestamp: Date().timeIntervalSince1970
+                        )
+                        SharedStorage.queuePendingRequest(pending)
+                    }
+
+                    let result = RequestResult(method: method, eventKind: eventKind, clientPubkey: senderPubkey,
+                                               status: "pending", errorMessage: "Queued for approval")
+                    logAndTrack(result: result, clientName: clientName)
+                    try await sendErrorResponse(
+                        requestId: requestId, error: "Permission denied — open Clave to approve",
+                        privateKey: privateKey, senderPubkeyData: senderPubkeyData,
+                        senderPubkey: senderPubkey, isNip04: isNip04
+                    )
+                    return result
+                }
             }
         }
 
@@ -349,7 +373,7 @@ enum LightSigner {
         )
         SharedStorage.logActivity(entry)
         if result.clientPubkey != "unknown" && result.status != "blocked" {
-            SharedStorage.updateClient(pubkey: result.clientPubkey, name: clientName)
+            SharedStorage.touchClient(pubkey: result.clientPubkey)
         }
     }
 
