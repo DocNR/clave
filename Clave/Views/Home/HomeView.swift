@@ -111,7 +111,7 @@ struct HomeView: View {
                 Button("Unpair", role: .destructive) {
                     if let client = clientToUnpair {
                         withAnimation {
-                            SharedStorage.unpairClient(client.pubkey)
+                            SharedStorage.removeClientPermissions(for: client.pubkey)
                             refreshData()
                         }
                     }

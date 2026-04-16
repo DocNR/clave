@@ -372,7 +372,8 @@ enum LightSigner {
             errorMessage: result.errorMessage
         )
         SharedStorage.logActivity(entry)
-        if result.clientPubkey != "unknown" && result.status != "blocked" {
+        if result.clientPubkey != "unknown" && result.status != "blocked"
+            && SharedStorage.getClientPermissions(for: result.clientPubkey) != nil {
             SharedStorage.touchClient(pubkey: result.clientPubkey)
         }
     }
