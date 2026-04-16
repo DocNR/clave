@@ -4,3 +4,4 @@ tokens.json
 relay-proxy/node_modules/
 xcuserdata/
 *.xcuserdatad/
+build/
