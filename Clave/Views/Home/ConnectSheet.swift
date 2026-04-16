@@ -33,17 +33,25 @@ struct ConnectSheet: View {
             }
             .sheet(item: $parsedURI) { uri in
                 ApprovalSheet(parsedURI: uri) { permissions in
-                    parsedURI = nil // dismiss approval sheet
+                    print("[Clave] ConnectSheet: onApprove received, starting handshake for \(uri.clientPubkey.prefix(8))")
+                    print("[Clave] ConnectSheet: relay = \(uri.relays.first ?? "none")")
                     isConnecting = true
                     connectionError = nil
+                    // Capture uri before dismissing the sheet
+                    let capturedURI = uri
+                    let capturedPerms = permissions
+                    parsedURI = nil // dismiss approval sheet
                     Task {
+                        print("[Clave] ConnectSheet: Task started, calling handleNostrConnect")
                         do {
-                            try await appState.handleNostrConnect(parsedURI: uri, permissions: permissions)
+                            try await appState.handleNostrConnect(parsedURI: capturedURI, permissions: capturedPerms)
+                            print("[Clave] ConnectSheet: handleNostrConnect succeeded")
                             await MainActor.run {
                                 isConnecting = false
                                 dismiss()
                             }
                         } catch {
+                            print("[Clave] ConnectSheet: handleNostrConnect FAILED: \(error)")
                             await MainActor.run {
                                 connectionError = error.localizedDescription
                                 isConnecting = false
@@ -187,8 +195,11 @@ struct ConnectSheet: View {
     // MARK: - Actions
 
     private func connectFromPaste() {
+        print("[Clave] connectFromPaste: input length = \(nostrConnectInput.count)")
         do {
-            parsedURI = try NostrConnectParser.parse(nostrConnectInput.trimmingCharacters(in: .whitespacesAndNewlines))
+            let parsed = try NostrConnectParser.parse(nostrConnectInput.trimmingCharacters(in: .whitespacesAndNewlines))
+            print("[Clave] connectFromPaste: parsed OK — pubkey=\(parsed.clientPubkey.prefix(8)), relay=\(parsed.relays.first ?? "none"), secret=\(parsed.secret.prefix(4))...")
+            parsedURI = parsed
             parseError = nil
         } catch let error as NostrConnectParser.ParseError {
             switch error {

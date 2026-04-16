@@ -337,34 +337,28 @@ final class AppState {
             print("[Clave] Failed to serialize connect event for publishing")
         }
 
-        // Brief listen for switch_relays (3s wait + 5s fetch, then disconnect)
-        // Don't block too long — the client will discover relay.powr.build
-        // via the proxy's existing push path even without switch_relays.
+        // Listen for follow-up events from the client (connect request, switch_relays, etc.)
+        // Many clients send a connect request even in the nostrconnect flow and wait for
+        // a response with a matching ID. Process ALL events through LightSigner.
         let now = Int(Date().timeIntervalSince1970)
         let filter: [String: Any] = [
             "kinds": [24133],
             "#p": [signerPubkey],
-            "since": now - 5,
-            "limit": 5
+            "since": now - 10,
+            "limit": 10
         ]
 
-        try? await Task.sleep(nanoseconds: 3_000_000_000)
+        try? await Task.sleep(nanoseconds: 2_000_000_000)
         if let events = try? await relay.fetchEvents(filter: filter, timeout: 5.0) {
             for event in events {
                 guard let pubkey = event["pubkey"] as? String,
-                      pubkey == parsedURI.clientPubkey,
-                      let content = event["content"] as? String else { continue }
-                if let decrypted = try? LightCrypto.decrypt(
+                      pubkey == parsedURI.clientPubkey else { continue }
+                print("[Clave] Handshake: processing event from client, pubkey=\(pubkey.prefix(8))")
+                let result = try? await LightSigner.handleRequest(
                     privateKey: privateKey,
-                    publicKey: clientPubkeyData,
-                    payload: content
-                ), decrypted.contains("switch_relays") {
-                    _ = try? await LightSigner.handleRequest(
-                        privateKey: privateKey,
-                        requestEvent: event
-                    )
-                    break
-                }
+                    requestEvent: event
+                )
+                print("[Clave] Handshake: processed method=\(result?.method ?? "?") status=\(result?.status ?? "?")")
             }
         }
 
