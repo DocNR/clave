@@ -169,6 +169,7 @@ struct ApprovalSheet: View {
             }
         }
         .padding(.vertical, 4)
+        .padding(.trailing, 4)
     }
 
     // MARK: - Action Buttons
@@ -245,9 +246,7 @@ struct ApprovalSheet: View {
             lastSeen: Date().timeIntervalSince1970,
             requestCount: 0
         )
-        print("[Clave] ApprovalSheet: buildAndApprove calling onApprove for \(parsedURI.clientPubkey.prefix(8))")
         onApprove(permissions)
-        print("[Clave] ApprovalSheet: onApprove returned")
         // Don't call dismiss() here — ConnectSheet handles dismissal
         // by setting parsedURI = nil on the .sheet(item:) binding.
     }

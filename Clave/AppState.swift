@@ -343,7 +343,6 @@ final class AppState {
             if let eventData = connectEvent.toJSON().data(using: .utf8),
                let eventDict = try? JSONSerialization.jsonObject(with: eventData) as? [String: Any] {
                 let accepted = try await relay.publishEvent(event: eventDict)
-                print("[Clave] Connect response #\(attempt) published to \(relayURL) — accepted: \(accepted)")
 
                 if !activityLogged {
                     let entry = ActivityEntry(
@@ -366,18 +365,15 @@ final class AppState {
                 for event in events {
                     guard let pubkey = event["pubkey"] as? String,
                           pubkey == parsedURI.clientPubkey else { continue }
-                    print("[Clave] Handshake: got event from client on attempt #\(attempt)")
-                    let result = try? await LightSigner.handleRequest(
+                    let _ = try? await LightSigner.handleRequest(
                         privateKey: privateKey,
                         requestEvent: event
                     )
-                    print("[Clave] Handshake: processed method=\(result?.method ?? "?") status=\(result?.status ?? "?")")
                     handshakeComplete = true
                 }
             }
 
             if handshakeComplete {
-                print("[Clave] Handshake complete after \(attempt) attempt(s)")
                 break
             }
         }
@@ -446,10 +442,8 @@ final class AppState {
         URLSession.shared.dataTask(with: request) { _, response, error in
             DispatchQueue.main.async {
                 if let http = response as? HTTPURLResponse, http.statusCode == 200 {
-                    print("[Clave] Registered with proxy (NIP-98)")
                     completion?(true, "Registered")
                 } else if let http = response as? HTTPURLResponse {
-                    print("[Clave] Proxy registration failed: HTTP \(http.statusCode)")
                     completion?(false, "Failed: HTTP \(http.statusCode)")
                 } else {
                     completion?(false, error?.localizedDescription ?? "Connection failed")
@@ -501,10 +495,6 @@ final class AppState {
         request.setValue(authHeader, forHTTPHeaderField: "X-Clave-Auth")
         request.httpBody = bodyData
 
-        URLSession.shared.dataTask(with: request) { _, response, _ in
-            if let http = response as? HTTPURLResponse, http.statusCode == 200 {
-                print("[Clave] Unregistered with proxy (NIP-98)")
-            }
-        }.resume()
+        URLSession.shared.dataTask(with: request) { _, _, _ in }.resume()
     }
 }

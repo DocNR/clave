@@ -229,6 +229,7 @@ struct ClientDetailView: View {
             }
         }
         .padding(.vertical, 4)
+        .padding(.trailing, 4)
     }
 
     private var encryptionSubsection: some View {
@@ -269,6 +270,7 @@ struct ClientDetailView: View {
                 .font(.subheadline)
         }
         .padding(.vertical, 4)
+        .padding(.trailing, 4)
     }
 
     private func methodLabel(_ method: String) -> String {
