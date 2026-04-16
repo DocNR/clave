@@ -301,76 +301,84 @@ final class AppState {
         let relay = LightRelay(url: relayURL)
         try await relay.connect(timeout: 10.0)
 
-        // Build connect response: {"id": "<random>", "result": "<secret>"}
-        let responseId = UUID().uuidString
-        let responseDict: [String: Any] = ["id": responseId, "result": parsedURI.secret]
-        guard let responseData = try? JSONSerialization.data(withJSONObject: responseDict),
-              let responseJSON = String(data: responseData, encoding: .utf8) else {
-            relay.disconnect()
-            throw ClaveError.serializationFailed
-        }
-
-        // Encrypt with NIP-44 to client pubkey
+        // Validate client pubkey before entering retry loop
         guard let clientPubkeyData = Data(hexString: parsedURI.clientPubkey) else {
             relay.disconnect()
             throw ClaveError.invalidPubkey
         }
-        let encrypted = try LightCrypto.nip44Encrypt(
-            privateKey: privateKey,
-            publicKey: clientPubkeyData,
-            plaintext: responseJSON
-        )
 
-        // Sign and publish connect response
-        let connectEvent = try LightEvent.sign(
-            privateKey: privateKey,
-            kind: 24133,
-            content: encrypted,
-            tags: [["p", parsedURI.clientPubkey]]
-        )
-
-        if let eventData = connectEvent.toJSON().data(using: .utf8),
-           let eventDict = try? JSONSerialization.jsonObject(with: eventData) as? [String: Any] {
-            let accepted = try await relay.publishEvent(event: eventDict)
-            print("[Clave] Connect response published to \(relayURL) — accepted: \(accepted)")
-
-            // Log the connect activity so it appears in the Activity tab
-            let entry = ActivityEntry(
-                id: UUID().uuidString,
-                method: "connect",
-                eventKind: nil,
-                clientPubkey: parsedURI.clientPubkey,
-                timestamp: Date().timeIntervalSince1970,
-                status: accepted ? "signed" : "error",
-                errorMessage: accepted ? nil : "Relay rejected connect response"
-            )
-            SharedStorage.logActivity(entry)
-        } else {
-            print("[Clave] Failed to serialize connect event for publishing")
-        }
-
-        // Listen for follow-up events from the client (connect request, switch_relays, etc.)
-        // Many clients send a connect request even in the nostrconnect flow and wait for
-        // a response with a matching ID. Process ALL events through LightSigner.
+        // Publish connect response with retry — ephemeral events (kind 24133) aren't
+        // stored by relays, so the client must be subscribed at the moment we publish.
+        // Retry up to 3 times with 2s gaps, stopping early if we hear back from the client.
         let now = Int(Date().timeIntervalSince1970)
-        let filter: [String: Any] = [
+        let listenFilter: [String: Any] = [
             "kinds": [24133],
             "#p": [signerPubkey],
             "since": now - 10,
             "limit": 10
         ]
+        var handshakeComplete = false
+        var activityLogged = false
 
-        try? await Task.sleep(nanoseconds: 2_000_000_000)
-        if let events = try? await relay.fetchEvents(filter: filter, timeout: 5.0) {
-            for event in events {
-                guard let pubkey = event["pubkey"] as? String,
-                      pubkey == parsedURI.clientPubkey else { continue }
-                print("[Clave] Handshake: processing event from client, pubkey=\(pubkey.prefix(8))")
-                let result = try? await LightSigner.handleRequest(
-                    privateKey: privateKey,
-                    requestEvent: event
-                )
-                print("[Clave] Handshake: processed method=\(result?.method ?? "?") status=\(result?.status ?? "?")")
+        for attempt in 1...3 {
+            // Build a fresh event each attempt (new created_at = new event ID)
+            let responseId = UUID().uuidString
+            let responseDict: [String: Any] = ["id": responseId, "result": parsedURI.secret]
+            guard let responseData = try? JSONSerialization.data(withJSONObject: responseDict),
+                  let responseJSON = String(data: responseData, encoding: .utf8) else {
+                continue
+            }
+            let freshEncrypted = try LightCrypto.nip44Encrypt(
+                privateKey: privateKey,
+                publicKey: clientPubkeyData,
+                plaintext: responseJSON
+            )
+            let connectEvent = try LightEvent.sign(
+                privateKey: privateKey,
+                kind: 24133,
+                content: freshEncrypted,
+                tags: [["p", parsedURI.clientPubkey]]
+            )
+
+            if let eventData = connectEvent.toJSON().data(using: .utf8),
+               let eventDict = try? JSONSerialization.jsonObject(with: eventData) as? [String: Any] {
+                let accepted = try await relay.publishEvent(event: eventDict)
+                print("[Clave] Connect response #\(attempt) published to \(relayURL) — accepted: \(accepted)")
+
+                if !activityLogged {
+                    let entry = ActivityEntry(
+                        id: UUID().uuidString,
+                        method: "connect",
+                        eventKind: nil,
+                        clientPubkey: parsedURI.clientPubkey,
+                        timestamp: Date().timeIntervalSince1970,
+                        status: accepted ? "signed" : "error",
+                        errorMessage: accepted ? nil : "Relay rejected connect response"
+                    )
+                    SharedStorage.logActivity(entry)
+                    activityLogged = true
+                }
+            }
+
+            // Wait then check for client response
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            if let events = try? await relay.fetchEvents(filter: listenFilter, timeout: 3.0) {
+                for event in events {
+                    guard let pubkey = event["pubkey"] as? String,
+                          pubkey == parsedURI.clientPubkey else { continue }
+                    print("[Clave] Handshake: got event from client on attempt #\(attempt)")
+                    let result = try? await LightSigner.handleRequest(
+                        privateKey: privateKey,
+                        requestEvent: event
+                    )
+                    print("[Clave] Handshake: processed method=\(result?.method ?? "?") status=\(result?.status ?? "?")")
+                    handshakeComplete = true
+                }
+            }
+
+            if handshakeComplete {
+                print("[Clave] Handshake complete after \(attempt) attempt(s)")
+                break
             }
         }
 
