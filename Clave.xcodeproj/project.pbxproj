@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		BD247C1AD3A7497E8DF29530 /* ClientPermissions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 894FE9FF88CD485ABCD31C05 /* ClientPermissions.swift */; };
+		DD90DE0C2D8944D08B23C606 /* ClientPermissions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 894FE9FF88CD485ABCD31C05 /* ClientPermissions.swift */; };
 		EF1963B89F3A6472380F1E0A /* LightRelay.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF3D7A5B2F8BD020005A6545 /* LightRelay.swift */; };
 		EF251FEC744434349FD7256D /* P256K in Frameworks */ = {isa = PBXBuildFile; productRef = EF609A96DAD7E5693CA7EE4D /* P256K */; };
 		EF304CFAA8D958E7CCDF01AD /* LightCrypto.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF3D7A592F8BD020005A6545 /* LightCrypto.swift */; };
@@ -25,13 +27,13 @@
 		EF3D7A722F8BD1C4005A6545 /* SharedKeychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF3D7A5E2F8BD020005A6545 /* SharedKeychain.swift */; };
 		EF56291E7860E39D54142281 /* SharedModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFCA55B463A619311A35AF3C /* SharedModels.swift */; };
 		EF6058BFB67AD8970BBE8953 /* LightEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF3D7A5A2F8BD020005A6545 /* LightEvent.swift */; };
-		DD90DE0C2D8944D08B23C606 /* ClientPermissions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 894FE9FF88CD485ABCD31C05 /* ClientPermissions.swift */; };
-		BD247C1AD3A7497E8DF29530 /* ClientPermissions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 894FE9FF88CD485ABCD31C05 /* ClientPermissions.swift */; };
 		EF85F076F6C02095C4B6D9C4 /* LightSigner.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF3D7A5C2F8BD020005A6545 /* LightSigner.swift */; };
 		EFAF49B35F7A4241A65DCD89 /* SharedStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFEE4316AC522CDDA35AFAC1 /* SharedStorage.swift */; };
 		EFBF443D3DA775A267700410 /* Bech32.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF3D7A582F8BD020005A6545 /* Bech32.swift */; };
 		EFC7FD75109694C0A7F86D26 /* SharedModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFCA55B463A619311A35AF3C /* SharedModels.swift */; };
 		EFE12D1EC4CE48622767D427 /* SharedStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFEE4316AC522CDDA35AFAC1 /* SharedStorage.swift */; };
+		6D2C503B9EF64C8EA5101CDB /* NostrConnectParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34B139A8E147475F9B40B3D5 /* NostrConnectParser.swift */; };
+		006B17A84C114EDF9B129CAE /* NostrConnectParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34B139A8E147475F9B40B3D5 /* NostrConnectParser.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -73,6 +75,8 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		894FE9FF88CD485ABCD31C05 /* ClientPermissions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClientPermissions.swift; sourceTree = "<group>"; };
+		34B139A8E147475F9B40B3D5 /* NostrConnectParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NostrConnectParser.swift; sourceTree = "<group>"; };
 		EF3D7A0F2F8BCAE3005A6545 /* Clave.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Clave.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		EF3D7A1C2F8BCAE6005A6545 /* ClaveTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ClaveTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		EF3D7A262F8BCAE6005A6545 /* ClaveUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ClaveUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -87,7 +91,6 @@
 		EF3D7A5F2F8BD020005A6545 /* SignerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignerService.swift; sourceTree = "<group>"; };
 		EFCA55B463A619311A35AF3C /* SharedModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedModels.swift; sourceTree = "<group>"; };
 		EFEE4316AC522CDDA35AFAC1 /* SharedStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedStorage.swift; sourceTree = "<group>"; };
-		894FE9FF88CD485ABCD31C05 /* ClientPermissions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClientPermissions.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -199,6 +202,7 @@
 			children = (
 				EF3D7A582F8BD020005A6545 /* Bech32.swift */,
 				894FE9FF88CD485ABCD31C05 /* ClientPermissions.swift */,
+				34B139A8E147475F9B40B3D5 /* NostrConnectParser.swift */,
 				EF3D7A592F8BD020005A6545 /* LightCrypto.swift */,
 				EF3D7A5A2F8BD020005A6545 /* LightEvent.swift */,
 				EF3D7A5B2F8BD020005A6545 /* LightRelay.swift */,
@@ -405,6 +409,7 @@
 				EFE12D1EC4CE48622767D427 /* SharedStorage.swift in Sources */,
 				EFBF443D3DA775A267700410 /* Bech32.swift in Sources */,
 				DD90DE0C2D8944D08B23C606 /* ClientPermissions.swift in Sources */,
+				6D2C503B9EF64C8EA5101CDB /* NostrConnectParser.swift in Sources */,
 				EF304CFAA8D958E7CCDF01AD /* LightCrypto.swift in Sources */,
 				EF6058BFB67AD8970BBE8953 /* LightEvent.swift in Sources */,
 				EF1963B89F3A6472380F1E0A /* LightRelay.swift in Sources */,
@@ -440,6 +445,7 @@
 				EF56291E7860E39D54142281 /* SharedModels.swift in Sources */,
 				EFAF49B35F7A4241A65DCD89 /* SharedStorage.swift in Sources */,
 				BD247C1AD3A7497E8DF29530 /* ClientPermissions.swift in Sources */,
+				006B17A84C114EDF9B129CAE /* NostrConnectParser.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
