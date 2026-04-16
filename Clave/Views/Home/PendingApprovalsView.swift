@@ -4,15 +4,6 @@ struct PendingApprovalsView: View {
     @Environment(AppState.self) private var appState
     @State private var processing: Set<String> = []
 
-    private let knownKinds: [Int: String] = [
-        0: "Profile Metadata",
-        1: "Short Note",
-        3: "Contact List",
-        5: "Deletion",
-        7: "Reaction",
-        30023: "Long-form Article"
-    ]
-
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
@@ -120,10 +111,7 @@ struct PendingApprovalsView: View {
     }
 
     private func kindLabel(_ kind: Int) -> String {
-        if let name = knownKinds[kind] {
-            return "Kind \(kind) — \(name)"
-        }
-        return "Kind \(kind)"
+        KnownKinds.label(for: kind)
     }
 
     private func truncatedPubkey(_ hex: String) -> String {

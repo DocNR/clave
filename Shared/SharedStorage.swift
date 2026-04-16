@@ -89,7 +89,7 @@ enum SharedStorage {
 
     static func getProtectedKinds() -> Set<Int> {
         guard let arr = defaults.array(forKey: SharedConstants.blockedKindsKey) as? [Int] else {
-            return [0, 3, 5]
+            return [0, 3, 5, 10002, 30078]
         }
         return Set(arr)
     }

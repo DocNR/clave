@@ -5,12 +5,6 @@ struct ProtectedKindsEditor: View {
     @State private var newKindText = ""
     @State private var kindToRemove: Int?
 
-    private let knownKinds: [Int: String] = [
-        0: "Profile Metadata",
-        3: "Contact List",
-        5: "Deletion"
-    ]
-
     var body: some View {
         List {
             Section {
@@ -18,7 +12,7 @@ struct ProtectedKindsEditor: View {
                     VStack(alignment: .leading) {
                         Text("Kind \(kind)")
                             .font(.body.bold())
-                        if let label = knownKinds[kind] {
+                        if let label = KnownKinds.names[kind] {
                             Text(label)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
@@ -76,7 +70,7 @@ struct ProtectedKindsEditor: View {
             }
         } message: {
             if let kind = kindToRemove {
-                let label = knownKinds[kind].map { " (\($0))" } ?? ""
+                let label = KnownKinds.names[kind].map { " (\($0))" } ?? ""
                 Text("Kind \(kind)\(label) will be auto-signed without your approval.")
             }
         }
