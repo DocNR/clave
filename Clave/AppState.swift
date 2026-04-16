@@ -333,6 +333,18 @@ final class AppState {
            let eventDict = try? JSONSerialization.jsonObject(with: eventData) as? [String: Any] {
             let accepted = try await relay.publishEvent(event: eventDict)
             print("[Clave] Connect response published to \(relayURL) — accepted: \(accepted)")
+
+            // Log the connect activity so it appears in the Activity tab
+            let entry = ActivityEntry(
+                id: UUID().uuidString,
+                method: "connect",
+                eventKind: nil,
+                clientPubkey: parsedURI.clientPubkey,
+                timestamp: Date().timeIntervalSince1970,
+                status: accepted ? "signed" : "error",
+                errorMessage: accepted ? nil : "Relay rejected connect response"
+            )
+            SharedStorage.logActivity(entry)
         } else {
             print("[Clave] Failed to serialize connect event for publishing")
         }
