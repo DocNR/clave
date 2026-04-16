@@ -9,6 +9,8 @@ struct ConnectSheet: View {
     @State private var showApproval = false
     @State private var showQR = false
     @State private var copiedBunker = false
+    @State private var isConnecting = false
+    @State private var connectionError: String?
 
     var body: some View {
         NavigationStack {
@@ -28,6 +30,53 @@ struct ConnectSheet: View {
             }
             .sheet(isPresented: $showQR) {
                 QRCodeView(content: appState.bunkerURI)
+            }
+            .sheet(isPresented: $showApproval) {
+                if let uri = parsedURI {
+                    ApprovalSheet(parsedURI: uri) { permissions in
+                        isConnecting = true
+                        connectionError = nil
+                        Task {
+                            do {
+                                try await appState.handleNostrConnect(parsedURI: uri, permissions: permissions)
+                                await MainActor.run {
+                                    isConnecting = false
+                                    dismiss()
+                                }
+                            } catch {
+                                await MainActor.run {
+                                    connectionError = error.localizedDescription
+                                    isConnecting = false
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .overlay {
+                if isConnecting {
+                    ZStack {
+                        Color.black.opacity(0.4)
+                            .ignoresSafeArea()
+                        VStack(spacing: 16) {
+                            ProgressView()
+                                .controlSize(.large)
+                            Text("Connecting...")
+                                .font(.headline)
+                                .foregroundStyle(.white)
+                        }
+                        .padding(32)
+                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+                    }
+                }
+            }
+            .alert("Connection Failed", isPresented: .init(
+                get: { connectionError != nil },
+                set: { if !$0 { connectionError = nil } }
+            )) {
+                Button("OK") { connectionError = nil }
+            } message: {
+                Text(connectionError ?? "Unknown error")
             }
         }
     }

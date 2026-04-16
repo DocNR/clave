@@ -4,6 +4,22 @@ import NostrSDK
 import Observation
 import UIKit
 
+enum ClaveError: LocalizedError {
+    case noSignerKey
+    case noRelay
+    case serializationFailed
+    case invalidPubkey
+
+    var errorDescription: String? {
+        switch self {
+        case .noSignerKey: return "No signer key configured"
+        case .noRelay: return "No relay specified"
+        case .serializationFailed: return "Failed to build response"
+        case .invalidPubkey: return "Invalid client public key"
+        }
+    }
+}
+
 struct CachedProfile: Codable {
     var displayName: String?
     var pictureURL: String?
@@ -261,6 +277,94 @@ final class AppState {
     func denyPendingRequest(_ request: PendingRequest) {
         SharedStorage.removePendingRequest(id: request.id)
         refreshPendingRequests()
+    }
+
+    /// Perform the nostrconnect:// handshake
+    func handleNostrConnect(
+        parsedURI: NostrConnectParser.ParsedURI,
+        permissions: ClientPermissions
+    ) async throws {
+        guard let nsec = SharedKeychain.loadNsec() else {
+            throw ClaveError.noSignerKey
+        }
+        let privateKey = try Bech32.decodeNsec(nsec)
+        let signerPubkey = try LightEvent.pubkeyHex(from: privateKey)
+
+        // Save client permissions
+        SharedStorage.saveClientPermissions(permissions)
+
+        // Connect to client's relay
+        guard let relayURL = parsedURI.relays.first else {
+            throw ClaveError.noRelay
+        }
+        let relay = LightRelay(url: relayURL)
+        try await relay.connect(timeout: 10.0)
+
+        // Build connect response: {"id": "<random>", "result": "<secret>"}
+        let responseId = UUID().uuidString
+        let responseDict: [String: Any] = ["id": responseId, "result": parsedURI.secret]
+        guard let responseData = try? JSONSerialization.data(withJSONObject: responseDict),
+              let responseJSON = String(data: responseData, encoding: .utf8) else {
+            relay.disconnect()
+            throw ClaveError.serializationFailed
+        }
+
+        // Encrypt with NIP-44 to client pubkey
+        guard let clientPubkeyData = Data(hexString: parsedURI.clientPubkey) else {
+            relay.disconnect()
+            throw ClaveError.invalidPubkey
+        }
+        let encrypted = try LightCrypto.nip44Encrypt(
+            privateKey: privateKey,
+            publicKey: clientPubkeyData,
+            plaintext: responseJSON
+        )
+
+        // Sign and publish connect response
+        let connectEvent = try LightEvent.sign(
+            privateKey: privateKey,
+            kind: 24133,
+            content: encrypted,
+            tags: [["p", parsedURI.clientPubkey]]
+        )
+
+        if let eventData = connectEvent.toJSON().data(using: .utf8),
+           let eventDict = try? JSONSerialization.jsonObject(with: eventData) as? [String: Any] {
+            _ = try await relay.publishEvent(event: eventDict)
+        }
+
+        // Listen briefly for switch_relays from client (up to 15s)
+        let now = Int(Date().timeIntervalSince1970)
+        let filter: [String: Any] = [
+            "kinds": [24133],
+            "#p": [signerPubkey],
+            "since": now - 5,
+            "limit": 5
+        ]
+
+        for _ in 0..<3 {
+            try await Task.sleep(nanoseconds: 5_000_000_000)
+            let events = try await relay.fetchEvents(filter: filter, timeout: 5.0)
+            for event in events {
+                guard let pubkey = event["pubkey"] as? String,
+                      pubkey == parsedURI.clientPubkey,
+                      let content = event["content"] as? String else { continue }
+                if let decrypted = try? LightCrypto.decrypt(
+                    privateKey: privateKey,
+                    publicKey: clientPubkeyData,
+                    payload: content
+                ), decrypted.contains("switch_relays") {
+                    _ = try? await LightSigner.handleRequest(
+                        privateKey: privateKey,
+                        requestEvent: event
+                    )
+                    relay.disconnect()
+                    return
+                }
+            }
+        }
+
+        relay.disconnect()
     }
 
     func registerWithProxy(completion: ((Bool, String) -> Void)? = nil) {
