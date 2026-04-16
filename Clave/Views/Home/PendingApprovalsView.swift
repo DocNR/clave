@@ -60,27 +60,36 @@ struct PendingApprovalsView: View {
             }
 
             let isProcessing = processing.contains(request.id)
-            HStack(spacing: 8) {
-                Button {
-                    approve(request)
-                } label: {
-                    Label("Approve", systemImage: "checkmark")
-                        .font(.caption)
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(.green)
-                .disabled(isProcessing)
+            VStack(spacing: 8) {
+                HStack(spacing: 8) {
+                    Button { approve(request) } label: {
+                        Label("Approve", systemImage: "checkmark")
+                            .font(.caption)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.green)
+                    .disabled(isProcessing)
 
-                Button {
-                    appState.denyPendingRequest(request)
-                } label: {
-                    Label("Deny", systemImage: "xmark")
-                        .font(.caption)
-                        .frame(maxWidth: .infinity)
+                    Button { appState.denyPendingRequest(request) } label: {
+                        Label("Deny", systemImage: "xmark")
+                            .font(.caption)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(isProcessing)
                 }
-                .buttonStyle(.bordered)
-                .disabled(isProcessing)
+
+                if request.eventKind != nil {
+                    Button { alwaysAllow(request) } label: {
+                        Label("Always Allow This Kind", systemImage: "checkmark.shield")
+                            .font(.caption)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.blue)
+                    .disabled(isProcessing)
+                }
             }
 
             if isProcessing {
@@ -95,6 +104,15 @@ struct PendingApprovalsView: View {
         }
         .padding(10)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func alwaysAllow(_ request: PendingRequest) {
+        if let kind = request.eventKind,
+           var perms = SharedStorage.getClientPermissions(for: request.clientPubkey) {
+            perms.kindOverrides[kind] = true
+            SharedStorage.saveClientPermissions(perms)
+        }
+        approve(request)
     }
 
     private func approve(_ request: PendingRequest) {
