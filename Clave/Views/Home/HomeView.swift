@@ -2,13 +2,10 @@ import SwiftUI
 
 struct HomeView: View {
     @Environment(AppState.self) private var appState
-    @State private var clients: [ConnectedClient] = []
+    @State private var clients: [ClientPermissions] = []
     @State private var activityLog: [ActivityEntry] = []
-    @State private var showQR = false
-    @State private var copiedBunker = false
-    @State private var clientToUnpair: ConnectedClient?
-    @State private var clientToRename: ConnectedClient?
-    @State private var renameText = ""
+    @State private var showConnectSheet = false
+    @State private var clientToUnpair: ClientPermissions?
     @Environment(\.scenePhase) private var scenePhase
 
     private var signedTodayCount: Int {
@@ -20,7 +17,7 @@ struct HomeView: View {
         appState.pendingRequests.count
     }
 
-    private var sortedClients: [ConnectedClient] {
+    private var sortedClients: [ClientPermissions] {
         clients.sorted { $0.lastSeen > $1.lastSeen }
     }
 
@@ -45,15 +42,6 @@ struct HomeView: View {
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
 
-                // Bunker URI
-                Section {
-                    bunkerCard
-                        .padding(.bottom, 8)
-                }
-                .listRowInsets(EdgeInsets())
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
-
                 // Stats
                 Section {
                     statsRow
@@ -69,19 +57,14 @@ struct HomeView: View {
                         emptyClientsView
                     } else {
                         ForEach(sortedClients) { client in
-                            clientRow(client)
-                                .contentShape(Rectangle())
-                                .onTapGesture {
-                                    renameText = client.name ?? ""
-                                    clientToRename = client
-                                }
+                            NavigationLink(destination: ClientDetailView(pubkey: client.pubkey)) {
+                                clientRow(client)
+                            }
                         }
                         .onDelete { indexSet in
                             for index in indexSet {
                                 let client = sortedClients[index]
-                                if SharedStorage.isClientPaired(client.pubkey) {
-                                    clientToUnpair = client
-                                }
+                                clientToUnpair = client
                             }
                         }
                     }
@@ -94,6 +77,15 @@ struct HomeView: View {
             }
             .listStyle(.plain)
             .navigationTitle("Clave")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showConnectSheet = true
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                }
+            }
             .onAppear { refreshData() }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active { refreshData() }
@@ -101,8 +93,8 @@ struct HomeView: View {
             .onReceive(NotificationCenter.default.publisher(for: .signingCompleted)) { _ in
                 refreshData()
             }
-            .sheet(isPresented: $showQR) {
-                QRCodeView(content: appState.bunkerURI)
+            .sheet(isPresented: $showConnectSheet) {
+                ConnectSheet()
             }
             .alert("Unpair Client?", isPresented: Binding(
                 get: { clientToUnpair != nil },
@@ -122,24 +114,6 @@ struct HomeView: View {
                 }
             } message: {
                 Text("This client will need a new bunker URI with a fresh secret to reconnect.")
-            }
-            .alert("Rename Client", isPresented: Binding(
-                get: { clientToRename != nil },
-                set: { if !$0 { clientToRename = nil } }
-            )) {
-                TextField("Client name", text: $renameText)
-                Button("Save") {
-                    if let client = clientToRename {
-                        SharedStorage.renameClient(pubkey: client.pubkey, name: renameText.isEmpty ? nil : renameText)
-                        refreshData()
-                    }
-                    clientToRename = nil
-                }
-                Button("Cancel", role: .cancel) {
-                    clientToRename = nil
-                }
-            } message: {
-                Text("Give this client a name so you can identify it.")
             }
         }
     }
@@ -208,73 +182,6 @@ struct HomeView: View {
         return String(npub.prefix(12)) + "..." + String(npub.suffix(6))
     }
 
-    // MARK: - Bunker URI Card
-
-    private var bunkerCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Bunker Address")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Button {
-                    appState.rotateBunkerSecret()
-                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                } label: {
-                    Label("New Secret", systemImage: "arrow.clockwise")
-                        .font(.caption2)
-                }
-            }
-
-            Text(appState.bunkerURI)
-                .font(.system(.caption2, design: .monospaced))
-                .foregroundStyle(.white)
-                .lineLimit(3)
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color(.systemGray6).opacity(0.3))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-
-            HStack(spacing: 12) {
-                Button {
-                    UIPasteboard.general.string = appState.bunkerURI
-                    copiedBunker = true
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) { copiedBunker = false }
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: copiedBunker ? "checkmark" : "doc.on.doc")
-                        Text(copiedBunker ? "Copied" : "Copy")
-                    }
-                    .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(copiedBunker ? .green : .accentColor)
-
-                Button {
-                    showQR = true
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "qrcode")
-                        Text("QR Code")
-                    }
-                    .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-            }
-
-            Text("Each secret is single-use. Tap New Secret to generate a fresh pairing link.")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-        }
-        .padding()
-        .background {
-            RoundedRectangle(cornerRadius: 16)
-                .fill(Color(.systemGray6))
-        }
-        .padding(.horizontal)
-    }
-
     // MARK: - Stats Row
 
     private var statsRow: some View {
@@ -306,38 +213,41 @@ struct HomeView: View {
     // MARK: - Connected Clients
 
     private var emptyClientsView: some View {
-        HStack {
-            Spacer()
-            VStack(spacing: 8) {
-                Image(systemName: "person.crop.circle.badge.questionmark")
-                    .font(.title)
-                    .foregroundStyle(.tertiary)
-                Text("No clients connected yet")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+        VStack(spacing: 12) {
+            Image(systemName: "person.crop.circle.badge.plus")
+                .font(.system(size: 40))
+                .foregroundStyle(.tertiary)
+            Text("No clients connected")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            Button("Connect a Client") {
+                showConnectSheet = true
             }
-            .padding(.vertical, 24)
-            Spacer()
+            .buttonStyle(.borderedProminent)
         }
+        .padding(.vertical, 32)
     }
 
-    private func clientRow(_ client: ConnectedClient) -> some View {
-        let isPaired = SharedStorage.isClientPaired(client.pubkey)
-        return HStack(spacing: 12) {
-            AvatarView(pubkeyHex: client.pubkey, size: 32)
+    private func clientRow(_ client: ClientPermissions) -> some View {
+        HStack(spacing: 12) {
+            // Client image or fallback avatar
+            if let imageURL = client.imageURL, let url = URL(string: imageURL) {
+                AsyncImage(url: url) { image in
+                    image.resizable().scaledToFill()
+                } placeholder: {
+                    AvatarView(pubkeyHex: client.pubkey, size: 32)
+                }
+                .frame(width: 32, height: 32)
+                .clipShape(Circle())
+            } else {
+                AvatarView(pubkeyHex: client.pubkey, size: 32)
+            }
 
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(client.name ?? truncatedPubkey(client.pubkey))
                         .font(.subheadline)
-                    if isPaired {
-                        Text("Paired")
-                            .font(.caption2)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(.green.opacity(0.15), in: Capsule())
-                            .foregroundStyle(.green)
-                    }
+                    trustBadge(client.trustLevel)
                 }
                 Text("Last seen \(relativeTime(client.lastSeen))")
                     .font(.caption2)
@@ -354,10 +264,25 @@ struct HomeView: View {
         }
     }
 
+    private func trustBadge(_ level: TrustLevel) -> some View {
+        let (text, color): (String, Color) = switch level {
+        case .full: ("Full", .green)
+        case .medium: ("Medium", .blue)
+        case .low: ("Low", .orange)
+        }
+        return Text(text)
+            .font(.caption2)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(color.opacity(0.15), in: Capsule())
+            .foregroundStyle(color)
+    }
+
     // MARK: - Helpers
 
     private func refreshData() {
-        clients = SharedStorage.getConnectedClients()
+        SharedStorage.migrateIfNeeded()
+        clients = SharedStorage.getClientPermissions()
         activityLog = SharedStorage.getActivityLog()
         appState.refreshPendingRequests()
         appState.refreshBunkerSecret()
