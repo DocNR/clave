@@ -136,9 +136,15 @@ enum LightSigner {
 
                 switch method {
                 case "sign_event":
-                    if let kind = eventKind {
-                        allowed = perms.isKindAllowed(kind, protectedKinds: SharedStorage.getProtectedKinds())
+                    // Fail closed: if the event kind couldn't be parsed from params, reject.
+                    // Don't let a malformed/unparseable sign_event slip through the permission
+                    // check (audit finding D.5.2 — previously `allowed` stayed `true` if
+                    // extractEventKind returned nil).
+                    guard let kind = eventKind else {
+                        allowed = false
+                        break
                     }
+                    allowed = perms.isKindAllowed(kind, protectedKinds: SharedStorage.getProtectedKinds())
                 case "nip04_encrypt", "nip04_decrypt", "nip44_encrypt", "nip44_decrypt":
                     allowed = perms.isMethodAllowed(method)
                 case "connect", "ping", "get_public_key", "describe", "switch_relays":
