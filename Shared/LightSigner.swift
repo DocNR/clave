@@ -404,4 +404,30 @@ enum LightSigner {
         }
         relay.disconnect()
     }
+
+    /// Decrypt just enough of a kind:24133 event to determine its NIP-46 method.
+    /// Returns nil if the event is malformed, not addressed to us, or the JSON-RPC payload is invalid.
+    /// Used by the NSE + foreground signing loops to sort events so that `connect` requests are
+    /// processed before other methods within a single batch, eliminating the ordering race that
+    /// previously required the unpaired-22242 bypass.
+    static func peekMethod(privateKey: Data, event: [String: Any]) -> String? {
+        guard let senderPubkey = event["pubkey"] as? String,
+              let encryptedContent = event["content"] as? String,
+              let senderPubkeyData = Data(hexString: senderPubkey) else {
+            return nil
+        }
+        guard let plaintext = try? LightCrypto.decrypt(
+            privateKey: privateKey,
+            publicKey: senderPubkeyData,
+            payload: encryptedContent
+        ) else {
+            return nil
+        }
+        guard let data = plaintext.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let method = json["method"] as? String else {
+            return nil
+        }
+        return method
+    }
 }
