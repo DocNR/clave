@@ -21,7 +21,7 @@ enum SharedKeychain {
             kSecAttrService as String: SharedConstants.keychainService,
             kSecAttrAccount as String: SharedConstants.keychainAccount,
             kSecValueData as String: data,
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         ]
 
         let status = SecItemAdd(query as CFDictionary, nil)
