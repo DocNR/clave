@@ -40,7 +40,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
     ) {
         let token = deviceToken.map { String(format: "%02x", $0) }.joined()
-        logger.notice("[APNs] Device token: \(token, privacy: .public)")
+        logger.notice("[APNs] Device token: \(token, privacy: .private)")
         SharedConstants.sharedDefaults.set(token, forKey: SharedConstants.deviceTokenKey)
         // Registration with the proxy is handled by AppState.importKey/generateKey
         // (on first-time setup) and by the Settings → Register button (on demand).
