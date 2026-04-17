@@ -149,7 +149,18 @@ class NotificationService: UNNotificationServiceExtension {
             var lastPendingPubkey: String? = nil
             var lastPendingKind: Int? = nil
 
-            for event in events {
+            // Process connect requests before anything else so pairing state is
+            // established before sign_event/encrypt/decrypt requests in the same batch.
+            // Fixes the out-of-order-fetch race that previously required a kind:22242
+            // exemption for unpaired clients.
+            let sortedEvents = events.sorted { a, b in
+                let aIsConnect = LightSigner.peekMethod(privateKey: privateKey, event: a) == "connect"
+                let bIsConnect = LightSigner.peekMethod(privateKey: privateKey, event: b) == "connect"
+                if aIsConnect != bIsConnect { return aIsConnect }
+                return (a["created_at"] as? Int ?? 0) < (b["created_at"] as? Int ?? 0)
+            }
+
+            for event in sortedEvents {
                 guard let eventPubkey = event["pubkey"] as? String,
                       eventPubkey != signerPubkey,
                       let eventId = event["id"] as? String,

@@ -109,13 +109,15 @@ enum LightSigner {
         } else {
             let perms = SharedStorage.getClientPermissions(for: senderPubkey)
 
-            // NIP-42 relay auth (kind 22242) is a chicken-and-egg: clients need to sign
-            // the auth challenge before they can publish anything (including connect) to
-            // an auth-required relay. Allow kind 22242 sign_event through without pairing.
-            let isRelayAuthSign = (method == "sign_event" && eventKind == 22242)
-
-            if perms == nil && !isRelayAuthSign {
-                // Non-connect method from an unknown client — reject
+            if perms == nil {
+                // Unpaired clients may ONLY send `connect` — everything else (including kind:22242
+                // NIP-42 relay auth) requires a prior successful pair via bunker secret or
+                // nostrconnect handshake. Historical note: we briefly exempted kind:22242 here to
+                // avoid a chicken-and-egg during initial auth, but that was a security bug
+                // (audit 2026-04-17 finding D.5.1 — attacker-controlled relay URL + challenge
+                // could be signed, enabling NIP-42 impersonation on AUTH-gated relays).
+                // The ordering race it worked around is now handled by NotificationService +
+                // ClaveApp sorting `connect` events to the front of each batch before dispatch.
                 logger.notice("[LightSigner] Rejecting unpaired client for method \(method, privacy: .public)")
                 let result = RequestResult(method: method, eventKind: eventKind, clientPubkey: senderPubkey,
                                            status: "blocked", errorMessage: "Client not paired")
@@ -126,10 +128,6 @@ enum LightSigner {
                     senderPubkey: senderPubkey, isNip04: isNip04
                 )
                 return result
-            }
-
-            if isRelayAuthSign && perms == nil {
-                logger.notice("[LightSigner] Allowing kind 22242 (NIP-42 relay auth) from unpaired client")
             }
 
             // Per-client permission enforcement

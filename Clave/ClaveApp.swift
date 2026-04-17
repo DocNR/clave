@@ -128,7 +128,16 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             var processedIDs = Set(SharedConstants.sharedDefaults.stringArray(forKey: processedKey) ?? [])
 
             var handledCount = 0
-            for event in events {
+            // Process connects first so pairing state exists before other methods.
+            // Mirrors NotificationService.swift; fixes the same intra-batch race.
+            let sortedEvents = events.sorted { a, b in
+                let aIsConnect = LightSigner.peekMethod(privateKey: privateKey, event: a) == "connect"
+                let bIsConnect = LightSigner.peekMethod(privateKey: privateKey, event: b) == "connect"
+                if aIsConnect != bIsConnect { return aIsConnect }
+                return (a["created_at"] as? Int ?? 0) < (b["created_at"] as? Int ?? 0)
+            }
+
+            for event in sortedEvents {
                 guard let eventPubkey = event["pubkey"] as? String,
                       eventPubkey != signerPubkey,
                       let eventId = event["id"] as? String,
