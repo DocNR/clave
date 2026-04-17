@@ -112,7 +112,16 @@ struct ConnectSheet: View {
 
             HStack(spacing: 12) {
                 Button {
-                    UIPasteboard.general.string = appState.bunkerURI
+                    // Local-only + 120s expiration: the bunker URI embeds the active pairing
+                    // secret, so don't sync via Universal Clipboard and auto-clear after 2 min
+                    // (audit finding A10.2).
+                    UIPasteboard.general.setItems(
+                        [["public.utf8-plain-text": appState.bunkerURI]],
+                        options: [
+                            .localOnly: true,
+                            .expirationDate: Date().addingTimeInterval(120)
+                        ]
+                    )
                     copiedBunker = true
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                     DispatchQueue.main.asyncAfter(deadline: .now() + 2) { copiedBunker = false }

@@ -37,7 +37,16 @@ struct ExportKeySheet: View {
                             .textSelection(.enabled)
 
                         Button {
-                            UIPasteboard.general.string = nsec
+                            // Local-only + 120s expiration: avoid Universal Clipboard syncing
+                            // the nsec to other Apple devices, and auto-clear after 2 minutes so
+                            // it doesn't sit in the pasteboard indefinitely (audit finding A10.2).
+                            UIPasteboard.general.setItems(
+                                [["public.utf8-plain-text": nsec]],
+                                options: [
+                                    .localOnly: true,
+                                    .expirationDate: Date().addingTimeInterval(120)
+                                ]
+                            )
                             copied = true
                             UIImpactFeedbackGenerator(style: .light).impactOccurred()
                             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { copied = false }
