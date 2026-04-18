@@ -328,9 +328,12 @@ final class AppState {
 
         // Publish connect response with retry — ephemeral events (kind 24133) aren't
         // stored by relays, so the client must be subscribed at the moment we publish.
-        // Retry up to 3 times with 2s gaps, stopping early if we hear back from the client.
+        // Retry up to 3 times with 2s gaps. We keep listening for the full window so
+        // the client can finish its full RPC handshake (connect → get_public_key →
+        // switch_relays) before we disconnect.
         var handshakeComplete = false
         var activityLogged = false
+        var seenEventIds = Set<String>()
 
         for _ in 1...3 {
             // Build a fresh event each attempt (new created_at = new event ID)
@@ -352,7 +355,14 @@ final class AppState {
                 tags: [["p", parsedURI.clientPubkey]]
             )
 
-            if let eventData = connectEvent.toJSON().data(using: .utf8),
+            // Publish the connect response only until we see a reply. After that
+            // we keep listening without republishing — the client is already paired
+            // and we just need to service its follow-up RPCs (connect/ack,
+            // get_public_key, switch_relays). Breaking early used to disconnect
+            // before switch_relays could run, which stranded the client on the URI
+            // relays instead of migrating it to relay.powr.build.
+            if !handshakeComplete,
+               let eventData = connectEvent.toJSON().data(using: .utf8),
                let eventDict = try? JSONSerialization.jsonObject(with: eventData) as? [String: Any] {
                 let acceptedCount = await publishEventToRelays(connectedRelays, event: eventDict)
 
@@ -382,7 +392,6 @@ final class AppState {
                 "limit": 10
             ]
             let events = await fetchEventsFromRelays(connectedRelays, filter: listenFilter, timeout: 3.0)
-            var seenEventIds = Set<String>()
             for event in events {
                 guard let eventId = event["id"] as? String, seenEventIds.insert(eventId).inserted else { continue }
                 guard let pubkey = event["pubkey"] as? String,
@@ -395,9 +404,9 @@ final class AppState {
                 handshakeComplete = true
             }
 
-            if handshakeComplete {
-                break
-            }
+            // Do NOT break on handshakeComplete — keep listening so the client
+            // can finish its get_public_key + switch_relays RPC sequence. The
+            // retry cap (3 iterations) bounds the total wait at ~15s.
         }
     }
 
