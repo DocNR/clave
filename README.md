@@ -2,32 +2,34 @@
 
 **iOS NIP-46 remote signer. Your Nostr private key stays in the iPhone Keychain — clients sign events via encrypted push, without the app being open.**
 
-[![TestFlight](https://img.shields.io/badge/iOS-TestFlight_beta-blue)](https://testflight.apple.com/) [![Platform](https://img.shields.io/badge/platform-iOS_17.6+-lightgrey)]()
-
 ## What it solves
 
-Every Nostr app you use needs to sign events as you. The usual options are both bad:
+Every Nostr app you use needs to sign events as you. The usual options are all bad:
 
 - **Paste your nsec into every client.** Now N apps know your key. One compromise and your identity is gone — Nostr keys can't be rotated like passwords.
 - **Use a web extension or hosted signer.** Only works when that tab/server is up. Doesn't help on mobile. Hosted signers mean someone else holds your key.
+- **Use a browser PWA with URL-scheme intents.** On iOS, scheme-based hand-offs to a signer are unreliable compared to Android's intent system, and break entirely in standalone PWA mode.
 
-Clave is a third option. Your nsec lives in the iOS Keychain, never leaves the device. When a client wants to sign an event, it sends an encrypted request over Nostr, a push notification wakes Clave's background extension for ~30 seconds, and the extension decrypts, checks your permission rules, signs, and publishes the response. You control which clients can sign which event kinds.
+On Android, [Amber](https://github.com/greenart7c3/Amber) has been the clean answer for years: a NIP-46 signer app with the key in device storage, woken on demand to sign. The iOS side of the ecosystem didn't have an equivalent. Every attempt ran into the same wall — iOS aggressively suspends backgrounded apps, so a signer that relies on a persistent connection simply can't run the way Amber does. Earlier attempts leaned on ugly workarounds:
 
-Similar in spirit to [Amber on Android](https://github.com/greenart7c3/Amber) — but getting the same architecture working on iOS is harder, because iOS aggressively suspends background apps. Clave works around that via a small server-side push proxy + iOS Notification Service Extension.
+- Requiring the app to stay in the foreground (breaks every multitasking flow)
+- Playing a silent audio track in the background so iOS won't suspend the process (battery drain, fragile across OS updates, App Store review risk)
+- Falling back to hosted signers or browser extensions, which aren't mobile-native
+
+Clave uses iOS's own native mechanism instead: a server-side push proxy sends an APNs push, which wakes a Notification Service Extension for up to ~30 seconds. The NSE decrypts the signing request, checks your per-client permission rules, signs with the nsec in the Keychain, publishes the response, and goes back to sleep. No foreground requirement, no hacks, no PWA intent gymnastics.
+
+Your nsec never leaves the device. You control which clients can sign which event kinds.
 
 ## Status
 
-**Beta.** In TestFlight internal, external review pending. Not yet recommended for your main nsec — use a throwaway key while we finish external testing. Full pre-external-TestFlight security audit completed 2026-04-17 with 5 must-fix items resolved in build 9 ([audit report](../hq/clave/security-audits/)).
+**Beta.** TestFlight external beta live — use a throwaway nsec for now, not your main key. Pre-external-TestFlight security audit completed 2026-04-17 with 5 must-fix items resolved in build 9.
 
 What works end-to-end:
 
-- **`bunker://` pairing flow** — Clave generates a URI, you paste it into a client, first-use secret establishes the pairing
-- **`nostrconnect://` pairing flow** — client generates a URI, you paste it into Clave, approval sheet sets trust level + per-kind permissions
-- **Per-client permissions** — Full / Medium / Low trust levels, plus per-kind overrides; protected kinds (0, 3, 5, 10002, 30078) prompt for approval on Medium trust by default
+- **Both pairing flows** — `bunker://` (Clave generates URI) and `nostrconnect://` (client generates URI, Clave approves)
+- **Per-client permissions** — Full / Medium / Low trust with per-kind overrides; protected kinds (0, 3, 5, 10002, 30078) require approval on Medium trust
 - **NIP-46 methods:** `connect`, `sign_event`, `get_public_key`, `ping`, `describe`, `switch_relays`, `nip04_encrypt`, `nip04_decrypt`, `nip44_encrypt`, `nip44_decrypt`
-- **Activity log** — every sign + connect event logged, bounded to 200 entries, no plaintext / keys stored
-- **Client detail view** — rename, change trust, view activity, unpair
-- **Silent push suppression** — successful signs don't pop a notification; only pending approvals and errors do
+- **Activity log + client detail view** — rename, change trust, review per-client history, unpair
 - **Verified with:** Nostur, noStrudel, zap.cooking
 
 Known limitations:
@@ -92,15 +94,11 @@ The magic is step 3–4: the proxy never sees the private key or the decrypted c
 
 Unpaired clients are rejected for all methods. There is no "auto-sign for any caller" mode.
 
-**Audit.** The codebase underwent a pre-external-TestFlight security audit on 2026-04-17: NIP-44 v2 primitives, Schnorr, NIP-98, permission dispatch, proxy-side verification, supply-chain + build integrity, operational security on the Dell host. Audit report is tracked in the `hq` companion repo under `security-audits/`. A weekly triage routine watches for drift on security-sensitive files; a full re-audit runs quarterly.
-
 ## Repository layout
 
 | Path | Purpose |
 |---|---|
 | `Clave/` | SwiftUI app. Onboarding, key import/generate/delete/export, settings, connect UI, approval sheets, activity log, client detail |
-| `Clave/ClaveApp.swift` | App entrypoint + APNs delegate + foreground push handler |
-| `Clave/AppState.swift` | Observable app-level state, key lifecycle, proxy register/unregister, nostrconnect handshake |
 | `ClaveNSE/` | Notification Service Extension. Wakes on push, decrypts request, signs, publishes response |
 | `Shared/` | Code shared between main app and NSE (see below) |
 | `relay-proxy/` | Node.js push proxy. Subscribes to relay, dispatches APNs pushes, authenticates registration via NIP-98 |
@@ -108,7 +106,9 @@ Unpaired clients are rejected for all methods. There is no "auto-sign for any ca
 
 ### The `Shared/` crypto stack
 
-The NSE has a tight budget (~24 MB RAM, 30 s wall-clock). The obvious choice — rust-nostr-swift — compiles to a binary that's too heavy. So the signing path uses a lightweight stack built on CryptoKit (Apple's built-in framework) + `swift-secp256k1` (a thin Swift wrapper around Bitcoin Core's `libsecp256k1`):
+The NSE has a tight budget (~24 MB RAM, 30 s wall-clock). The main app uses [rust-nostr-swift](https://github.com/rust-nostr/nostr-sdk-swift) for full Nostr SDK functionality — most feature-complete option for Swift, with NIP-44 v2 / bech32 / relay client shared across the Rust core's other language bindings for better spec conformance. But its FFI binary is too heavy for the NSE. A pure-Swift alternative exists in [NostrSDK-iOS](https://github.com/nostr-sdk/nostr-sdk-ios); we went with rust-nostr-swift for the main app because of the shared-core spec conformance, and because the NSE needs a custom stack either way.
+
+So the signing path uses a lightweight stack built on CryptoKit (Apple's built-in framework) + [swift-secp256k1](https://github.com/21-DOT-DEV/swift-secp256k1) (a thin Swift wrapper around Bitcoin Core's `libsecp256k1`):
 
 | File | Responsibility |
 |---|---|
@@ -123,12 +123,6 @@ The NSE has a tight budget (~24 MB RAM, 30 s wall-clock). The obvious choice —
 | `SharedStorage.swift` | Activity log, pending approvals, connected clients, bunker secret rotation (all in shared UserDefaults / App Group) |
 | `SharedConstants.swift` | App group id, Keychain service name, default relay URL, default proxy URL |
 | `SharedModels.swift` | `ActivityEntry`, `PendingRequest`, `ConnectedClient` codable types |
-
-### Why four hand-written crypto files?
-
-- **`CryptoKit`** gives us SHA-256, HMAC-SHA256, HKDF scaffolding, and symmetric cipher building blocks — but it doesn't support the `secp256k1` curve (Apple chose `P-256` instead). So for Schnorr and NIP-44's ECDH we need…
-- **`swift-secp256k1`** — a small (~500 KB) Swift wrapper around Bitcoin Core's `libsecp256k1`. Gives us secp256k1 ECDH + BIP-340 Schnorr. The combination fits under the NSE memory budget; a full nostr SDK does not.
-- **`LightCrypto` + `LightEvent`** are thin application-level code built on top: wire the primitives together to match the NIP-44 v2, NIP-04, NIP-01, and BIP-340 specs exactly.
 
 ## Developer setup
 
@@ -246,8 +240,4 @@ Please report security issues responsibly per [SECURITY.md](SECURITY.md) — not
 
 ## Contributing
 
-This is early-stage beta. Issues and PRs welcome, especially around:
-- multi-relay publish for nostrconnect reliability
-- per-client sign dedup (currently multi-publishing clients like Nostur can trigger duplicate prompts — see BACKLOG)
-- macOS Catalyst / visionOS support
-- npub/nprofile handling in the client detail view
+Beta-stage; issues and PRs welcome. For larger changes, open an issue first to discuss.
