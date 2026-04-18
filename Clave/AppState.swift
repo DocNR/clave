@@ -280,7 +280,11 @@ final class AppState {
         refreshPendingRequests()
     }
 
-    /// Perform the nostrconnect:// handshake
+    /// Perform the nostrconnect:// handshake across all relays listed in the URI.
+    /// Why multi-relay: the client (per NIP-46) subscribes on every relay in its URI;
+    /// if we publish to only one and that relay drops the ephemeral kind:24133,
+    /// the client never sees our response. Publishing to all is best-effort — we
+    /// don't fail if some relays reject or are unreachable, we just need at least one.
     func handleNostrConnect(
         parsedURI: NostrConnectParser.ParsedURI,
         permissions: ClientPermissions
@@ -294,29 +298,37 @@ final class AppState {
         // Save client permissions
         SharedStorage.saveClientPermissions(permissions)
 
-        // Connect to client's relay
-        guard let relayURL = parsedURI.relays.first else {
+        guard !parsedURI.relays.isEmpty else {
             throw ClaveError.noRelay
         }
-        let relay = LightRelay(url: relayURL)
-        try await relay.connect(timeout: 10.0)
-
-        // Validate client pubkey before entering retry loop
         guard let clientPubkeyData = Data(hexString: parsedURI.clientPubkey) else {
-            relay.disconnect()
             throw ClaveError.invalidPubkey
+        }
+
+        // Connect to every URI relay in parallel, best-effort.
+        let connectedRelays = await connectToRelays(urls: parsedURI.relays, timeout: 10.0)
+        defer {
+            for relay in connectedRelays { relay.disconnect() }
+        }
+
+        // If zero relays connected, log the failure so the user sees it, then throw.
+        if connectedRelays.isEmpty {
+            let entry = ActivityEntry(
+                id: UUID().uuidString,
+                method: "connect",
+                eventKind: nil,
+                clientPubkey: parsedURI.clientPubkey,
+                timestamp: Date().timeIntervalSince1970,
+                status: "error",
+                errorMessage: "Could not connect to any relay"
+            )
+            SharedStorage.logActivity(entry)
+            throw ClaveError.noRelay
         }
 
         // Publish connect response with retry — ephemeral events (kind 24133) aren't
         // stored by relays, so the client must be subscribed at the moment we publish.
         // Retry up to 3 times with 2s gaps, stopping early if we hear back from the client.
-        let now = Int(Date().timeIntervalSince1970)
-        let listenFilter: [String: Any] = [
-            "kinds": [24133],
-            "#p": [signerPubkey],
-            "since": now - 10,
-            "limit": 10
-        ]
         var handshakeComplete = false
         var activityLogged = false
 
@@ -342,43 +354,50 @@ final class AppState {
 
             if let eventData = connectEvent.toJSON().data(using: .utf8),
                let eventDict = try? JSONSerialization.jsonObject(with: eventData) as? [String: Any] {
-                let accepted = try await relay.publishEvent(event: eventDict)
+                let acceptedCount = await publishEventToRelays(connectedRelays, event: eventDict)
 
                 if !activityLogged {
+                    let success = acceptedCount > 0
                     let entry = ActivityEntry(
                         id: UUID().uuidString,
                         method: "connect",
                         eventKind: nil,
                         clientPubkey: parsedURI.clientPubkey,
                         timestamp: Date().timeIntervalSince1970,
-                        status: accepted ? "signed" : "error",
-                        errorMessage: accepted ? nil : "Relay rejected connect response"
+                        status: success ? "signed" : "error",
+                        errorMessage: success ? nil : "All relays rejected connect response"
                     )
                     SharedStorage.logActivity(entry)
                     activityLogged = true
                 }
             }
 
-            // Wait then check for client response
+            // Wait then check for client response across all connected relays.
             try? await Task.sleep(nanoseconds: 2_000_000_000)
-            if let events = try? await relay.fetchEvents(filter: listenFilter, timeout: 3.0) {
-                for event in events {
-                    guard let pubkey = event["pubkey"] as? String,
-                          pubkey == parsedURI.clientPubkey else { continue }
-                    let _ = try? await LightSigner.handleRequest(
-                        privateKey: privateKey,
-                        requestEvent: event
-                    )
-                    handshakeComplete = true
-                }
+            let now = Int(Date().timeIntervalSince1970)
+            let listenFilter: [String: Any] = [
+                "kinds": [24133],
+                "#p": [signerPubkey],
+                "since": now - 10,
+                "limit": 10
+            ]
+            let events = await fetchEventsFromRelays(connectedRelays, filter: listenFilter, timeout: 3.0)
+            var seenEventIds = Set<String>()
+            for event in events {
+                guard let eventId = event["id"] as? String, seenEventIds.insert(eventId).inserted else { continue }
+                guard let pubkey = event["pubkey"] as? String,
+                      pubkey == parsedURI.clientPubkey else { continue }
+                let _ = try? await LightSigner.handleRequest(
+                    privateKey: privateKey,
+                    requestEvent: event
+                )
+                handshakeComplete = true
             }
 
             if handshakeComplete {
                 break
             }
         }
-
-        relay.disconnect()
     }
 
     func registerWithProxy(completion: ((Bool, String) -> Void)? = nil) {
