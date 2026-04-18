@@ -13,7 +13,12 @@ enum LightSigner {
         let errorMessage: String?
     }
 
-    static func handleRequest(privateKey: Data, requestEvent: [String: Any], skipProtection: Bool = false) async throws -> RequestResult {
+    static func handleRequest(
+        privateKey: Data,
+        requestEvent: [String: Any],
+        skipProtection: Bool = false,
+        responseRelays: [LightRelay]? = nil
+    ) async throws -> RequestResult {
         guard let senderPubkey = requestEvent["pubkey"] as? String,
               let encryptedContent = requestEvent["content"] as? String else {
             logger.error("[LightSigner] Invalid event: missing pubkey or content")
@@ -102,7 +107,8 @@ enum LightSigner {
                 try await sendErrorResponse(
                     requestId: requestId, error: "Invalid or missing bunker secret",
                     privateKey: privateKey, senderPubkeyData: senderPubkeyData,
-                    senderPubkey: senderPubkey, isNip04: isNip04
+                    senderPubkey: senderPubkey, isNip04: isNip04,
+                    responseRelays: responseRelays
                 )
                 return result
             }
@@ -125,7 +131,8 @@ enum LightSigner {
                 try await sendErrorResponse(
                     requestId: requestId, error: "Client not paired — send connect with valid bunker secret first",
                     privateKey: privateKey, senderPubkeyData: senderPubkeyData,
-                    senderPubkey: senderPubkey, isNip04: isNip04
+                    senderPubkey: senderPubkey, isNip04: isNip04,
+                    responseRelays: responseRelays
                 )
                 return result
             }
@@ -176,7 +183,8 @@ enum LightSigner {
                     try await sendErrorResponse(
                         requestId: requestId, error: "Permission denied — open Clave to approve",
                         privateKey: privateKey, senderPubkeyData: senderPubkeyData,
-                        senderPubkey: senderPubkey, isNip04: isNip04
+                        senderPubkey: senderPubkey, isNip04: isNip04,
+                        responseRelays: responseRelays
                     )
                     return result
                 }
@@ -226,22 +234,28 @@ enum LightSigner {
             tags: [["p", senderPubkey]]
         )
 
-        let relay = LightRelay(url: SharedConstants.relayURL)
-        try await relay.connect(timeout: 5.0)
-
         let eventJSON = responseEvent.toJSON()
         guard let eventData = eventJSON.data(using: .utf8),
               let eventDict = try? JSONSerialization.jsonObject(with: eventData) as? [String: Any] else {
             logger.error("[LightSigner] Failed to serialize event for publish")
-            relay.disconnect()
             let result = RequestResult(method: method, eventKind: eventKind, clientPubkey: senderPubkey,
                                        status: "error", errorMessage: "Publish serialization failed")
             logAndTrack(result: result, clientName: clientName)
             return result
         }
 
-        let accepted = try await relay.publishEvent(event: eventDict)
-        relay.disconnect()
+        let accepted: Bool
+        if let responseRelays = responseRelays, !responseRelays.isEmpty {
+            // nostrconnect handshake: publish to all already-connected URI relays.
+            // Best-effort — accepted if at least one relay took the event.
+            accepted = await publishResponseToRelays(responseRelays, event: eventDict)
+        } else {
+            // Bunker/NSE path: publish to the signer's primary relay (relay.powr.build).
+            let relay = LightRelay(url: SharedConstants.relayURL)
+            try await relay.connect(timeout: 5.0)
+            accepted = (try? await relay.publishEvent(event: eventDict)) ?? false
+            relay.disconnect()
+        }
 
         let status: String
         let errorMsg: String?
@@ -382,10 +396,28 @@ enum LightSigner {
         }
     }
 
+    /// Publish an event to multiple already-connected relays in parallel.
+    /// Returns true if at least one relay accepted the event.
+    private static func publishResponseToRelays(_ relays: [LightRelay], event: [String: Any]) async -> Bool {
+        await withTaskGroup(of: Bool.self) { group in
+            for relay in relays {
+                group.addTask {
+                    (try? await relay.publishEvent(event: event)) ?? false
+                }
+            }
+            var anyAccepted = false
+            for await ok in group {
+                if ok { anyAccepted = true }
+            }
+            return anyAccepted
+        }
+    }
+
     private static func sendErrorResponse(
         requestId: String, error: String,
         privateKey: Data, senderPubkeyData: Data,
-        senderPubkey: String, isNip04: Bool
+        senderPubkey: String, isNip04: Bool,
+        responseRelays: [LightRelay]? = nil
     ) async throws {
         let responseDict: [String: Any] = ["id": requestId, "error": error]
         guard let responseData = try? JSONSerialization.data(withJSONObject: responseDict),
@@ -399,14 +431,19 @@ enum LightSigner {
         }
 
         let event = try LightEvent.sign(privateKey: privateKey, kind: 24133, content: encrypted, tags: [["p", senderPubkey]])
-        let relay = LightRelay(url: SharedConstants.relayURL)
-        try await relay.connect(timeout: 5.0)
-
-        if let eventData = event.toJSON().data(using: .utf8),
-           let eventDict = try? JSONSerialization.jsonObject(with: eventData) as? [String: Any] {
-            _ = try await relay.publishEvent(event: eventDict)
+        guard let eventData = event.toJSON().data(using: .utf8),
+              let eventDict = try? JSONSerialization.jsonObject(with: eventData) as? [String: Any] else {
+            return
         }
-        relay.disconnect()
+
+        if let responseRelays = responseRelays, !responseRelays.isEmpty {
+            _ = await publishResponseToRelays(responseRelays, event: eventDict)
+        } else {
+            let relay = LightRelay(url: SharedConstants.relayURL)
+            try await relay.connect(timeout: 5.0)
+            _ = try? await relay.publishEvent(event: eventDict)
+            relay.disconnect()
+        }
     }
 
     /// Decrypt just enough of a kind:24133 event to determine its NIP-46 method.
