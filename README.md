@@ -22,7 +22,7 @@ Your nsec never leaves the device. You control which clients can sign which even
 
 ## Status
 
-**Beta.** TestFlight external beta live — use a throwaway nsec for now, not your main key. Pre-external-TestFlight security audit completed 2026-04-17 with 5 must-fix items resolved in build 9.
+**Beta.** TestFlight external beta live — use a throwaway nsec for now, not your main key.
 
 What works end-to-end:
 
