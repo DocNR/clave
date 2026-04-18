@@ -9,7 +9,7 @@ Clave holds your Nostr private key. A security issue here is especially serious 
 Contact the maintainer privately:
 
 - **Nostr DM** (NIP-17 gift wrap preferred): `npub1xy54p83r6wnpyhs52xjeztd7qyyeu9ghymz8v66yu8kt3jzx75rqhf3urc`
-- **Email:** doctord21@proton.me
+- **Email:** thehypoxicdrive@gmail.com
 
 Please include:
 
