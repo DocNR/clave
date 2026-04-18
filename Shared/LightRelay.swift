@@ -8,7 +8,7 @@ final class LightRelay: @unchecked Sendable {
     private let urlString: String
     private let session: URLSession
 
-    init(url: String) {
+    nonisolated init(url: String) {
         self.urlString = url
         self.session = URLSession(configuration: .default)
     }
