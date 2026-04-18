@@ -389,7 +389,8 @@ final class AppState {
                       pubkey == parsedURI.clientPubkey else { continue }
                 let _ = try? await LightSigner.handleRequest(
                     privateKey: privateKey,
-                    requestEvent: event
+                    requestEvent: event,
+                    responseRelays: connectedRelays
                 )
                 handshakeComplete = true
             }
