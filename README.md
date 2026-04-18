@@ -30,12 +30,11 @@ What works end-to-end:
 - **Per-client permissions** — Full / Medium / Low trust with per-kind overrides; protected kinds (0, 3, 5, 10002, 30078) require approval on Medium trust
 - **NIP-46 methods:** `connect`, `sign_event`, `get_public_key`, `ping`, `describe`, `switch_relays`, `nip04_encrypt`, `nip04_decrypt`, `nip44_encrypt`, `nip44_decrypt`
 - **Activity log + client detail view** — rename, change trust, review per-client history, unpair
-- **Verified with:** Nostur, noStrudel, zap.cooking
+- **Verified with:** Nostur (bunker://) and noStrudel (bunker:// and nostrconnect://)
 
 Known limitations:
 
-- **One relay** (`wss://relay.powr.build`) — multi-relay publishing is backlogged
-- **noStrudel async approval** can time out on protected kinds (client-side timeout, not ours; workaround: Full Trust)
+- **Bunker flow pins to `wss://relay.powr.build`** — the proxy subscribes to one relay, so clients paired via `bunker://` must publish kind:24133 requests there. Nostrconnect uses whatever relay the client specifies in its URI; multi-relay bunker support is backlogged.- **noStrudel async approval** can time out on protected kinds (client-side timeout, not ours; workaround: Full Trust)
 - **Debug builds can't test signing end-to-end** because sandbox APNs tokens can't reach the production proxy; only the nostrconnect handshake works locally in debug
 
 ## How it works
