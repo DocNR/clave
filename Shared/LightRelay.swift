@@ -3,6 +3,21 @@ import os.log
 
 private let logger = Logger(subsystem: "dev.nostr.clave", category: "relay")
 
+/// Thread-safe single-fire guard. Used to make `URLSessionWebSocketTask` callbacks
+/// that might be invoked more than once (observed on cancel-after-pong races) safe
+/// to use with `withCheckedThrowingContinuation`, which crashes on double-resume.
+private final class ResumeOnce: @unchecked Sendable {
+    private let lock = NSLock()
+    private var consumed = false
+    nonisolated init() {}
+    func consume() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        if consumed { return false }
+        consumed = true
+        return true
+    }
+}
+
 final class LightRelay: @unchecked Sendable {
     private var webSocket: URLSessionWebSocketTask?
     private let urlString: String
@@ -27,8 +42,13 @@ final class LightRelay: @unchecked Sendable {
         do {
             try await withThrowingTaskGroup(of: Void.self) { group in
                 group.addTask {
+                    // URLSessionWebSocketTask.sendPing can invoke its callback more than once
+                    // when the task is cancelled shortly after the pong arrives. Guard against
+                    // double-resume, which is a fatal error for CheckedContinuation.
+                    let fired = ResumeOnce()
                     try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
                         ws.sendPing { error in
+                            guard fired.consume() else { return }
                             if let error = error { cont.resume(throwing: error) }
                             else { cont.resume() }
                         }
