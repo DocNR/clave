@@ -5,3 +5,8 @@ relay-proxy/node_modules/
 xcuserdata/
 *.xcuserdatad/
 build/
+
+# Environment files (proxy runtime config — must never be committed)
+.env
+.env.*
+!.env.example
