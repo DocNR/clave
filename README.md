@@ -125,6 +125,8 @@ So the signing path uses a lightweight stack built on CryptoKit (Apple's built-i
 
 ## Developer setup
 
+> These steps get the project building locally and running against your own proxy/relay. **Running a full production fork** (your own bundle ID, App Group, Keychain group, APNs key, relay, proxy) requires additional renames and config changes that aren't fully documented yet. If you're attempting a self-hosted instance, [open an issue](https://github.com/DocNR/clave/issues) and we'll help walk through it — and the feedback will drive a proper `docs/SELF-HOSTING.md`.
+
 ### Prerequisites
 
 - Xcode 16.2+ (for iOS 26.4 SDK; the NSE target deploys to 26.4)
