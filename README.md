@@ -34,7 +34,8 @@ What works end-to-end:
 
 Known limitations:
 
-- **Bunker flow pins to `wss://relay.powr.build`** — the proxy subscribes to one relay, so clients paired via `bunker://` must publish kind:24133 requests there. Nostrconnect uses whatever relay the client specifies in its URI; multi-relay bunker support is backlogged.- **noStrudel async approval** can time out on protected kinds (client-side timeout, not ours; workaround: Full Trust)
+- **Bunker flow pins to `wss://relay.powr.build`** — the proxy subscribes to one relay, so clients paired via `bunker://` must publish kind:24133 requests there. Nostrconnect uses whatever relay the client specifies in its URI; multi-relay bunker support is backlogged.
+- **noStrudel async approval** can time out on protected kinds (client-side timeout, not ours; workaround: Full Trust)
 - **Debug builds can't test signing end-to-end** because sandbox APNs tokens can't reach the production proxy; only the nostrconnect handshake works locally in debug
 
 ## How it works
