@@ -7,6 +7,9 @@ struct SettingsView: View {
     @State private var showExportSheet = false
     @State private var proxyURL = ""
     @State private var registrationStatus = ""
+    @State private var devSettings = DeveloperSettings.shared
+    @State private var versionTapTimes: [Date] = []
+    @State private var showCopyLogsConfirmation = false
 
     var body: some View {
         NavigationStack {
@@ -16,6 +19,9 @@ struct SettingsView: View {
                 pushProxySection
                 relaySection
                 aboutSection
+                if devSettings.developerMenuUnlocked {
+                    developerSection
+                }
             }
             .navigationTitle("Settings")
             .onAppear { loadSettings() }
@@ -160,6 +166,64 @@ struct SettingsView: View {
                 Text(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")
                     .foregroundStyle(.secondary)
             }
+            .contentShape(Rectangle())
+            .onTapGesture {
+                versionTapTimes.append(Date())
+                // Keep only the most recent 10 to bound memory
+                if versionTapTimes.count > 10 {
+                    versionTapTimes = Array(versionTapTimes.suffix(10))
+                }
+                if DeveloperSettings.tapGateSatisfied(timestamps: versionTapTimes, window: 3.0, required: 7) {
+                    if !devSettings.developerMenuUnlocked {
+                        devSettings.developerMenuUnlocked = true
+                        UINotificationFeedbackGenerator().notificationOccurred(.success)
+                    }
+                    versionTapTimes = []
+                }
+            }
+        }
+    }
+
+    // MARK: - Developer
+
+    private var developerSection: some View {
+        Section("Developer") {
+            Toggle(isOn: $devSettings.nostrconnectEnabled) {
+                VStack(alignment: .leading) {
+                    Text("Enable Nostrconnect")
+                    Text("Experimental — some clients have compatibility issues. Use bunker:// for reliable signing.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Button {
+                Task.detached(priority: .userInitiated) {
+                    let entries = LogExporter.fetchRecentLogs(since: Date().addingTimeInterval(-3600))
+                    let logs = LogExporter.format(entries: entries)
+                    await MainActor.run {
+                        UIPasteboard.general.string = logs.isEmpty ? "(no logs in the last hour)" : logs
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        showCopyLogsConfirmation = true
+                    }
+                }
+            } label: {
+                Label("Copy Recent Logs (last hour)", systemImage: "doc.on.clipboard")
+            }
+
+            Text("Captures Clave main-app logs only. NSE (signing) runs in a separate process and is not included — use Xcode Console for NSE logs.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+
+            Button(role: .destructive) {
+                devSettings.developerMenuUnlocked = false
+                versionTapTimes = []
+            } label: {
+                Label("Lock Developer Menu", systemImage: "lock")
+            }
+        }
+        .alert("Logs copied to clipboard", isPresented: $showCopyLogsConfirmation) {
+            Button("OK", role: .cancel) {}
         }
     }
 
