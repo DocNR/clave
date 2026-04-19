@@ -351,13 +351,16 @@ enum LightSigner {
             }
 
         case "switch_relays":
-            // DIAGNOSTIC 2026-04-19 — pointing switch_relays at relay.nsec.app to test
-            // whether welshman's narrowing (vs migration) fixes the Coracle UI stall AND
-            // whether proxy-per-client-relay (Dell side watches relay.nsec.app) lets
-            // post-pair signing complete. REVERT to `SharedConstants.relayURL` before
-            // any external TestFlight / main merge. Plan:
+            // DIAGNOSTIC 2026-04-19 (pivoted) — first probe returned
+            // ["wss://relay.nsec.app"] and Coracle's UI still stalled, disproving
+            // the welshman-narrowing hypothesis. Pivoted to Amber's responder-only
+            // pattern (return null, skip migration entirely) while keeping the
+            // proxy's secondary sub on relay.nsec.app. Tests whether the real
+            // combo — iOS null + proxy watches client URI relays — lets
+            // sign_event complete end-to-end. REVERT to `SharedConstants.relayURL`
+            // before any external TestFlight / main merge. Plan:
             // ~/hq/clave/plans/2026-04-19-switch-relays-nsec-app-diagnostic.md
-            return ("[\"wss://relay.nsec.app\"]", nil)
+            return ("null", nil)
 
         case "describe":
             return ("[\"connect\",\"sign_event\",\"get_public_key\",\"ping\",\"nip04_encrypt\",\"nip04_decrypt\",\"nip44_encrypt\",\"nip44_decrypt\",\"switch_relays\",\"describe\"]", nil)
