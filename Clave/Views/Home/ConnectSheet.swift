@@ -11,13 +11,14 @@ struct ConnectSheet: View {
     @State private var copiedBunker = false
     @State private var isConnecting = false
     @State private var connectionError: String?
+    @State private var devSettings = DeveloperSettings.shared
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 24) {
                     bunkerSection
-                    if DeveloperSettings.shared.nostrconnectEnabled {
+                    if devSettings.nostrconnectEnabled {
                         nostrConnectSection
                     }
                 }
