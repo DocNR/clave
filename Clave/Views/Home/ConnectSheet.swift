@@ -17,7 +17,9 @@ struct ConnectSheet: View {
             ScrollView {
                 VStack(spacing: 24) {
                     bunkerSection
-                    nostrConnectSection
+                    if DeveloperSettings.shared.nostrconnectEnabled {
+                        nostrConnectSection
+                    }
                 }
                 .padding(.top, 16)
             }
