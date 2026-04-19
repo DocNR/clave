@@ -34,6 +34,8 @@
 		EFBF443D3DA775A267700410 /* Bech32.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF3D7A582F8BD020005A6545 /* Bech32.swift */; };
 		EFC7FD75109694C0A7F86D26 /* SharedModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFCA55B463A619311A35AF3C /* SharedModels.swift */; };
 		EFE12D1EC4CE48622767D427 /* SharedStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFEE4316AC522CDDA35AFAC1 /* SharedStorage.swift */; };
+		DE7E10B2DE7E10B2DE7E10B2 /* DeveloperSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE7E10B1DE7E10B1DE7E10B1 /* DeveloperSettings.swift */; };
+		DE7E10B3DE7E10B3DE7E10B3 /* DeveloperSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE7E10B1DE7E10B1DE7E10B1 /* DeveloperSettings.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -91,6 +93,7 @@
 		EF3D7A5F2F8BD020005A6545 /* SignerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignerService.swift; sourceTree = "<group>"; };
 		EFCA55B463A619311A35AF3C /* SharedModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedModels.swift; sourceTree = "<group>"; };
 		EFEE4316AC522CDDA35AFAC1 /* SharedStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedStorage.swift; sourceTree = "<group>"; };
+		DE7E10B1DE7E10B1DE7E10B1 /* DeveloperSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeveloperSettings.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -202,6 +205,7 @@
 			children = (
 				EF3D7A582F8BD020005A6545 /* Bech32.swift */,
 				894FE9FF88CD485ABCD31C05 /* ClientPermissions.swift */,
+				DE7E10B1DE7E10B1DE7E10B1 /* DeveloperSettings.swift */,
 				34B139A8E147475F9B40B3D5 /* NostrConnectParser.swift */,
 				EF3D7A592F8BD020005A6545 /* LightCrypto.swift */,
 				EF3D7A5A2F8BD020005A6545 /* LightEvent.swift */,
@@ -414,6 +418,7 @@
 				EF6058BFB67AD8970BBE8953 /* LightEvent.swift in Sources */,
 				EF1963B89F3A6472380F1E0A /* LightRelay.swift in Sources */,
 				EF85F076F6C02095C4B6D9C4 /* LightSigner.swift in Sources */,
+				DE7E10B2DE7E10B2DE7E10B2 /* DeveloperSettings.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -446,6 +451,7 @@
 				EFAF49B35F7A4241A65DCD89 /* SharedStorage.swift in Sources */,
 				BD247C1AD3A7497E8DF29530 /* ClientPermissions.swift in Sources */,
 				006B17A84C114EDF9B129CAE /* NostrConnectParser.swift in Sources */,
+				DE7E10B3DE7E10B3DE7E10B3 /* DeveloperSettings.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
