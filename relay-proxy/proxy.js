@@ -6,6 +6,14 @@ const fs = require("fs");
 
 // --- Configuration (set via env vars) ---
 const RELAY_URL = process.env.RELAY_URL || "wss://relay.powr.build";
+// DIAGNOSTIC 2026-04-19 — additional relays the proxy subscribes to on top of
+// RELAY_URL, so sign_event published to client-URI relays (which Clave's iOS
+// asserts via switch_relays for this test) still wakes the NSE. Comma-separated
+// env var; default covers the Coracle-on-relay.nsec.app diagnostic. Revert
+// along with the iOS switch_relays change before merging to main. Plan:
+// ~/hq/clave/plans/2026-04-19-switch-relays-nsec-app-diagnostic.md
+const SECONDARY_RELAY_URLS = (process.env.SECONDARY_RELAY_URLS || "wss://relay.nsec.app")
+  .split(",").map((s) => s.trim()).filter(Boolean);
 const APNS_KEY_PATH = process.env.APNS_KEY_PATH || "./AuthKey.p8";
 const APNS_KEY_ID = process.env.APNS_KEY_ID;
 const APNS_TEAM_ID = process.env.APNS_TEAM_ID;
@@ -146,9 +154,9 @@ function sendPush(token, pushPayload) {
 }
 
 // --- Relay WebSocket ---
-function connectRelay() {
-  console.log(`[Relay] Connecting to ${RELAY_URL}...`);
-  const ws = new WebSocket(RELAY_URL);
+function connectRelay(relayUrl, subId) {
+  console.log(`[Relay ${relayUrl}] Connecting...`);
+  const ws = new WebSocket(relayUrl);
 
   let pingTimer = null;
   let pongTimer = null;
@@ -174,21 +182,21 @@ function connectRelay() {
   });
 
   ws.on("open", () => {
-    console.log("[Relay] Connected");
+    console.log(`[Relay ${relayUrl}] Connected`);
     const filter = {
       kinds: [24133],
       since: Math.floor(Date.now() / 1000),
     };
-    const sub = JSON.stringify(["REQ", "clave-watch", filter]);
+    const sub = JSON.stringify(["REQ", subId, filter]);
     ws.send(sub);
-    console.log("[Relay] Watching kind:24133 events for all registered signer pubkeys");
+    console.log(`[Relay ${relayUrl}] Watching kind:24133 events for all registered signer pubkeys`);
     startHeartbeat();
   });
 
   ws.on("message", async (data) => {
     try {
       const msg = JSON.parse(data.toString());
-      if (msg[0] !== "EVENT" || msg[1] !== "clave-watch") return;
+      if (msg[0] !== "EVENT" || msg[1] !== subId) return;
 
       global.lastEventReceivedAt = new Date().toISOString();
 
@@ -197,7 +205,7 @@ function connectRelay() {
       // Extract the signer pubkey from the p-tag on the kind:24133 event
       const pTag = (event.tags || []).find((t) => t[0] === "p");
       if (!pTag || !pTag[1]) {
-        console.log(`[Relay] Event ${event.id.slice(0, 8)}... has no p-tag, skipping`);
+        console.log(`[Relay ${relayUrl}] Event ${event.id.slice(0, 8)}... has no p-tag, skipping`);
         return;
       }
       const targetPubkey = pTag[1];
@@ -210,18 +218,33 @@ function connectRelay() {
       const matchingTokens = storage.findByPubkey(targetPubkey);
       if (matchingTokens.length === 0) {
         console.log(
-          `[Relay] Event for pubkey ${targetPubkey.slice(0, 8)}... — no registered tokens, skipping`
+          `[Relay ${relayUrl}] Event for pubkey ${targetPubkey.slice(0, 8)}... — no registered tokens, skipping`
         );
         return;
       }
 
       if (alreadySeen(event.id)) {
-        console.log(`[Relay] Duplicate event ${event.id.slice(0, 8)}..., skipping`);
+        console.log(`[Relay ${relayUrl}] Duplicate event ${event.id.slice(0, 8)}..., skipping`);
         return;
       }
 
+      // Compliance signal: which relay did the client publish to?
+      // Diagnostic context: switch_relays asserts wss://relay.nsec.app to
+      // Coracle in this test build. A client honoring switch_relays should
+      // publish subsequent sign_events to relay.nsec.app (the secondary sub).
+      // A client ignoring switch_relays would stay on its URI relays — which
+      // the proxy may or may not watch. In prod (post proxy-per-client-relay),
+      // flip the labels: PRIMARY = compliant, SECONDARY = caught-via-defensive-infra.
+      const isPrimary = relayUrl === (process.env.RELAY_URL || "ws://localhost:7778");
+      const classification = isPrimary ? "PRIMARY" : "SECONDARY";
       console.log(
-        `[Relay] Event for pubkey ${targetPubkey.slice(0, 8)}... — pushing to ${matchingTokens.length} device(s)`
+        `[Compliance] source=${relayUrl} class=${classification} ` +
+          `client=${event.pubkey.slice(0, 8)} signer=${targetPubkey.slice(0, 8)} ` +
+          `event=${event.id.slice(0, 8)} ts=${event.created_at || "?"}`
+      );
+
+      console.log(
+        `[Relay ${relayUrl}] Event for pubkey ${targetPubkey.slice(0, 8)}... — pushing to ${matchingTokens.length} device(s)`
       );
 
       const pushPayload = {
@@ -230,7 +253,9 @@ function connectRelay() {
           "interruption-level": "passive",
           alert: { title: " ", body: " " },
         },
-        relay_url: process.env.PUBLIC_RELAY_URL || RELAY_URL,
+        relay_url: isPrimary
+          ? (process.env.PUBLIC_RELAY_URL || "wss://relay.powr.build")
+          : relayUrl,
         event_id: event.id,
       };
 
@@ -256,12 +281,12 @@ function connectRelay() {
 
   ws.on("close", () => {
     stopHeartbeat();
-    console.log("[Relay] Disconnected. Reconnecting in 5s...");
-    setTimeout(connectRelay, 5000);
+    console.log(`[Relay ${relayUrl}] Disconnected. Reconnecting in 5s...`);
+    setTimeout(() => connectRelay(relayUrl, subId), 5000);
   });
 
   ws.on("error", (e) => {
-    console.error("[Relay] Error:", e.message);
+    console.error(`[Relay ${relayUrl}] Error:`, e.message);
   });
 }
 
@@ -403,5 +428,9 @@ const server = http.createServer((req, res) => {
 
 server.listen(HTTP_PORT, () => {
   console.log(`[HTTP] Listening on port ${HTTP_PORT}`);
-  connectRelay();
+  connectRelay(RELAY_URL, "clave-watch-primary");
+  for (const url of SECONDARY_RELAY_URLS) {
+    const slug = url.replace(/[^a-z0-9]/gi, "").slice(0, 20);
+    connectRelay(url, `clave-watch-${slug}`);
+  }
 });
