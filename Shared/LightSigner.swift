@@ -351,7 +351,13 @@ enum LightSigner {
             }
 
         case "switch_relays":
-            return ("[\"\(SharedConstants.relayURL)\"]", nil)
+            // DIAGNOSTIC 2026-04-19 — pointing switch_relays at relay.nsec.app to test
+            // whether welshman's narrowing (vs migration) fixes the Coracle UI stall AND
+            // whether proxy-per-client-relay (Dell side watches relay.nsec.app) lets
+            // post-pair signing complete. REVERT to `SharedConstants.relayURL` before
+            // any external TestFlight / main merge. Plan:
+            // ~/hq/clave/plans/2026-04-19-switch-relays-nsec-app-diagnostic.md
+            return ("[\"wss://relay.nsec.app\"]", nil)
 
         case "describe":
             return ("[\"connect\",\"sign_event\",\"get_public_key\",\"ping\",\"nip04_encrypt\",\"nip04_decrypt\",\"nip44_encrypt\",\"nip44_decrypt\",\"switch_relays\",\"describe\"]", nil)
