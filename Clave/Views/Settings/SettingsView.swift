@@ -198,16 +198,15 @@ struct SettingsView: View {
             }
 
             Button {
-                let logs = LogExporter.format(
-                    entries: LogExporter.fetchRecentLogs(since: Date().addingTimeInterval(-3600))
-                )
-                if logs.isEmpty {
-                    UIPasteboard.general.string = "(no logs in the last hour)"
-                } else {
-                    UIPasteboard.general.string = logs
+                Task.detached(priority: .userInitiated) {
+                    let entries = LogExporter.fetchRecentLogs(since: Date().addingTimeInterval(-3600))
+                    let logs = LogExporter.format(entries: entries)
+                    await MainActor.run {
+                        UIPasteboard.general.string = logs.isEmpty ? "(no logs in the last hour)" : logs
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        showCopyLogsConfirmation = true
+                    }
                 }
-                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                showCopyLogsConfirmation = true
             } label: {
                 Label("Copy Recent Logs (last hour)", systemImage: "doc.on.clipboard")
             }
