@@ -187,6 +187,22 @@ function connectRelay(relayUrl, subId) {
       kinds: [24133],
       since: Math.floor(Date.now() / 1000),
     };
+    // DIAGNOSTIC 2026-04-19 (probe C) — strict relays (e.g. relay.nsec.app)
+    // don't deliver kind:24133 to subs without a #p filter. Primary (local
+    // strfry) is permissive so the broad filter works there; for secondary
+    // relays narrow to registered signer pubkeys. This is a one-shot read of
+    // storage at sub-open time; register/unregister during the diagnostic
+    // won't reshape the filter. Revert along with SECONDARY_RELAY_URLS.
+    const isPrimaryOpen = relayUrl === (process.env.RELAY_URL || "ws://localhost:7778");
+    if (!isPrimaryOpen) {
+      const pubkeys = [...new Set(storage.loadTokens().map((t) => t.pubkey))];
+      if (pubkeys.length > 0) {
+        filter["#p"] = pubkeys;
+        console.log(`[Relay ${relayUrl}] Filtering by #p: ${pubkeys.length} registered signer(s)`);
+      } else {
+        console.log(`[Relay ${relayUrl}] No registered signers — sub will match nothing`);
+      }
+    }
     const sub = JSON.stringify(["REQ", subId, filter]);
     ws.send(sub);
     console.log(`[Relay ${relayUrl}] Watching kind:24133 events for all registered signer pubkeys`);
