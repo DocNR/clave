@@ -17,7 +17,8 @@ enum LightSigner {
         privateKey: Data,
         requestEvent: [String: Any],
         skipProtection: Bool = false,
-        responseRelays: [LightRelay]? = nil
+        responseRelays: [LightRelay]? = nil,
+        responseRelayUrl: String? = nil
     ) async throws -> RequestResult {
         guard let senderPubkey = requestEvent["pubkey"] as? String,
               let encryptedContent = requestEvent["content"] as? String else {
@@ -108,7 +109,8 @@ enum LightSigner {
                     requestId: requestId, error: "Invalid or missing bunker secret",
                     privateKey: privateKey, senderPubkeyData: senderPubkeyData,
                     senderPubkey: senderPubkey, isNip04: isNip04,
-                    responseRelays: responseRelays
+                    responseRelays: responseRelays,
+                    responseRelayUrl: responseRelayUrl
                 )
                 return result
             }
@@ -132,7 +134,8 @@ enum LightSigner {
                     requestId: requestId, error: "Client not paired — send connect with valid bunker secret first",
                     privateKey: privateKey, senderPubkeyData: senderPubkeyData,
                     senderPubkey: senderPubkey, isNip04: isNip04,
-                    responseRelays: responseRelays
+                    responseRelays: responseRelays,
+                    responseRelayUrl: responseRelayUrl
                 )
                 return result
             }
@@ -184,7 +187,8 @@ enum LightSigner {
                         requestId: requestId, error: "Permission denied — open Clave to approve",
                         privateKey: privateKey, senderPubkeyData: senderPubkeyData,
                         senderPubkey: senderPubkey, isNip04: isNip04,
-                        responseRelays: responseRelays
+                        responseRelays: responseRelays,
+                        responseRelayUrl: responseRelayUrl
                     )
                     return result
                 }
@@ -250,8 +254,14 @@ enum LightSigner {
             // Best-effort — accepted if at least one relay took the event.
             accepted = await publishResponseToRelays(responseRelays, event: eventDict)
         } else {
-            // Bunker/NSE path: publish to the signer's primary relay (relay.powr.build).
-            let relay = LightRelay(url: SharedConstants.relayURL)
+            // Bunker/NSE path: publish to the relay the request arrived on (passed
+            // from the push payload via responseRelayUrl), falling back to the
+            // primary signer relay. Without this, a sign_event arriving via a
+            // proxy-watched client URI relay would have its response routed to
+            // relay.powr.build — a relay the client isn't subscribed to — and the
+            // client UI would time out. DIAGNOSTIC 2026-04-19 probe E.
+            let targetUrl = responseRelayUrl ?? SharedConstants.relayURL
+            let relay = LightRelay(url: targetUrl)
             try await relay.connect(timeout: 5.0)
             accepted = (try? await relay.publishEvent(event: eventDict)) ?? false
             relay.disconnect()
@@ -426,7 +436,8 @@ enum LightSigner {
         requestId: String, error: String,
         privateKey: Data, senderPubkeyData: Data,
         senderPubkey: String, isNip04: Bool,
-        responseRelays: [LightRelay]? = nil
+        responseRelays: [LightRelay]? = nil,
+        responseRelayUrl: String? = nil
     ) async throws {
         let responseDict: [String: Any] = ["id": requestId, "error": error]
         guard let responseData = try? JSONSerialization.data(withJSONObject: responseDict),
@@ -448,7 +459,8 @@ enum LightSigner {
         if let responseRelays = responseRelays, !responseRelays.isEmpty {
             _ = await publishResponseToRelays(responseRelays, event: eventDict)
         } else {
-            let relay = LightRelay(url: SharedConstants.relayURL)
+            let targetUrl = responseRelayUrl ?? SharedConstants.relayURL
+            let relay = LightRelay(url: targetUrl)
             try await relay.connect(timeout: 5.0)
             _ = try? await relay.publishEvent(event: eventDict)
             relay.disconnect()
