@@ -55,6 +55,12 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         logger.error("[APNs] Failed to register: \(error.localizedDescription)")
     }
 
+    func applicationDidBecomeActive(_ application: UIApplication) {
+        // Drain the pair/unpair retry queue. AppState listens for this and
+        // processes pendingPairOps.
+        NotificationCenter.default.post(name: .drainPendingPairOps, object: nil)
+    }
+
     // MARK: - Foreground Push Handling
 
     func userNotificationCenter(
@@ -146,7 +152,8 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                 do {
                     let result = try await LightSigner.handleRequest(
                         privateKey: privateKey,
-                        requestEvent: event
+                        requestEvent: event,
+                        responseRelayUrl: relayUrlString
                     )
                     processedIDs.insert(eventId)
                     if result.status == "error" && result.errorMessage == "Decrypt failed" {
@@ -179,4 +186,5 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
 extension Notification.Name {
     static let signingCompleted = Notification.Name("signingCompleted")
+    static let drainPendingPairOps = Notification.Name("drainPendingPairOps")
 }

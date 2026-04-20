@@ -85,6 +85,39 @@ enum SharedStorage {
         defaults.removeObject(forKey: SharedConstants.pendingRequestsKey)
     }
 
+    // MARK: - Pending Pair Ops (HTTP failure retry queue)
+
+    /// Queue an operation to be retried on next drain. FIFO, cap 10 — drops
+    /// oldest on overflow.
+    static func enqueuePendingPairOp(_ op: PairOp) {
+        var queue = getPendingPairOps()
+        queue.append(op)
+        if queue.count > 10 { queue = Array(queue.suffix(10)) }
+        save(queue, forKey: SharedConstants.pendingPairOpsKey)
+        logger.notice("[Storage] enqueuePendingPairOp: \(op.kind.rawValue, privacy: .public) client=\(op.clientPubkey.prefix(8), privacy: .public) count=\(queue.count)")
+    }
+
+    static func getPendingPairOps() -> [PairOp] {
+        load(forKey: SharedConstants.pendingPairOpsKey) ?? []
+    }
+
+    static func removePendingPairOp(id: String) {
+        var queue = getPendingPairOps()
+        queue.removeAll { $0.id == id }
+        save(queue, forKey: SharedConstants.pendingPairOpsKey)
+    }
+
+    static func bumpPendingPairOpFailCount(id: String) {
+        var queue = getPendingPairOps()
+        guard let idx = queue.firstIndex(where: { $0.id == id }) else { return }
+        queue[idx].failCount += 1
+        save(queue, forKey: SharedConstants.pendingPairOpsKey)
+    }
+
+    static func clearPendingPairOps() {
+        defaults.removeObject(forKey: SharedConstants.pendingPairOpsKey)
+    }
+
     // MARK: - Protected Kinds (Always Ask)
 
     static func getProtectedKinds() -> Set<Int> {

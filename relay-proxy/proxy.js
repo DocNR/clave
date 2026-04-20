@@ -26,8 +26,15 @@ const PONG_TIMEOUT = 10000; // 10 seconds to respond
 // --- NIP-98 auth + multi-signer storage ---
 const { parseAuthHeader, verifyNip98, sha256Hex } = require("./nip98");
 const { createStorage } = require("./storage");
+const { createClientsStorage } = require("./clients");
+const { createRelayPool } = require("./relayPool");
+
+const PUBLIC_PRIMARY_URL = process.env.PUBLIC_RELAY_URL || "wss://relay.powr.build";
 
 const storage = createStorage(TOKEN_FILE);
+const CLIENTS_FILE = "./clients.json";
+const clientsStorage = createClientsStorage(CLIENTS_FILE);
+let relayPool = null; // initialized in server.listen after all deps are in scope
 const migrationResult = storage.migrateIfLegacy();
 if (migrationResult.migrated) {
   console.log(
@@ -189,66 +196,13 @@ function connectRelay() {
     try {
       const msg = JSON.parse(data.toString());
       if (msg[0] !== "EVENT" || msg[1] !== "clave-watch") return;
-
-      global.lastEventReceivedAt = new Date().toISOString();
-
       const event = msg[2];
-
-      // Extract the signer pubkey from the p-tag on the kind:24133 event
-      const pTag = (event.tags || []).find((t) => t[0] === "p");
-      if (!pTag || !pTag[1]) {
-        console.log(`[Relay] Event ${event.id.slice(0, 8)}... has no p-tag, skipping`);
-        return;
-      }
-      const targetPubkey = pTag[1];
-
-      // Skip responses from the signer themselves (pubkey === targetPubkey means the
-      // signer is p-tagging themselves, which doesn't happen in practice since responses
-      // are p-tagged to the client, but skip for safety)
-      if (event.pubkey === targetPubkey) return;
-
-      const matchingTokens = storage.findByPubkey(targetPubkey);
-      if (matchingTokens.length === 0) {
-        console.log(
-          `[Relay] Event for pubkey ${targetPubkey.slice(0, 8)}... — no registered tokens, skipping`
-        );
-        return;
-      }
-
-      if (alreadySeen(event.id)) {
-        console.log(`[Relay] Duplicate event ${event.id.slice(0, 8)}..., skipping`);
-        return;
-      }
-
-      console.log(
-        `[Relay] Event for pubkey ${targetPubkey.slice(0, 8)}... — pushing to ${matchingTokens.length} device(s)`
-      );
-
-      const pushPayload = {
-        aps: {
-          "mutable-content": 1,
-          "interruption-level": "passive",
-          alert: { title: " ", body: " " },
-        },
-        relay_url: process.env.PUBLIC_RELAY_URL || RELAY_URL,
-        event_id: event.id,
-      };
-
-      for (const entry of matchingTokens) {
-        try {
-          const status = await sendPush(entry.token, pushPayload);
-          if (status === 410) {
-            storage.removeToken({ token: entry.token, pubkey: entry.pubkey });
-            console.log(
-              `[APNs] Removed stale token: ${entry.token.slice(0, 8)}... for ${entry.pubkey.slice(0, 8)}...`
-            );
-          }
-        } catch (e) {
-          console.error(
-            `[APNs] Push failed for ${entry.token.slice(0, 8)}...: ${e.message}`
-          );
-        }
-      }
+      if (!event || event.kind !== 24133) return;
+      await dispatchCaughtEvent({
+        event,
+        sourceUrl: PUBLIC_PRIMARY_URL,
+        classification: "PRIMARY",
+      });
     } catch (e) {
       console.error("[Relay] Message handler error:", e.message);
     }
@@ -312,6 +266,7 @@ const server = http.createServer((req, res) => {
         }
 
         storage.upsertToken({ token, pubkey: result.pubkey });
+        if (relayPool) relayPool.refreshFilter();
         console.log(
           `[HTTP] Registered ${token.slice(0, 8)}... for pubkey ${result.pubkey.slice(0, 8)}...`
         );
@@ -369,6 +324,7 @@ const server = http.createServer((req, res) => {
         }
 
         storage.removeToken({ token, pubkey: result.pubkey });
+        if (relayPool) relayPool.refreshFilter();
         console.log(
           `[HTTP] Unregistered ${token.slice(0, 8)}... for pubkey ${result.pubkey.slice(0, 8)}...`
         );
@@ -377,6 +333,187 @@ const server = http.createServer((req, res) => {
         res.end(JSON.stringify({ ok: true }));
       } catch (e) {
         console.error("[HTTP] /unregister error:", e.message);
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Internal error" }));
+      }
+    });
+  } else if (req.method === "POST" && req.url === "/pair-client") {
+    let body = "";
+    req.on("data", (d) => {
+      body += d;
+      if (body.length > MAX_BODY_SIZE) {
+        req.destroy();
+      }
+    });
+    req.on("end", async () => {
+      try {
+        const authHeader = req.headers["x-clave-auth"];
+        if (!authHeader) {
+          console.log(`[HTTP] /pair-client 401: Missing X-Clave-Auth header`);
+          res.writeHead(401, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: "Missing X-Clave-Auth header" }));
+        }
+
+        let authEvent;
+        try {
+          authEvent = parseAuthHeader(authHeader);
+        } catch (e) {
+          console.log(`[HTTP] /pair-client 401: ${e.message}`);
+          res.writeHead(401, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: e.message }));
+        }
+
+        const expectedUrl = `https://proxy.clave.casa/pair-client`;
+        const bodyHash = sha256Hex(Buffer.from(body));
+        const result = await verifyNip98(authEvent, expectedUrl, "POST", bodyHash);
+        if (!result.valid) {
+          console.log(`[HTTP] /pair-client auth failed: ${result.error}`);
+          res.writeHead(401, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: result.error }));
+        }
+
+        let parsed;
+        try {
+          parsed = JSON.parse(body);
+        } catch {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: "invalid_body" }));
+        }
+
+        const { client_pubkey, relay_urls } = parsed;
+        if (typeof client_pubkey !== "string" || !/^[0-9a-f]{64}$/.test(client_pubkey)) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: "invalid_client_pubkey" }));
+        }
+        if (!Array.isArray(relay_urls) || relay_urls.some((u) => typeof u !== "string")) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: "invalid_relay_urls" }));
+        }
+        if (relay_urls.length === 0) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: "no_relays" }));
+        }
+        if (relay_urls.length > 10) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: "relay_limit_per_pair", limit: 10, requested: relay_urls.length }));
+        }
+        // Validate each URL is parseable and ws/wss before passing to relayPool.addRelay —
+        // the `ws` constructor throws synchronously on malformed input, which would leave
+        // clients.json and the pool out of sync if we didn't pre-validate.
+        for (const url of relay_urls) {
+          let parsed;
+          try {
+            parsed = new URL(url);
+          } catch {
+            res.writeHead(400, { "Content-Type": "application/json" });
+            return res.end(JSON.stringify({ error: "invalid_relay_url", url }));
+          }
+          if (parsed.protocol !== "wss:" && parsed.protocol !== "ws:") {
+            res.writeHead(400, { "Content-Type": "application/json" });
+            return res.end(JSON.stringify({ error: "invalid_relay_url", url }));
+          }
+        }
+
+        const signerPubkey = result.pubkey;
+        const existingCount = clientsStorage.countBySigner(signerPubkey);
+        // Count upsert as 1 if (signer,client) already exists; else +1.
+        const alreadyPaired = clientsStorage.loadAll()
+          .some((p) => p.signerPubkey === signerPubkey && p.clientPubkey === client_pubkey);
+        const projectedCount = alreadyPaired ? existingCount : existingCount + 1;
+        if (projectedCount > 5) {
+          res.writeHead(409, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: "pairing_limit", limit: 5, used: existingCount }));
+        }
+
+        const novel = clientsStorage.novelRelayCount(signerPubkey, relay_urls);
+        if (novel > 50) {
+          res.writeHead(409, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: "novel_relay_quota", limit: 50 }));
+        }
+
+        clientsStorage.addPair({ signerPubkey, clientPubkey: client_pubkey, relayUrls: relay_urls });
+        for (const url of relay_urls) {
+          relayPool.addRelay(url);
+        }
+        console.log(
+          `[HTTP] Paired client ${client_pubkey.slice(0, 8)}... for signer ${signerPubkey.slice(0, 8)}... with ${relay_urls.length} relays`
+        );
+
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: true }));
+      } catch (e) {
+        console.error("[HTTP] /pair-client error:", e.message);
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Internal error" }));
+      }
+    });
+  } else if (req.method === "POST" && req.url === "/unpair-client") {
+    let body = "";
+    req.on("data", (d) => {
+      body += d;
+      if (body.length > MAX_BODY_SIZE) {
+        req.destroy();
+      }
+    });
+    req.on("end", async () => {
+      try {
+        const authHeader = req.headers["x-clave-auth"];
+        if (!authHeader) {
+          res.writeHead(401, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: "Missing X-Clave-Auth header" }));
+        }
+
+        let authEvent;
+        try {
+          authEvent = parseAuthHeader(authHeader);
+        } catch (e) {
+          res.writeHead(401, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: e.message }));
+        }
+
+        const expectedUrl = `https://proxy.clave.casa/unpair-client`;
+        const bodyHash = sha256Hex(Buffer.from(body));
+        const result = await verifyNip98(authEvent, expectedUrl, "POST", bodyHash);
+        if (!result.valid) {
+          res.writeHead(401, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: result.error }));
+        }
+
+        let parsed;
+        try {
+          parsed = JSON.parse(body);
+        } catch {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: "invalid_body" }));
+        }
+
+        const { client_pubkey } = parsed;
+        if (typeof client_pubkey !== "string" || !/^[0-9a-f]{64}$/.test(client_pubkey)) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: "invalid_client_pubkey" }));
+        }
+
+        const signerPubkey = result.pubkey;
+        const removed = clientsStorage.removePair({ signerPubkey, clientPubkey: client_pubkey });
+        if (removed) {
+          if (Array.isArray(removed.relayUrls)) {
+            for (const url of removed.relayUrls) {
+              relayPool.releaseRelay(url);
+            }
+          }
+          console.log(
+            `[HTTP] Unpaired client ${client_pubkey.slice(0, 8)}... for signer ${signerPubkey.slice(0, 8)}...`
+          );
+        } else {
+          console.log(
+            `[HTTP] /unpair-client: no pair found for signer ${signerPubkey.slice(0, 8)}... / client ${client_pubkey.slice(0, 8)}...`
+          );
+        }
+
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: true }));
+      } catch (e) {
+        console.error("[HTTP] /unpair-client error:", e.message);
         res.writeHead(500, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Internal error" }));
       }
@@ -401,7 +538,90 @@ const server = http.createServer((req, res) => {
   }
 });
 
+// Shared push pipeline: both the primary-sub handler (inside connectRelay)
+// and the secondary-relay pool route caught kind:24133 events through this.
+// sourceUrl is the relay the event was seen on, classification is PRIMARY|SECONDARY.
+async function dispatchCaughtEvent({ event, sourceUrl, classification }) {
+  const pTag = (event.tags || []).find((t) => t[0] === "p");
+  if (!pTag || !pTag[1]) return;
+  const targetPubkey = pTag[1];
+
+  // Guard against the signer p-tagging themselves (shouldn't happen in practice)
+  if (event.pubkey === targetPubkey) return;
+
+  const matchingTokens = storage.findByPubkey(targetPubkey);
+  if (matchingTokens.length === 0) {
+    console.log(
+      `[${classification}] Event for pubkey ${targetPubkey.slice(0, 8)}... — no registered tokens, skipping`
+    );
+    return;
+  }
+
+  if (alreadySeen(event.id)) return;
+
+  console.log(
+    `[Compliance] source=${sourceUrl} class=${classification} client=${event.pubkey.slice(0, 8)} signer=${targetPubkey.slice(0, 8)} event=${event.id.slice(0, 8)} ts=${new Date().toISOString()}`
+  );
+
+  global.lastEventReceivedAt = new Date().toISOString();
+
+  const pushPayload = {
+    aps: {
+      "mutable-content": 1,
+      "interruption-level": "passive",
+      alert: { title: " ", body: " " },
+    },
+    relay_url: classification === "PRIMARY" ? PUBLIC_PRIMARY_URL : sourceUrl,
+    event_id: event.id,
+  };
+
+  for (const entry of matchingTokens) {
+    try {
+      const status = await sendPush(entry.token, pushPayload);
+      if (status === 410) {
+        storage.removeToken({ token: entry.token, pubkey: entry.pubkey });
+        console.log(
+          `[APNs] Removed stale token: ${entry.token.slice(0, 8)}... for ${entry.pubkey.slice(0, 8)}...`
+        );
+      }
+    } catch (e) {
+      console.error(`[APNs] Push failed for ${entry.token.slice(0, 8)}...: ${e.message}`);
+    }
+  }
+}
+
+function handleSecondaryEvent(relayUrl, event) {
+  dispatchCaughtEvent({ event, sourceUrl: relayUrl, classification: "SECONDARY" }).catch((e) => {
+    console.error(`[Secondary] dispatch error: ${e.message}`);
+  });
+}
+
+// Initialize the secondary-relay pool at module scope BEFORE server.listen so
+// incoming requests to /pair-client (which arrive the moment listen() returns)
+// never race with pool init. The pool has no network cost until addRelay is
+// called, so safe to create eagerly.
+relayPool = createRelayPool({
+  signerPubkeysProvider: () => [...new Set(storage.loadTokens().map((t) => t.pubkey))],
+  onEvent: (relayUrl, event) => handleSecondaryEvent(relayUrl, event),
+  logger: console,
+});
+
+// Boot-time restoration: open secondary subs for every paired relay URL.
+// Deduplicated by relayPool's ref counting (union across pairings).
+{
+  const allPairs = clientsStorage.loadAll();
+  const bootRelays = new Set(allPairs.flatMap((p) => p.relayUrls));
+  for (const url of bootRelays) {
+    if (url === PUBLIC_PRIMARY_URL) continue; // skip primary
+    relayPool.addRelay(url);
+  }
+  if (bootRelays.size > 0) {
+    console.log(`[Boot] Restored ${bootRelays.size} secondary relay subs from clients.json`);
+  }
+}
+
 server.listen(HTTP_PORT, () => {
   console.log(`[HTTP] Listening on port ${HTTP_PORT}`);
+  // Primary sub (ws://localhost:7778) — unchanged behavior, broad filter.
   connectRelay();
 });

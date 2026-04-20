@@ -17,6 +17,7 @@ enum SharedConstants {
     static let blockedKindsKey = "blockedKinds"
     static let autoSignKey = "autoSignEnabled"
     static let pendingRequestsKey = "pendingRequests"
+    static let pendingPairOpsKey = "pendingPairOps"
     static let bunkerSecretKey = "bunkerSecret"
     static let pairedClientsKey = "pairedClients"
     static let clientPermissionsKey = "clientPermissions"

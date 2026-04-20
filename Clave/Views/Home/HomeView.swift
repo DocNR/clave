@@ -60,11 +60,12 @@ struct HomeView: View {
                             NavigationLink(destination: ClientDetailView(pubkey: client.pubkey)) {
                                 clientRow(client)
                             }
-                        }
-                        .onDelete { indexSet in
-                            for index in indexSet {
-                                let client = sortedClients[index]
-                                clientToUnpair = client
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                Button(role: .destructive) {
+                                    clientToUnpair = client
+                                } label: {
+                                    Label("Unpair", systemImage: "trash")
+                                }
                             }
                         }
                     }
@@ -105,6 +106,7 @@ struct HomeView: View {
                 Button("Unpair", role: .destructive) {
                     if let client = clientToUnpair {
                         withAnimation {
+                            appState.unpairClientWithProxy(clientPubkey: client.pubkey)
                             SharedStorage.removeClientPermissions(for: client.pubkey)
                             refreshData()
                         }

@@ -17,7 +17,8 @@ enum LightSigner {
         privateKey: Data,
         requestEvent: [String: Any],
         skipProtection: Bool = false,
-        responseRelays: [LightRelay]? = nil
+        responseRelays: [LightRelay]? = nil,
+        responseRelayUrl: String? = nil
     ) async throws -> RequestResult {
         guard let senderPubkey = requestEvent["pubkey"] as? String,
               let encryptedContent = requestEvent["content"] as? String else {
@@ -75,8 +76,30 @@ enum LightSigner {
             let expectedSecret = SharedStorage.getBunkerSecret()
 
             if !providedSecret.isEmpty && providedSecret == expectedSecret {
-                // Valid secret — create permissions if new, then rotate secret
-                if SharedStorage.getClientPermissions(for: senderPubkey) == nil {
+                // Valid secret — check cap before creating new permissions
+                let isExistingClient = SharedStorage.getClientPermissions(for: senderPubkey) != nil
+                if !isExistingClient {
+                    let currentCount = SharedStorage.getConnectedClients().count
+                    if currentCount >= 5 {
+                        logger.notice("[LightSigner] Bunker connect rejected: pairing cap reached (5)")
+                        let result = RequestResult(
+                            method: method, eventKind: nil, clientPubkey: senderPubkey,
+                            status: "blocked", errorMessage: "Pairing limit reached (5)"
+                        )
+                        logAndTrack(result: result, clientName: clientName)
+                        try await sendErrorResponse(
+                            requestId: requestId,
+                            error: "Pairing limit reached. Unpair an existing client in Clave settings.",
+                            privateKey: privateKey, senderPubkeyData: senderPubkeyData,
+                            senderPubkey: senderPubkey, isNip04: isNip04,
+                            responseRelays: responseRelays,
+                            responseRelayUrl: responseRelayUrl
+                        )
+                        return result
+                    }
+                }
+
+                if !isExistingClient {
                     let perms = ClientPermissions(
                         pubkey: senderPubkey,
                         trustLevel: .medium,
@@ -108,7 +131,8 @@ enum LightSigner {
                     requestId: requestId, error: "Invalid or missing bunker secret",
                     privateKey: privateKey, senderPubkeyData: senderPubkeyData,
                     senderPubkey: senderPubkey, isNip04: isNip04,
-                    responseRelays: responseRelays
+                    responseRelays: responseRelays,
+                    responseRelayUrl: responseRelayUrl
                 )
                 return result
             }
@@ -132,7 +156,8 @@ enum LightSigner {
                     requestId: requestId, error: "Client not paired — send connect with valid bunker secret first",
                     privateKey: privateKey, senderPubkeyData: senderPubkeyData,
                     senderPubkey: senderPubkey, isNip04: isNip04,
-                    responseRelays: responseRelays
+                    responseRelays: responseRelays,
+                    responseRelayUrl: responseRelayUrl
                 )
                 return result
             }
@@ -184,7 +209,8 @@ enum LightSigner {
                         requestId: requestId, error: "Permission denied — open Clave to approve",
                         privateKey: privateKey, senderPubkeyData: senderPubkeyData,
                         senderPubkey: senderPubkey, isNip04: isNip04,
-                        responseRelays: responseRelays
+                        responseRelays: responseRelays,
+                        responseRelayUrl: responseRelayUrl
                     )
                     return result
                 }
@@ -250,8 +276,11 @@ enum LightSigner {
             // Best-effort — accepted if at least one relay took the event.
             accepted = await publishResponseToRelays(responseRelays, event: eventDict)
         } else {
-            // Bunker/NSE path: publish to the signer's primary relay (relay.powr.build).
-            let relay = LightRelay(url: SharedConstants.relayURL)
+            // Bunker/NSE path: publish to the relay the request came in on
+            // (origin relay from push payload), falling back to the primary
+            // relay for handshake paths that don't have an origin yet.
+            let relayUrlString = responseRelayUrl ?? SharedConstants.relayURL
+            let relay = LightRelay(url: relayUrlString)
             try await relay.connect(timeout: 5.0)
             accepted = (try? await relay.publishEvent(event: eventDict)) ?? false
             relay.disconnect()
@@ -422,7 +451,8 @@ enum LightSigner {
         requestId: String, error: String,
         privateKey: Data, senderPubkeyData: Data,
         senderPubkey: String, isNip04: Bool,
-        responseRelays: [LightRelay]? = nil
+        responseRelays: [LightRelay]? = nil,
+        responseRelayUrl: String? = nil
     ) async throws {
         let responseDict: [String: Any] = ["id": requestId, "error": error]
         guard let responseData = try? JSONSerialization.data(withJSONObject: responseDict),
@@ -444,7 +474,8 @@ enum LightSigner {
         if let responseRelays = responseRelays, !responseRelays.isEmpty {
             _ = await publishResponseToRelays(responseRelays, event: eventDict)
         } else {
-            let relay = LightRelay(url: SharedConstants.relayURL)
+            let relayUrlString = responseRelayUrl ?? SharedConstants.relayURL
+            let relay = LightRelay(url: relayUrlString)
             try await relay.connect(timeout: 5.0)
             _ = try? await relay.publishEvent(event: eventDict)
             relay.disconnect()
