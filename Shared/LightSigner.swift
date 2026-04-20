@@ -280,7 +280,7 @@ enum LightSigner {
 
     // MARK: - Request Processing
 
-    private static func processRequest(method: String, params: [String], privateKey: Data) -> (String?, String?) {
+    static func processRequest(method: String, params: [String], privateKey: Data) -> (String?, String?) {
         switch method {
         case "ping":
             return ("pong", nil)
