@@ -266,6 +266,7 @@ const server = http.createServer((req, res) => {
         }
 
         storage.upsertToken({ token, pubkey: result.pubkey });
+        if (relayPool) relayPool.refreshFilter();
         console.log(
           `[HTTP] Registered ${token.slice(0, 8)}... for pubkey ${result.pubkey.slice(0, 8)}...`
         );
@@ -323,6 +324,7 @@ const server = http.createServer((req, res) => {
         }
 
         storage.removeToken({ token, pubkey: result.pubkey });
+        if (relayPool) relayPool.refreshFilter();
         console.log(
           `[HTTP] Unregistered ${token.slice(0, 8)}... for pubkey ${result.pubkey.slice(0, 8)}...`
         );
