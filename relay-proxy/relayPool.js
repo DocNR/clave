@@ -8,8 +8,9 @@ function createRelayPool({
   signerPubkeysProvider = () => [],
   onEvent = () => {},
   logger = console,
+  reconnectInitialMs = 1000,
+  reconnectMaxMs = 600_000, // 10 min
 } = {}) {
-  // URL → { ws, refCount, state, url }
   const pool = new Map();
 
   function narrowFilter() {
@@ -29,14 +30,26 @@ function createRelayPool({
     if (!entry.ws || entry.ws.readyState !== WebSocket.OPEN) return;
     try {
       entry.ws.send(JSON.stringify(["CLOSE", SUB_ID]));
-    } catch (e) {
-      // best-effort
-    }
+    } catch {}
+  }
+
+  function scheduleReconnect(entry) {
+    if (entry.refCount <= 0) return; // released; don't reconnect
+    if (entry.reconnectTimer) return; // already scheduled
+    const delay = Math.min(entry.backoffMs, reconnectMaxMs);
+    logger.log(`[RelayPool] ${entry.url} reconnecting in ${delay}ms (failures=${entry.failures})`);
+    entry.reconnectTimer = setTimeout(() => {
+      entry.reconnectTimer = null;
+      if (entry.refCount <= 0) return;
+      entry.backoffMs = Math.min(entry.backoffMs * 2, reconnectMaxMs);
+      openSocket(entry);
+    }, delay);
   }
 
   function attachHandlers(entry) {
     entry.ws.on("open", () => {
       entry.state = "ready";
+      entry.backoffMs = reconnectInitialMs; // reset backoff on success
       logger.log(`[RelayPool] ${entry.url} connected`);
       sendReq(entry);
     });
@@ -60,6 +73,8 @@ function createRelayPool({
 
     entry.ws.on("close", () => {
       entry.state = "closed";
+      entry.failures++;
+      scheduleReconnect(entry);
     });
 
     entry.ws.on("error", (err) => {
@@ -67,8 +82,14 @@ function createRelayPool({
     });
   }
 
+  function openSocket(entry) {
+    entry.ws = createSocket(entry.url);
+    entry.state = "connecting";
+    attachHandlers(entry);
+  }
+
   function addRelay(url) {
-    if (url === PRIMARY_RELAY_URL) return; // covered by top-level primary sub in proxy.js
+    if (url === PRIMARY_RELAY_URL) return;
     const existing = pool.get(url);
     if (existing) {
       existing.refCount++;
@@ -76,12 +97,15 @@ function createRelayPool({
     }
     const entry = {
       url,
-      ws: createSocket(url),
+      ws: null,
       refCount: 1,
       state: "connecting",
+      backoffMs: reconnectInitialMs,
+      failures: 0,
+      reconnectTimer: null,
     };
     pool.set(url, entry);
-    attachHandlers(entry);
+    openSocket(entry);
   }
 
   function releaseRelay(url) {
@@ -89,22 +113,13 @@ function createRelayPool({
     if (!entry) return;
     entry.refCount--;
     if (entry.refCount <= 0) {
+      if (entry.reconnectTimer) clearTimeout(entry.reconnectTimer);
       sendClose(entry);
       try {
-        entry.ws.close();
+        entry.ws && entry.ws.close();
       } catch {}
       pool.delete(url);
     }
-  }
-
-  function getState(url) {
-    const entry = pool.get(url);
-    if (!entry) return null;
-    return { url: entry.url, refCount: entry.refCount, state: entry.state };
-  }
-
-  function listUrls() {
-    return Array.from(pool.keys());
   }
 
   function refreshFilter() {
@@ -115,7 +130,30 @@ function createRelayPool({
     }
   }
 
-  return { addRelay, releaseRelay, refreshFilter, getState, listUrls };
+  function getState(url) {
+    const entry = pool.get(url);
+    if (!entry) return null;
+    return {
+      url: entry.url,
+      refCount: entry.refCount,
+      state: entry.state,
+      failures: entry.failures,
+    };
+  }
+
+  function listUrls() {
+    return Array.from(pool.keys());
+  }
+
+  function shutdown() {
+    for (const entry of pool.values()) {
+      if (entry.reconnectTimer) clearTimeout(entry.reconnectTimer);
+      try { entry.ws && entry.ws.close(); } catch {}
+    }
+    pool.clear();
+  }
+
+  return { addRelay, releaseRelay, refreshFilter, getState, listUrls, shutdown };
 }
 
 module.exports = { createRelayPool };

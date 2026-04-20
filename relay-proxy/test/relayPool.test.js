@@ -196,3 +196,57 @@ test("refreshFilter is a no-op for WSs not yet open", () => {
   pool.refreshFilter();
   assert.equal(factory.sockets[0].sent.length, 0, "no messages sent to un-opened sockets");
 });
+
+test("on WS close, opens a new WS after backoff (still ref'd)", async () => {
+  const factory = makeFactory();
+  const { createRelayPool } = require("../relayPool");
+  const pool = createRelayPool({
+    createSocket: factory,
+    signerPubkeysProvider: () => ["s1"],
+    reconnectInitialMs: 10,
+    reconnectMaxMs: 50,
+  });
+  pool.addRelay("wss://a");
+  factory.sockets[0]._openFromServer();
+  // Simulate server-side disconnect
+  factory.sockets[0].emit("close");
+  await new Promise((r) => setTimeout(r, 30));
+  assert.equal(factory.sockets.length, 2, "should have created a replacement WS");
+  assert.equal(factory.sockets[1]._url, "wss://a");
+});
+
+test("reconnect backoff grows on repeated failures, capped at max", async () => {
+  const factory = makeFactory();
+  const { createRelayPool } = require("../relayPool");
+  const pool = createRelayPool({
+    createSocket: factory,
+    signerPubkeysProvider: () => ["s1"],
+    reconnectInitialMs: 10,
+    reconnectMaxMs: 40,
+  });
+  pool.addRelay("wss://a");
+  // Three sequential failures — each close before open
+  factory.sockets[0].emit("close"); // backoff 10ms → new WS
+  await new Promise((r) => setTimeout(r, 20));
+  factory.sockets[1].emit("close"); // backoff 20ms → new WS
+  await new Promise((r) => setTimeout(r, 30));
+  factory.sockets[2].emit("close"); // backoff 40ms (capped) → new WS
+  await new Promise((r) => setTimeout(r, 50));
+  assert.ok(factory.sockets.length >= 4, `expected ≥ 4 sockets, got ${factory.sockets.length}`);
+});
+
+test("no reconnect after releaseRelay drops refcount to 0", async () => {
+  const factory = makeFactory();
+  const { createRelayPool } = require("../relayPool");
+  const pool = createRelayPool({
+    createSocket: factory,
+    signerPubkeysProvider: () => ["s1"],
+    reconnectInitialMs: 10,
+    reconnectMaxMs: 50,
+  });
+  pool.addRelay("wss://a");
+  factory.sockets[0]._openFromServer();
+  pool.releaseRelay("wss://a");
+  await new Promise((r) => setTimeout(r, 30));
+  assert.equal(factory.sockets.length, 1, "should NOT create replacement after release");
+});
