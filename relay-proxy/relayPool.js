@@ -3,6 +3,12 @@ const WebSocket = require("ws");
 const SUB_ID = "clave-watch";
 const PRIMARY_RELAY_URL = "wss://relay.powr.build";
 
+// Same heartbeat settings as the primary sub in proxy.js (connectRelay).
+// NAT/firewall can silently drop idle TCP; without ping/pong the pool would
+// happily sit on a zombie socket and miss events indefinitely.
+const PING_INTERVAL_MS = 30_000;
+const PONG_TIMEOUT_MS = 10_000;
+
 function createRelayPool({
   createSocket = (url) => new WebSocket(url),
   signerPubkeysProvider = () => [],
@@ -10,6 +16,8 @@ function createRelayPool({
   logger = console,
   reconnectInitialMs = 1000,
   reconnectMaxMs = 600_000, // 10 min
+  pingIntervalMs = PING_INTERVAL_MS,
+  pongTimeoutMs = PONG_TIMEOUT_MS,
 } = {}) {
   const pool = new Map();
 
@@ -33,6 +41,33 @@ function createRelayPool({
     } catch {}
   }
 
+  function startHeartbeat(entry) {
+    stopHeartbeat(entry);
+    entry.pingTimer = setInterval(() => {
+      if (!entry.ws || entry.ws.readyState !== WebSocket.OPEN) return;
+      try {
+        entry.ws.ping();
+      } catch {}
+      entry.pongTimer = setTimeout(() => {
+        logger.error(`[RelayPool] ${entry.url} pong timeout — terminating`);
+        try {
+          entry.ws.terminate();
+        } catch {}
+      }, pongTimeoutMs);
+    }, pingIntervalMs);
+  }
+
+  function stopHeartbeat(entry) {
+    if (entry.pingTimer) {
+      clearInterval(entry.pingTimer);
+      entry.pingTimer = null;
+    }
+    if (entry.pongTimer) {
+      clearTimeout(entry.pongTimer);
+      entry.pongTimer = null;
+    }
+  }
+
   function scheduleReconnect(entry) {
     if (entry.refCount <= 0) return; // released; don't reconnect
     if (entry.reconnectTimer) return; // already scheduled
@@ -52,6 +87,7 @@ function createRelayPool({
       entry.backoffMs = reconnectInitialMs; // reset backoff on success
       logger.log(`[RelayPool] ${entry.url} connected`);
       sendReq(entry);
+      startHeartbeat(entry);
     });
 
     entry.ws.on("message", (data) => {
@@ -71,9 +107,17 @@ function createRelayPool({
       }
     });
 
+    entry.ws.on("pong", () => {
+      if (entry.pongTimer) {
+        clearTimeout(entry.pongTimer);
+        entry.pongTimer = null;
+      }
+    });
+
     entry.ws.on("close", () => {
       entry.state = "closed";
       entry.failures++;
+      stopHeartbeat(entry);
       scheduleReconnect(entry);
     });
 
@@ -103,6 +147,8 @@ function createRelayPool({
       backoffMs: reconnectInitialMs,
       failures: 0,
       reconnectTimer: null,
+      pingTimer: null,
+      pongTimer: null,
     };
     pool.set(url, entry);
     openSocket(entry);
@@ -114,6 +160,7 @@ function createRelayPool({
     entry.refCount--;
     if (entry.refCount <= 0) {
       if (entry.reconnectTimer) clearTimeout(entry.reconnectTimer);
+      stopHeartbeat(entry);
       sendClose(entry);
       try {
         entry.ws && entry.ws.close();
@@ -148,6 +195,7 @@ function createRelayPool({
   function shutdown() {
     for (const entry of pool.values()) {
       if (entry.reconnectTimer) clearTimeout(entry.reconnectTimer);
+      stopHeartbeat(entry);
       try { entry.ws && entry.ws.close(); } catch {}
     }
     pool.clear();

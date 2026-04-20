@@ -397,6 +397,22 @@ const server = http.createServer((req, res) => {
           res.writeHead(400, { "Content-Type": "application/json" });
           return res.end(JSON.stringify({ error: "relay_limit_per_pair", limit: 10, requested: relay_urls.length }));
         }
+        // Validate each URL is parseable and ws/wss before passing to relayPool.addRelay —
+        // the `ws` constructor throws synchronously on malformed input, which would leave
+        // clients.json and the pool out of sync if we didn't pre-validate.
+        for (const url of relay_urls) {
+          let parsed;
+          try {
+            parsed = new URL(url);
+          } catch {
+            res.writeHead(400, { "Content-Type": "application/json" });
+            return res.end(JSON.stringify({ error: "invalid_relay_url", url }));
+          }
+          if (parsed.protocol !== "wss:" && parsed.protocol !== "ws:") {
+            res.writeHead(400, { "Content-Type": "application/json" });
+            return res.end(JSON.stringify({ error: "invalid_relay_url", url }));
+          }
+        }
 
         const signerPubkey = result.pubkey;
         const existingCount = clientsStorage.countBySigner(signerPubkey);
@@ -580,22 +596,19 @@ function handleSecondaryEvent(relayUrl, event) {
   });
 }
 
-server.listen(HTTP_PORT, () => {
-  console.log(`[HTTP] Listening on port ${HTTP_PORT}`);
+// Initialize the secondary-relay pool at module scope BEFORE server.listen so
+// incoming requests to /pair-client (which arrive the moment listen() returns)
+// never race with pool init. The pool has no network cost until addRelay is
+// called, so safe to create eagerly.
+relayPool = createRelayPool({
+  signerPubkeysProvider: () => [...new Set(storage.loadTokens().map((t) => t.pubkey))],
+  onEvent: (relayUrl, event) => handleSecondaryEvent(relayUrl, event),
+  logger: console,
+});
 
-  // Initialize the secondary-relay pool. Signer pubkeys come from the token
-  // storage so new registrations naturally extend the #p filter.
-  relayPool = createRelayPool({
-    signerPubkeysProvider: () => [...new Set(storage.loadTokens().map((t) => t.pubkey))],
-    onEvent: (relayUrl, event) => handleSecondaryEvent(relayUrl, event),
-    logger: console,
-  });
-
-  // Primary sub (ws://localhost:7778) — unchanged behavior, broad filter.
-  connectRelay();
-
-  // Boot-time restoration: open secondary subs for every paired relay URL.
-  // Deduplicated by relayPool's ref counting (union across pairings).
+// Boot-time restoration: open secondary subs for every paired relay URL.
+// Deduplicated by relayPool's ref counting (union across pairings).
+{
   const allPairs = clientsStorage.loadAll();
   const bootRelays = new Set(allPairs.flatMap((p) => p.relayUrls));
   for (const url of bootRelays) {
@@ -605,4 +618,10 @@ server.listen(HTTP_PORT, () => {
   if (bootRelays.size > 0) {
     console.log(`[Boot] Restored ${bootRelays.size} secondary relay subs from clients.json`);
   }
+}
+
+server.listen(HTTP_PORT, () => {
+  console.log(`[HTTP] Listening on port ${HTTP_PORT}`);
+  // Primary sub (ws://localhost:7778) — unchanged behavior, broad filter.
+  connectRelay();
 });

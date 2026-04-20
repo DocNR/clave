@@ -7,14 +7,17 @@ function makeFakeSocket() {
   const ws = new EventEmitter();
   ws.readyState = 0; // CONNECTING
   ws.sent = [];
+  ws.pingCount = 0;
+  ws.terminated = false;
   ws.send = (msg) => ws.sent.push(msg);
-  ws.ping = () => {};
+  ws.ping = () => { ws.pingCount++; };
   ws.close = () => {
     ws.readyState = 3; // CLOSED
     ws.emit("close");
   };
   ws.terminate = () => {
     ws.readyState = 3;
+    ws.terminated = true;
     ws.emit("close");
   };
   // Helper for tests — simulate the server side opening the socket
@@ -249,4 +252,76 @@ test("no reconnect after releaseRelay drops refcount to 0", async () => {
   pool.releaseRelay("wss://a");
   await new Promise((r) => setTimeout(r, 30));
   assert.equal(factory.sockets.length, 1, "should NOT create replacement after release");
+});
+
+test("heartbeat pings open socket on interval", async () => {
+  const factory = makeFactory();
+  const { createRelayPool } = require("../relayPool");
+  const pool = createRelayPool({
+    createSocket: factory,
+    signerPubkeysProvider: () => ["s1"],
+    pingIntervalMs: 20,
+    pongTimeoutMs: 50,
+  });
+  pool.addRelay("wss://a");
+  factory.sockets[0]._openFromServer();
+  await new Promise((r) => setTimeout(r, 50));
+  assert.ok(factory.sockets[0].pingCount >= 2, `expected ≥2 pings, got ${factory.sockets[0].pingCount}`);
+  pool.shutdown();
+});
+
+test("pong-timeout triggers ws.terminate()", async () => {
+  const factory = makeFactory();
+  const { createRelayPool } = require("../relayPool");
+  const pool = createRelayPool({
+    createSocket: factory,
+    signerPubkeysProvider: () => ["s1"],
+    pingIntervalMs: 10,
+    pongTimeoutMs: 20,
+  });
+  pool.addRelay("wss://a");
+  factory.sockets[0]._openFromServer();
+  // Do NOT emit 'pong' — simulate silent zombie socket
+  await new Promise((r) => setTimeout(r, 50));
+  assert.ok(factory.sockets[0].terminated, "silent socket should have been terminated");
+  pool.shutdown();
+});
+
+test("pong reply cancels pong-timeout", async () => {
+  const factory = makeFactory();
+  const { createRelayPool } = require("../relayPool");
+  const pool = createRelayPool({
+    createSocket: factory,
+    signerPubkeysProvider: () => ["s1"],
+    pingIntervalMs: 10,
+    pongTimeoutMs: 30,
+  });
+  pool.addRelay("wss://a");
+  factory.sockets[0]._openFromServer();
+  // Keep replying to every ping with a pong
+  const pongInterval = setInterval(() => {
+    factory.sockets[0].emit("pong");
+  }, 5);
+  await new Promise((r) => setTimeout(r, 50));
+  clearInterval(pongInterval);
+  assert.ok(!factory.sockets[0].terminated, "responsive socket should NOT be terminated");
+  pool.shutdown();
+});
+
+test("heartbeat stops on release", async () => {
+  const factory = makeFactory();
+  const { createRelayPool } = require("../relayPool");
+  const pool = createRelayPool({
+    createSocket: factory,
+    signerPubkeysProvider: () => ["s1"],
+    pingIntervalMs: 10,
+    pongTimeoutMs: 20,
+  });
+  pool.addRelay("wss://a");
+  factory.sockets[0]._openFromServer();
+  await new Promise((r) => setTimeout(r, 15));
+  const pingCountBeforeRelease = factory.sockets[0].pingCount;
+  pool.releaseRelay("wss://a");
+  await new Promise((r) => setTimeout(r, 30));
+  assert.equal(factory.sockets[0].pingCount, pingCountBeforeRelease, "no further pings after release");
 });
