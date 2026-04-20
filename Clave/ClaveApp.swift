@@ -146,7 +146,8 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                 do {
                     let result = try await LightSigner.handleRequest(
                         privateKey: privateKey,
-                        requestEvent: event
+                        requestEvent: event,
+                        responseRelayUrl: relayUrlString
                     )
                     processedIDs.insert(eventId)
                     if result.status == "error" && result.errorMessage == "Decrypt failed" {

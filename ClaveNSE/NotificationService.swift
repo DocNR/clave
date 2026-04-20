@@ -169,7 +169,8 @@ class NotificationService: UNNotificationServiceExtension {
                 do {
                     let result = try await LightSigner.handleRequest(
                         privateKey: privateKey,
-                        requestEvent: event
+                        requestEvent: event,
+                        responseRelayUrl: relayUrlString
                     )
                     processedIDs.insert(eventId)
                     // Decrypt failures mean "not for us" — skip silently
