@@ -3,6 +3,7 @@ import SwiftUI
 struct ClientDetailView: View {
     let pubkey: String
 
+    @Environment(AppState.self) private var appState
     @State private var permissions: ClientPermissions?
     @State private var selectedTrust: TrustLevel = .medium
     @State private var kindOverrides: [Int: Bool] = [:]
@@ -407,6 +408,7 @@ struct ClientDetailView: View {
     }
 
     private func performUnpair() {
+        appState.unpairClientWithProxy(clientPubkey: pubkey)
         SharedStorage.removeClientPermissions(for: pubkey)
         dismiss()
     }

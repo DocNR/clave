@@ -696,20 +696,35 @@ final class AppState {
     }
 
     private func retryPairOp(op: PairOp, relayUrls: [String]) {
-        guard let nsec = SharedKeychain.loadNsec() else { return }
+        // No-nsec / setup-failure early returns: remove the op rather than let it
+        // sit forever. A PairOp without a signable key is meaningless — the op
+        // was queued before a key rotation or delete.
+        guard let nsec = SharedKeychain.loadNsec() else {
+            SharedStorage.removePendingPairOp(id: op.id)
+            return
+        }
         let privateKey: Data
-        do { privateKey = try Bech32.decodeNsec(nsec) } catch { return }
+        do { privateKey = try Bech32.decodeNsec(nsec) } catch {
+            SharedStorage.removePendingPairOp(id: op.id)
+            return
+        }
 
         let proxyURL = SharedConstants.sharedDefaults.string(forKey: SharedConstants.proxyURLKey)
             ?? SharedConstants.defaultProxyURL
         let pairURL = "\(proxyURL)/pair-client"
-        guard let url = URL(string: pairURL) else { return }
+        guard let url = URL(string: pairURL) else {
+            SharedStorage.removePendingPairOp(id: op.id)
+            return
+        }
 
         let bodyDict: [String: Any] = [
             "client_pubkey": op.clientPubkey,
             "relay_urls": relayUrls
         ]
-        guard let bodyData = try? JSONSerialization.data(withJSONObject: bodyDict) else { return }
+        guard let bodyData = try? JSONSerialization.data(withJSONObject: bodyDict) else {
+            SharedStorage.removePendingPairOp(id: op.id)
+            return
+        }
         let bodyHash = SHA256.hash(data: bodyData).map { String(format: "%02x", $0) }.joined()
 
         let authHeader: String
@@ -720,7 +735,10 @@ final class AppState {
                 method: "POST",
                 bodySha256Hex: bodyHash
             )
-        } catch { return }
+        } catch {
+            SharedStorage.bumpPendingPairOpFailCount(id: op.id)
+            return
+        }
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -740,17 +758,29 @@ final class AppState {
     }
 
     private func retryUnpairOp(op: PairOp) {
-        guard let nsec = SharedKeychain.loadNsec() else { return }
+        guard let nsec = SharedKeychain.loadNsec() else {
+            SharedStorage.removePendingPairOp(id: op.id)
+            return
+        }
         let privateKey: Data
-        do { privateKey = try Bech32.decodeNsec(nsec) } catch { return }
+        do { privateKey = try Bech32.decodeNsec(nsec) } catch {
+            SharedStorage.removePendingPairOp(id: op.id)
+            return
+        }
 
         let proxyURL = SharedConstants.sharedDefaults.string(forKey: SharedConstants.proxyURLKey)
             ?? SharedConstants.defaultProxyURL
         let unpairURL = "\(proxyURL)/unpair-client"
-        guard let url = URL(string: unpairURL) else { return }
+        guard let url = URL(string: unpairURL) else {
+            SharedStorage.removePendingPairOp(id: op.id)
+            return
+        }
 
         let bodyDict: [String: Any] = ["client_pubkey": op.clientPubkey]
-        guard let bodyData = try? JSONSerialization.data(withJSONObject: bodyDict) else { return }
+        guard let bodyData = try? JSONSerialization.data(withJSONObject: bodyDict) else {
+            SharedStorage.removePendingPairOp(id: op.id)
+            return
+        }
         let bodyHash = SHA256.hash(data: bodyData).map { String(format: "%02x", $0) }.joined()
 
         let authHeader: String
@@ -761,7 +791,10 @@ final class AppState {
                 method: "POST",
                 bodySha256Hex: bodyHash
             )
-        } catch { return }
+        } catch {
+            SharedStorage.bumpPendingPairOpFailCount(id: op.id)
+            return
+        }
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
