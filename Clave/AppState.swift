@@ -379,6 +379,16 @@ final class AppState {
                     )
                     SharedStorage.logActivity(entry)
                     activityLogged = true
+
+                    // Tell the proxy about this pair so it opens secondary subs
+                    // on the URI relays. Best-effort — failures queue for retry
+                    // via SharedStorage.pendingPairOps.
+                    if success {
+                        pairClientWithProxy(
+                            clientPubkey: parsedURI.clientPubkey,
+                            relayUrls: parsedURI.relays
+                        )
+                    }
                 }
             }
 
@@ -525,6 +535,120 @@ final class AppState {
         request.httpBody = bodyData
 
         URLSession.shared.dataTask(with: request) { _, _, _ in }.resume()
+    }
+
+    // MARK: - Proxy per-client-relay (V2)
+
+    /// Notify the proxy of a nostrconnect pair so it can open secondary relay
+    /// subscriptions. Fire-and-forget from the caller's perspective; failures
+    /// are queued in SharedStorage.pendingPairOps for later retry.
+    func pairClientWithProxy(clientPubkey: String, relayUrls: [String]) {
+        guard let nsec = SharedKeychain.loadNsec() else { return }
+        let privateKey: Data
+        do {
+            privateKey = try Bech32.decodeNsec(nsec)
+        } catch {
+            return
+        }
+
+        let proxyURL = SharedConstants.sharedDefaults.string(forKey: SharedConstants.proxyURLKey)
+            ?? SharedConstants.defaultProxyURL
+        let pairURL = "\(proxyURL)/pair-client"
+        guard let url = URL(string: pairURL) else { return }
+
+        let bodyDict: [String: Any] = [
+            "client_pubkey": clientPubkey,
+            "relay_urls": relayUrls
+        ]
+        guard let bodyData = try? JSONSerialization.data(withJSONObject: bodyDict) else { return }
+        let bodyHash = SHA256.hash(data: bodyData).map { String(format: "%02x", $0) }.joined()
+
+        let authHeader: String
+        do {
+            authHeader = try LightEvent.signNip98(
+                privateKey: privateKey,
+                url: pairURL,
+                method: "POST",
+                bodySha256Hex: bodyHash
+            )
+        } catch {
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 10
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(authHeader, forHTTPHeaderField: "X-Clave-Auth")
+        request.httpBody = bodyData
+
+        URLSession.shared.dataTask(with: request) { _, response, _ in
+            let http = response as? HTTPURLResponse
+            if http?.statusCode == 200 { return }
+            // Any non-200 (including network error → http == nil) queues for retry.
+            let op = PairOp(
+                id: UUID().uuidString,
+                kind: .pair,
+                clientPubkey: clientPubkey,
+                relayUrls: relayUrls,
+                createdAt: Date().timeIntervalSince1970,
+                failCount: 0
+            )
+            SharedStorage.enqueuePendingPairOp(op)
+        }.resume()
+    }
+
+    /// Notify the proxy of an unpair. Same failure semantics as pair.
+    func unpairClientWithProxy(clientPubkey: String) {
+        guard let nsec = SharedKeychain.loadNsec() else { return }
+        let privateKey: Data
+        do {
+            privateKey = try Bech32.decodeNsec(nsec)
+        } catch {
+            return
+        }
+
+        let proxyURL = SharedConstants.sharedDefaults.string(forKey: SharedConstants.proxyURLKey)
+            ?? SharedConstants.defaultProxyURL
+        let unpairURL = "\(proxyURL)/unpair-client"
+        guard let url = URL(string: unpairURL) else { return }
+
+        let bodyDict: [String: Any] = ["client_pubkey": clientPubkey]
+        guard let bodyData = try? JSONSerialization.data(withJSONObject: bodyDict) else { return }
+        let bodyHash = SHA256.hash(data: bodyData).map { String(format: "%02x", $0) }.joined()
+
+        let authHeader: String
+        do {
+            authHeader = try LightEvent.signNip98(
+                privateKey: privateKey,
+                url: unpairURL,
+                method: "POST",
+                bodySha256Hex: bodyHash
+            )
+        } catch {
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 10
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(authHeader, forHTTPHeaderField: "X-Clave-Auth")
+        request.httpBody = bodyData
+
+        URLSession.shared.dataTask(with: request) { _, response, _ in
+            let http = response as? HTTPURLResponse
+            if http?.statusCode == 200 { return }
+            let op = PairOp(
+                id: UUID().uuidString,
+                kind: .unpair,
+                clientPubkey: clientPubkey,
+                relayUrls: nil,
+                createdAt: Date().timeIntervalSince1970,
+                failCount: 0
+            )
+            SharedStorage.enqueuePendingPairOp(op)
+        }.resume()
     }
 
     // MARK: - Multi-relay helpers (nostrconnect handshake)
