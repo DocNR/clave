@@ -27,10 +27,14 @@ const PONG_TIMEOUT = 10000; // 10 seconds to respond
 const { parseAuthHeader, verifyNip98, sha256Hex } = require("./nip98");
 const { createStorage } = require("./storage");
 const { createClientsStorage } = require("./clients");
+const { createRelayPool } = require("./relayPool");
+
+const PUBLIC_PRIMARY_URL = process.env.PUBLIC_RELAY_URL || "wss://relay.powr.build";
 
 const storage = createStorage(TOKEN_FILE);
 const CLIENTS_FILE = "./clients.json";
 const clientsStorage = createClientsStorage(CLIENTS_FILE);
+let relayPool = null; // initialized in server.listen after all deps are in scope
 const migrationResult = storage.migrateIfLegacy();
 if (migrationResult.migrated) {
   console.log(
@@ -192,66 +196,13 @@ function connectRelay() {
     try {
       const msg = JSON.parse(data.toString());
       if (msg[0] !== "EVENT" || msg[1] !== "clave-watch") return;
-
-      global.lastEventReceivedAt = new Date().toISOString();
-
       const event = msg[2];
-
-      // Extract the signer pubkey from the p-tag on the kind:24133 event
-      const pTag = (event.tags || []).find((t) => t[0] === "p");
-      if (!pTag || !pTag[1]) {
-        console.log(`[Relay] Event ${event.id.slice(0, 8)}... has no p-tag, skipping`);
-        return;
-      }
-      const targetPubkey = pTag[1];
-
-      // Skip responses from the signer themselves (pubkey === targetPubkey means the
-      // signer is p-tagging themselves, which doesn't happen in practice since responses
-      // are p-tagged to the client, but skip for safety)
-      if (event.pubkey === targetPubkey) return;
-
-      const matchingTokens = storage.findByPubkey(targetPubkey);
-      if (matchingTokens.length === 0) {
-        console.log(
-          `[Relay] Event for pubkey ${targetPubkey.slice(0, 8)}... — no registered tokens, skipping`
-        );
-        return;
-      }
-
-      if (alreadySeen(event.id)) {
-        console.log(`[Relay] Duplicate event ${event.id.slice(0, 8)}..., skipping`);
-        return;
-      }
-
-      console.log(
-        `[Relay] Event for pubkey ${targetPubkey.slice(0, 8)}... — pushing to ${matchingTokens.length} device(s)`
-      );
-
-      const pushPayload = {
-        aps: {
-          "mutable-content": 1,
-          "interruption-level": "passive",
-          alert: { title: " ", body: " " },
-        },
-        relay_url: process.env.PUBLIC_RELAY_URL || RELAY_URL,
-        event_id: event.id,
-      };
-
-      for (const entry of matchingTokens) {
-        try {
-          const status = await sendPush(entry.token, pushPayload);
-          if (status === 410) {
-            storage.removeToken({ token: entry.token, pubkey: entry.pubkey });
-            console.log(
-              `[APNs] Removed stale token: ${entry.token.slice(0, 8)}... for ${entry.pubkey.slice(0, 8)}...`
-            );
-          }
-        } catch (e) {
-          console.error(
-            `[APNs] Push failed for ${entry.token.slice(0, 8)}...: ${e.message}`
-          );
-        }
-      }
+      if (!event || event.kind !== 24133) return;
+      await dispatchCaughtEvent({
+        event,
+        sourceUrl: PUBLIC_PRIMARY_URL,
+        classification: "PRIMARY",
+      });
     } catch (e) {
       console.error("[Relay] Message handler error:", e.message);
     }
@@ -463,7 +414,9 @@ const server = http.createServer((req, res) => {
         }
 
         clientsStorage.addPair({ signerPubkey, clientPubkey: client_pubkey, relayUrls: relay_urls });
-        // TODO in Task 9: for each relay_urls, call relayPool.addRelay(url)
+        for (const url of relay_urls) {
+          relayPool.addRelay(url);
+        }
         console.log(
           `[HTTP] Paired client ${client_pubkey.slice(0, 8)}... for signer ${signerPubkey.slice(0, 8)}... with ${relay_urls.length} relays`
         );
@@ -525,7 +478,11 @@ const server = http.createServer((req, res) => {
         const signerPubkey = result.pubkey;
         const removed = clientsStorage.removePair({ signerPubkey, clientPubkey: client_pubkey });
         if (removed) {
-          // TODO in Task 9: for each removed.relayUrls, relayPool.releaseRelay(url)
+          if (Array.isArray(removed.relayUrls)) {
+            for (const url of removed.relayUrls) {
+              relayPool.releaseRelay(url);
+            }
+          }
           console.log(
             `[HTTP] Unpaired client ${client_pubkey.slice(0, 8)}... for signer ${signerPubkey.slice(0, 8)}...`
           );
@@ -563,7 +520,87 @@ const server = http.createServer((req, res) => {
   }
 });
 
+// Shared push pipeline: both the primary-sub handler (inside connectRelay)
+// and the secondary-relay pool route caught kind:24133 events through this.
+// sourceUrl is the relay the event was seen on, classification is PRIMARY|SECONDARY.
+async function dispatchCaughtEvent({ event, sourceUrl, classification }) {
+  const pTag = (event.tags || []).find((t) => t[0] === "p");
+  if (!pTag || !pTag[1]) return;
+  const targetPubkey = pTag[1];
+
+  // Guard against the signer p-tagging themselves (shouldn't happen in practice)
+  if (event.pubkey === targetPubkey) return;
+
+  const matchingTokens = storage.findByPubkey(targetPubkey);
+  if (matchingTokens.length === 0) {
+    console.log(
+      `[${classification}] Event for pubkey ${targetPubkey.slice(0, 8)}... — no registered tokens, skipping`
+    );
+    return;
+  }
+
+  if (alreadySeen(event.id)) return;
+
+  console.log(
+    `[Compliance] source=${sourceUrl} class=${classification} client=${event.pubkey.slice(0, 8)} signer=${targetPubkey.slice(0, 8)} event=${event.id.slice(0, 8)} ts=${new Date().toISOString()}`
+  );
+
+  global.lastEventReceivedAt = new Date().toISOString();
+
+  const pushPayload = {
+    aps: {
+      "mutable-content": 1,
+      "interruption-level": "passive",
+      alert: { title: " ", body: " " },
+    },
+    relay_url: classification === "PRIMARY" ? PUBLIC_PRIMARY_URL : sourceUrl,
+    event_id: event.id,
+  };
+
+  for (const entry of matchingTokens) {
+    try {
+      const status = await sendPush(entry.token, pushPayload);
+      if (status === 410) {
+        storage.removeToken({ token: entry.token, pubkey: entry.pubkey });
+        console.log(
+          `[APNs] Removed stale token: ${entry.token.slice(0, 8)}... for ${entry.pubkey.slice(0, 8)}...`
+        );
+      }
+    } catch (e) {
+      console.error(`[APNs] Push failed for ${entry.token.slice(0, 8)}...: ${e.message}`);
+    }
+  }
+}
+
+function handleSecondaryEvent(relayUrl, event) {
+  dispatchCaughtEvent({ event, sourceUrl: relayUrl, classification: "SECONDARY" }).catch((e) => {
+    console.error(`[Secondary] dispatch error: ${e.message}`);
+  });
+}
+
 server.listen(HTTP_PORT, () => {
   console.log(`[HTTP] Listening on port ${HTTP_PORT}`);
+
+  // Initialize the secondary-relay pool. Signer pubkeys come from the token
+  // storage so new registrations naturally extend the #p filter.
+  relayPool = createRelayPool({
+    signerPubkeysProvider: () => [...new Set(storage.loadTokens().map((t) => t.pubkey))],
+    onEvent: (relayUrl, event) => handleSecondaryEvent(relayUrl, event),
+    logger: console,
+  });
+
+  // Primary sub (ws://localhost:7778) — unchanged behavior, broad filter.
   connectRelay();
+
+  // Boot-time restoration: open secondary subs for every paired relay URL.
+  // Deduplicated by relayPool's ref counting (union across pairings).
+  const allPairs = clientsStorage.loadAll();
+  const bootRelays = new Set(allPairs.flatMap((p) => p.relayUrls));
+  for (const url of bootRelays) {
+    if (url === PUBLIC_PRIMARY_URL) continue; // skip primary
+    relayPool.addRelay(url);
+  }
+  if (bootRelays.size > 0) {
+    console.log(`[Boot] Restored ${bootRelays.size} secondary relay subs from clients.json`);
+  }
 });
