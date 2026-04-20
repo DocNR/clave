@@ -8,6 +8,7 @@ struct ApprovalSheet: View {
     @State private var selectedTrust: TrustLevel
     @State private var kindOverrides: [Int: Bool] = [:]
     @State private var showPermissions = false
+    @State private var capExceeded = false
 
     private let protectedKinds: Set<Int> = SharedStorage.getProtectedKinds()
 
@@ -30,6 +31,11 @@ struct ApprovalSheet: View {
             }
             .navigationTitle("Approve Connection")
             .navigationBarTitleDisplayMode(.inline)
+            .alert("Free tier limit reached", isPresented: $capExceeded) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text("You've paired the maximum 5 clients. Unpair one from Settings → Clients to continue.")
+            }
         }
     }
 
@@ -234,6 +240,16 @@ struct ApprovalSheet: View {
     }
 
     private func buildAndApprove() {
+        // Free-tier cap: 5 paired clients total (bunker + nostrconnect combined).
+        // Counts the union in SharedStorage.connectedClients. Re-pairing an
+        // existing client (same pubkey) isn't blocked since no new row is added.
+        let connected = SharedStorage.getConnectedClients()
+        let alreadyPaired = connected.contains { $0.pubkey == parsedURI.clientPubkey }
+        if !alreadyPaired && connected.count >= 5 {
+            capExceeded = true
+            return
+        }
+
         let permissions = ClientPermissions(
             pubkey: parsedURI.clientPubkey,
             trustLevel: selectedTrust,
