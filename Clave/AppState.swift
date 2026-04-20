@@ -35,6 +35,18 @@ final class AppState {
     var profile: CachedProfile?
     var profileImage: UIImage?
 
+    init() {
+        // Drain the /pair-client retry queue on every app foreground. The
+        // AppDelegate posts .drainPendingPairOps from applicationDidBecomeActive.
+        NotificationCenter.default.addObserver(
+            forName: .drainPendingPairOps,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.drainPendingPairOps()
+        }
+    }
+
     var npub: String {
         guard !signerPubkeyHex.isEmpty,
               let pubkey = try? PublicKey.parse(publicKey: signerPubkeyHex) else { return "" }
@@ -215,6 +227,13 @@ final class AppState {
 
     func deleteKey() {
         // Unregister BEFORE wiping the keychain — needs the nsec to sign the NIP-98 header.
+        // Also bulk-unpair every known client first (best-effort) so the proxy releases its
+        // secondary relay refs. Any failures become 90-day-GC'd orphans on the proxy.
+        let clientsToUnpair = SharedStorage.getConnectedClients()
+        for client in clientsToUnpair {
+            unpairClientWithProxy(clientPubkey: client.pubkey)
+        }
+        SharedStorage.clearPendingPairOps()  // nuking the key; drop any queued ops
         unregisterWithProxy()
         SharedKeychain.deleteNsec()
         SharedConstants.sharedDefaults.removeObject(forKey: SharedConstants.signerPubkeyHexKey)
@@ -478,9 +497,10 @@ final class AppState {
         request.setValue(authHeader, forHTTPHeaderField: "X-Clave-Auth")
         request.httpBody = bodyData
 
-        URLSession.shared.dataTask(with: request) { _, response, error in
+        URLSession.shared.dataTask(with: request) { [weak self] _, response, error in
             DispatchQueue.main.async {
                 if let http = response as? HTTPURLResponse, http.statusCode == 200 {
+                    self?.drainPendingPairOps()
                     completion?(true, "Registered")
                 } else if let http = response as? HTTPURLResponse {
                     completion?(false, "Failed: HTTP \(http.statusCode)")
@@ -648,6 +668,115 @@ final class AppState {
                 failCount: 0
             )
             SharedStorage.enqueuePendingPairOp(op)
+        }.resume()
+    }
+
+    /// Drain the pending pair/unpair ops queue. Called on app foreground and
+    /// after successful /register. Each op is retried once per drain attempt;
+    /// ops that fail 3 times are removed.
+    func drainPendingPairOps() {
+        let ops = SharedStorage.getPendingPairOps()
+        guard !ops.isEmpty else { return }
+        for op in ops {
+            if op.failCount >= 3 {
+                SharedStorage.removePendingPairOp(id: op.id)
+                continue
+            }
+            switch op.kind {
+            case .pair:
+                if let relays = op.relayUrls {
+                    retryPairOp(op: op, relayUrls: relays)
+                } else {
+                    SharedStorage.removePendingPairOp(id: op.id)
+                }
+            case .unpair:
+                retryUnpairOp(op: op)
+            }
+        }
+    }
+
+    private func retryPairOp(op: PairOp, relayUrls: [String]) {
+        guard let nsec = SharedKeychain.loadNsec() else { return }
+        let privateKey: Data
+        do { privateKey = try Bech32.decodeNsec(nsec) } catch { return }
+
+        let proxyURL = SharedConstants.sharedDefaults.string(forKey: SharedConstants.proxyURLKey)
+            ?? SharedConstants.defaultProxyURL
+        let pairURL = "\(proxyURL)/pair-client"
+        guard let url = URL(string: pairURL) else { return }
+
+        let bodyDict: [String: Any] = [
+            "client_pubkey": op.clientPubkey,
+            "relay_urls": relayUrls
+        ]
+        guard let bodyData = try? JSONSerialization.data(withJSONObject: bodyDict) else { return }
+        let bodyHash = SHA256.hash(data: bodyData).map { String(format: "%02x", $0) }.joined()
+
+        let authHeader: String
+        do {
+            authHeader = try LightEvent.signNip98(
+                privateKey: privateKey,
+                url: pairURL,
+                method: "POST",
+                bodySha256Hex: bodyHash
+            )
+        } catch { return }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 10
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(authHeader, forHTTPHeaderField: "X-Clave-Auth")
+        request.httpBody = bodyData
+
+        URLSession.shared.dataTask(with: request) { _, response, _ in
+            let http = response as? HTTPURLResponse
+            if http?.statusCode == 200 {
+                SharedStorage.removePendingPairOp(id: op.id)
+            } else {
+                SharedStorage.bumpPendingPairOpFailCount(id: op.id)
+            }
+        }.resume()
+    }
+
+    private func retryUnpairOp(op: PairOp) {
+        guard let nsec = SharedKeychain.loadNsec() else { return }
+        let privateKey: Data
+        do { privateKey = try Bech32.decodeNsec(nsec) } catch { return }
+
+        let proxyURL = SharedConstants.sharedDefaults.string(forKey: SharedConstants.proxyURLKey)
+            ?? SharedConstants.defaultProxyURL
+        let unpairURL = "\(proxyURL)/unpair-client"
+        guard let url = URL(string: unpairURL) else { return }
+
+        let bodyDict: [String: Any] = ["client_pubkey": op.clientPubkey]
+        guard let bodyData = try? JSONSerialization.data(withJSONObject: bodyDict) else { return }
+        let bodyHash = SHA256.hash(data: bodyData).map { String(format: "%02x", $0) }.joined()
+
+        let authHeader: String
+        do {
+            authHeader = try LightEvent.signNip98(
+                privateKey: privateKey,
+                url: unpairURL,
+                method: "POST",
+                bodySha256Hex: bodyHash
+            )
+        } catch { return }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 10
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(authHeader, forHTTPHeaderField: "X-Clave-Auth")
+        request.httpBody = bodyData
+
+        URLSession.shared.dataTask(with: request) { _, response, _ in
+            let http = response as? HTTPURLResponse
+            if http?.statusCode == 200 {
+                SharedStorage.removePendingPairOp(id: op.id)
+            } else {
+                SharedStorage.bumpPendingPairOpFailCount(id: op.id)
+            }
         }.resume()
     }
 
