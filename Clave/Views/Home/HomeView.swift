@@ -60,11 +60,12 @@ struct HomeView: View {
                             NavigationLink(destination: ClientDetailView(pubkey: client.pubkey)) {
                                 clientRow(client)
                             }
-                        }
-                        .onDelete { indexSet in
-                            for index in indexSet {
-                                let client = sortedClients[index]
-                                clientToUnpair = client
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                Button(role: .destructive) {
+                                    clientToUnpair = client
+                                } label: {
+                                    Label("Unpair", systemImage: "trash")
+                                }
                             }
                         }
                     }
