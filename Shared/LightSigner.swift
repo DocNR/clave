@@ -76,8 +76,30 @@ enum LightSigner {
             let expectedSecret = SharedStorage.getBunkerSecret()
 
             if !providedSecret.isEmpty && providedSecret == expectedSecret {
-                // Valid secret — create permissions if new, then rotate secret
-                if SharedStorage.getClientPermissions(for: senderPubkey) == nil {
+                // Valid secret — check cap before creating new permissions
+                let isExistingClient = SharedStorage.getClientPermissions(for: senderPubkey) != nil
+                if !isExistingClient {
+                    let currentCount = SharedStorage.getConnectedClients().count
+                    if currentCount >= 5 {
+                        logger.notice("[LightSigner] Bunker connect rejected: pairing cap reached (5)")
+                        let result = RequestResult(
+                            method: method, eventKind: nil, clientPubkey: senderPubkey,
+                            status: "blocked", errorMessage: "Pairing limit reached (5)"
+                        )
+                        logAndTrack(result: result, clientName: clientName)
+                        try await sendErrorResponse(
+                            requestId: requestId,
+                            error: "Pairing limit reached. Unpair an existing client in Clave settings.",
+                            privateKey: privateKey, senderPubkeyData: senderPubkeyData,
+                            senderPubkey: senderPubkey, isNip04: isNip04,
+                            responseRelays: responseRelays,
+                            responseRelayUrl: responseRelayUrl
+                        )
+                        return result
+                    }
+                }
+
+                if !isExistingClient {
                     let perms = ClientPermissions(
                         pubkey: senderPubkey,
                         trustLevel: .medium,
