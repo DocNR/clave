@@ -351,7 +351,12 @@ enum LightSigner {
             }
 
         case "switch_relays":
-            return ("[\"\(SharedConstants.relayURL)\"]", nil)
+            // Return JSON null per NIP-46 ("null if there is nothing to be
+            // changed"). Matches Amber's responder-only pattern and NDK's
+            // default switchRelays handler. Returning a concrete relay array
+            // here triggered welshman pool migration in Coracle and stalled
+            // the pairing UI. Validated on TestFlight builds 16+17.
+            return ("null", nil)
 
         case "describe":
             return ("[\"connect\",\"sign_event\",\"get_public_key\",\"ping\",\"nip04_encrypt\",\"nip04_decrypt\",\"nip44_encrypt\",\"nip44_decrypt\",\"switch_relays\",\"describe\"]", nil)
