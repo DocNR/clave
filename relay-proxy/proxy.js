@@ -476,6 +476,73 @@ const server = http.createServer((req, res) => {
         res.end(JSON.stringify({ error: "Internal error" }));
       }
     });
+  } else if (req.method === "POST" && req.url === "/unpair-client") {
+    let body = "";
+    req.on("data", (d) => {
+      body += d;
+      if (body.length > MAX_BODY_SIZE) {
+        req.destroy();
+      }
+    });
+    req.on("end", async () => {
+      try {
+        const authHeader = req.headers["x-clave-auth"];
+        if (!authHeader) {
+          res.writeHead(401, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: "Missing X-Clave-Auth header" }));
+        }
+
+        let authEvent;
+        try {
+          authEvent = parseAuthHeader(authHeader);
+        } catch (e) {
+          res.writeHead(401, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: e.message }));
+        }
+
+        const expectedUrl = `https://proxy.clave.casa/unpair-client`;
+        const bodyHash = sha256Hex(Buffer.from(body));
+        const result = await verifyNip98(authEvent, expectedUrl, "POST", bodyHash);
+        if (!result.valid) {
+          res.writeHead(401, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: result.error }));
+        }
+
+        let parsed;
+        try {
+          parsed = JSON.parse(body);
+        } catch {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: "invalid_body" }));
+        }
+
+        const { client_pubkey } = parsed;
+        if (typeof client_pubkey !== "string" || !/^[0-9a-f]{64}$/.test(client_pubkey)) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: "invalid_client_pubkey" }));
+        }
+
+        const signerPubkey = result.pubkey;
+        const removed = clientsStorage.removePair({ signerPubkey, clientPubkey: client_pubkey });
+        if (removed) {
+          // TODO in Task 9: for each removed.relayUrls, relayPool.releaseRelay(url)
+          console.log(
+            `[HTTP] Unpaired client ${client_pubkey.slice(0, 8)}... for signer ${signerPubkey.slice(0, 8)}...`
+          );
+        } else {
+          console.log(
+            `[HTTP] /unpair-client: no pair found for signer ${signerPubkey.slice(0, 8)}... / client ${client_pubkey.slice(0, 8)}...`
+          );
+        }
+
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: true }));
+      } catch (e) {
+        console.error("[HTTP] /unpair-client error:", e.message);
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Internal error" }));
+      }
+    });
   } else if (req.method === "GET" && req.url === "/health") {
     const allTokens = storage.loadTokens();
     const pubkeys = new Set(allTokens.map((t) => t.pubkey));
