@@ -115,14 +115,15 @@ struct ConnectSheet: View {
 
             HStack(spacing: 12) {
                 Button {
-                    // 120s expiration: the bunker URI embeds the active pairing secret, so
-                    // auto-clear after 2 min. Universal Clipboard is intentionally allowed
-                    // here — pairing a Mac browser client (Coracle, noStrudel, etc.) from
-                    // the iPhone bunker URI is the primary cross-device UX path. Audit
-                    // finding A10.2 (originally applied `localOnly: true` to both nsec and
-                    // bunker URI) scope is now reduced to nsec only; nsec export in
-                    // `ExportKeySheet.swift` remains `localOnly: true` (raw private key,
-                    // non-negotiable).
+                    // 120s expiration fires on iPhone only. Universal Clipboard does
+                    // not propagate `.expirationDate` to Mac-side NSPasteboard, so the
+                    // Mac clipboard stays populated until the user next copies something
+                    // on any UC-connected device. Acceptable because the bunker secret
+                    // rotates on successful pair (`SharedStorage.rotateBunkerSecret()` in
+                    // `LightSigner.handleRequest`) — once any client pairs with the
+                    // secret, stale clipboard copies become dead weight. Audit A10.2
+                    // scope reduced to nsec only; nsec export in `ExportKeySheet.swift`
+                    // keeps `.localOnly: true` (raw private key, non-negotiable).
                     UIPasteboard.general.setItems(
                         [["public.utf8-plain-text": appState.bunkerURI]],
                         options: [
