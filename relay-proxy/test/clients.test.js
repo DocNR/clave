@@ -133,3 +133,74 @@ test("atomic write: temp file is cleaned up after rename", () => {
   assert.ok(!fs.existsSync(file + ".tmp"), "temp file should not remain after write");
   assert.ok(fs.existsSync(file), "target file should exist");
 });
+
+test("novelRelayCount returns 0 when all URLs are already in user's own pool", () => {
+  const file = tmpFile();
+  const { createClientsStorage } = require("../clients");
+  const storage = createClientsStorage(file);
+  storage.addPair({ signerPubkey: "s1", clientPubkey: "c1", relayUrls: ["wss://a", "wss://b"] });
+  assert.equal(storage.novelRelayCount("s1", ["wss://a", "wss://b"]), 0);
+});
+
+test("novelRelayCount counts only URLs not in any pairing", () => {
+  const file = tmpFile();
+  const { createClientsStorage } = require("../clients");
+  const storage = createClientsStorage(file);
+  storage.addPair({ signerPubkey: "s1", clientPubkey: "c1", relayUrls: ["wss://a"] });
+  // wss://b is novel (not in any pool yet); wss://a is not (already in s1's pool)
+  assert.equal(storage.novelRelayCount("s1", ["wss://a", "wss://b"]), 1);
+});
+
+test("novelRelayCount excludes relay.powr.build", () => {
+  const file = tmpFile();
+  const { createClientsStorage } = require("../clients");
+  const storage = createClientsStorage(file);
+  // relay.powr.build is always covered by primary sub; never counts as novel
+  assert.equal(storage.novelRelayCount("s1", ["wss://relay.powr.build"]), 0);
+});
+
+test("novelRelayCount treats URLs already used by other users as non-novel", () => {
+  const file = tmpFile();
+  const { createClientsStorage } = require("../clients");
+  const storage = createClientsStorage(file);
+  storage.addPair({ signerPubkey: "s2", clientPubkey: "c1", relayUrls: ["wss://shared"] });
+  // s1 hasn't used wss://shared before, but s2 has — pool already covers it → not novel
+  assert.equal(storage.novelRelayCount("s1", ["wss://shared"]), 0);
+});
+
+test("novelRelayCount deduplicates proposedUrls", () => {
+  const file = tmpFile();
+  const { createClientsStorage } = require("../clients");
+  const storage = createClientsStorage(file);
+  assert.equal(storage.novelRelayCount("s1", ["wss://a", "wss://a", "wss://a"]), 1);
+});
+
+test("gcStale removes pairs older than maxAgeDays and returns count", async () => {
+  const file = tmpFile();
+  const { createClientsStorage } = require("../clients");
+  const storage = createClientsStorage(file);
+  storage.addPair({ signerPubkey: "s1", clientPubkey: "c1", relayUrls: [] });
+  // Manually rewrite the file so one entry is "old" (createdAt in the past)
+  const all = storage.loadAll();
+  all.push({
+    signerPubkey: "s2",
+    clientPubkey: "c1",
+    relayUrls: [],
+    createdAt: Math.floor(Date.now() / 1000) - (100 * 86400), // 100 days ago
+    lastSeenAt: Math.floor(Date.now() / 1000),
+  });
+  fs.writeFileSync(file, JSON.stringify(all, null, 2));
+  const removed = storage.gcStale(90);
+  assert.equal(removed, 1);
+  const remaining = storage.loadAll();
+  assert.equal(remaining.length, 1);
+  assert.equal(remaining[0].signerPubkey, "s1");
+});
+
+test("gcStale returns 0 when nothing is stale", () => {
+  const file = tmpFile();
+  const { createClientsStorage } = require("../clients");
+  const storage = createClientsStorage(file);
+  storage.addPair({ signerPubkey: "s1", clientPubkey: "c1", relayUrls: [] });
+  assert.equal(storage.gcStale(90), 0);
+});

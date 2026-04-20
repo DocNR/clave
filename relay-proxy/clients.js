@@ -63,7 +63,37 @@ function createClientsStorage(filePath) {
     return loadAll().filter((p) => p.signerPubkey === signerPubkey).length;
   }
 
-  return { loadAll, addPair, removePair, removeBySigner, countBySigner };
+  const PRIMARY_RELAY_URL = "wss://relay.powr.build";
+
+  function novelRelayCount(signerPubkey, proposedUrls) {
+    const all = loadAll();
+    const myCurrentRelays = new Set(
+      all.filter((p) => p.signerPubkey === signerPubkey).flatMap((p) => p.relayUrls)
+    );
+    const othersRelays = new Set(
+      all.filter((p) => p.signerPubkey !== signerPubkey).flatMap((p) => p.relayUrls)
+    );
+    const deduped = new Set(proposedUrls);
+    let novel = 0;
+    for (const url of deduped) {
+      if (url === PRIMARY_RELAY_URL) continue;
+      if (myCurrentRelays.has(url)) continue;
+      if (othersRelays.has(url)) continue;
+      novel++;
+    }
+    return novel;
+  }
+
+  function gcStale(maxAgeDays) {
+    const cutoff = Math.floor(Date.now() / 1000) - maxAgeDays * 86400;
+    const all = loadAll();
+    const kept = all.filter((p) => p.createdAt >= cutoff);
+    const removed = all.length - kept.length;
+    if (removed > 0) saveAll(kept);
+    return removed;
+  }
+
+  return { loadAll, addPair, removePair, removeBySigner, countBySigner, novelRelayCount, gcStale };
 }
 
 module.exports = { createClientsStorage };
