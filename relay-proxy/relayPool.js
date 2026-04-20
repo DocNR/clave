@@ -107,7 +107,15 @@ function createRelayPool({
     return Array.from(pool.keys());
   }
 
-  return { addRelay, releaseRelay, getState, listUrls };
+  function refreshFilter() {
+    for (const entry of pool.values()) {
+      if (!entry.ws || entry.ws.readyState !== WebSocket.OPEN) continue;
+      sendClose(entry);
+      sendReq(entry);
+    }
+  }
+
+  return { addRelay, releaseRelay, refreshFilter, getState, listUrls };
 }
 
 module.exports = { createRelayPool };

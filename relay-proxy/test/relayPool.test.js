@@ -152,3 +152,47 @@ test("message handler ignores messages with wrong subscription id", () => {
   factory.sockets[0].emit("message", Buffer.from(JSON.stringify(["EVENT", "other-sub", event])));
   assert.equal(received.length, 0);
 });
+
+test("refreshFilter sends CLOSE + new REQ on every open WS", () => {
+  const factory = makeFactory();
+  let signers = ["s1"];
+  const { createRelayPool } = require("../relayPool");
+  const pool = createRelayPool({
+    createSocket: factory,
+    signerPubkeysProvider: () => signers,
+  });
+  pool.addRelay("wss://a");
+  pool.addRelay("wss://b");
+  factory.sockets[0]._openFromServer();
+  factory.sockets[1]._openFromServer();
+  // Clear the initial REQs from tracking
+  factory.sockets[0].sent.length = 0;
+  factory.sockets[1].sent.length = 0;
+
+  signers = ["s1", "s2"];
+  pool.refreshFilter();
+
+  for (const ws of factory.sockets) {
+    assert.equal(ws.sent.length, 2, "expect CLOSE then REQ on each WS");
+    const [closeVerb, closeSubId] = JSON.parse(ws.sent[0]);
+    assert.equal(closeVerb, "CLOSE");
+    assert.equal(closeSubId, "clave-watch");
+    const [reqVerb, reqSubId, filter] = JSON.parse(ws.sent[1]);
+    assert.equal(reqVerb, "REQ");
+    assert.equal(reqSubId, "clave-watch");
+    assert.deepEqual(filter["#p"], ["s1", "s2"]);
+  }
+});
+
+test("refreshFilter is a no-op for WSs not yet open", () => {
+  const factory = makeFactory();
+  const { createRelayPool } = require("../relayPool");
+  const pool = createRelayPool({
+    createSocket: factory,
+    signerPubkeysProvider: () => ["s1"],
+  });
+  pool.addRelay("wss://a");
+  // Do NOT open the socket
+  pool.refreshFilter();
+  assert.equal(factory.sockets[0].sent.length, 0, "no messages sent to un-opened sockets");
+});
