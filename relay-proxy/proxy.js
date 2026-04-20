@@ -26,8 +26,11 @@ const PONG_TIMEOUT = 10000; // 10 seconds to respond
 // --- NIP-98 auth + multi-signer storage ---
 const { parseAuthHeader, verifyNip98, sha256Hex } = require("./nip98");
 const { createStorage } = require("./storage");
+const { createClientsStorage } = require("./clients");
 
 const storage = createStorage(TOKEN_FILE);
+const CLIENTS_FILE = "./clients.json";
+const clientsStorage = createClientsStorage(CLIENTS_FILE);
 const migrationResult = storage.migrateIfLegacy();
 if (migrationResult.migrated) {
   console.log(
@@ -377,6 +380,98 @@ const server = http.createServer((req, res) => {
         res.end(JSON.stringify({ ok: true }));
       } catch (e) {
         console.error("[HTTP] /unregister error:", e.message);
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Internal error" }));
+      }
+    });
+  } else if (req.method === "POST" && req.url === "/pair-client") {
+    let body = "";
+    req.on("data", (d) => {
+      body += d;
+      if (body.length > MAX_BODY_SIZE) {
+        req.destroy();
+      }
+    });
+    req.on("end", async () => {
+      try {
+        const authHeader = req.headers["x-clave-auth"];
+        if (!authHeader) {
+          console.log(`[HTTP] /pair-client 401: Missing X-Clave-Auth header`);
+          res.writeHead(401, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: "Missing X-Clave-Auth header" }));
+        }
+
+        let authEvent;
+        try {
+          authEvent = parseAuthHeader(authHeader);
+        } catch (e) {
+          console.log(`[HTTP] /pair-client 401: ${e.message}`);
+          res.writeHead(401, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: e.message }));
+        }
+
+        const expectedUrl = `https://proxy.clave.casa/pair-client`;
+        const bodyHash = sha256Hex(Buffer.from(body));
+        const result = await verifyNip98(authEvent, expectedUrl, "POST", bodyHash);
+        if (!result.valid) {
+          console.log(`[HTTP] /pair-client auth failed: ${result.error}`);
+          res.writeHead(401, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: result.error }));
+        }
+
+        let parsed;
+        try {
+          parsed = JSON.parse(body);
+        } catch {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: "invalid_body" }));
+        }
+
+        const { client_pubkey, relay_urls } = parsed;
+        if (typeof client_pubkey !== "string" || !/^[0-9a-f]{64}$/.test(client_pubkey)) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: "invalid_client_pubkey" }));
+        }
+        if (!Array.isArray(relay_urls) || relay_urls.some((u) => typeof u !== "string")) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: "invalid_relay_urls" }));
+        }
+        if (relay_urls.length === 0) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: "no_relays" }));
+        }
+        if (relay_urls.length > 10) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: "relay_limit_per_pair", limit: 10, requested: relay_urls.length }));
+        }
+
+        const signerPubkey = result.pubkey;
+        const existingCount = clientsStorage.countBySigner(signerPubkey);
+        // Count upsert as 1 if (signer,client) already exists; else +1.
+        const alreadyPaired = clientsStorage.loadAll()
+          .some((p) => p.signerPubkey === signerPubkey && p.clientPubkey === client_pubkey);
+        const projectedCount = alreadyPaired ? existingCount : existingCount + 1;
+        if (projectedCount > 5) {
+          res.writeHead(409, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: "pairing_limit", limit: 5, used: existingCount }));
+        }
+
+        const novel = clientsStorage.novelRelayCount(signerPubkey, relay_urls);
+        if (novel > 50) {
+          res.writeHead(409, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: "novel_relay_quota", limit: 50 }));
+        }
+
+        clientsStorage.addPair({ signerPubkey, clientPubkey: client_pubkey, relayUrls: relay_urls });
+        // TODO in Task 9: for each relay_urls, call relayPool.addRelay(url)
+        console.log(
+          `[HTTP] Paired client ${client_pubkey.slice(0, 8)}... for signer ${signerPubkey.slice(0, 8)}... with ${relay_urls.length} relays`
+        );
+
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: true }));
+      } catch (e) {
+        console.error("[HTTP] /pair-client error:", e.message);
         res.writeHead(500, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Internal error" }));
       }
