@@ -23,11 +23,11 @@ struct PendingRequest: Codable, Identifiable {
     /// to the same relay the client is actually subscribed on — not the
     /// powr.build fallback.
     ///
-    /// Optional for forward compatibility — Codable decodes missing keys on
+    /// Optional for backward compatibility — Codable decodes missing keys on
     /// Optional properties as nil without throwing, so pre-build-22 rows in
     /// UserDefaults decode cleanly and fall back to SharedConstants.relayURL
     /// at publish time.
-    let relayUrl: String?
+    let responseRelayUrl: String?
 }
 
 struct ConnectedClient: Codable, Identifiable {

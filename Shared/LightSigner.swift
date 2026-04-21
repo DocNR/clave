@@ -198,7 +198,7 @@ enum LightSigner {
                             eventKind: eventKind ?? 0,
                             clientPubkey: senderPubkey,
                             timestamp: Date().timeIntervalSince1970,
-                            relayUrl: responseRelayUrl
+                            responseRelayUrl: responseRelayUrl
                         )
                         SharedStorage.queuePendingRequest(pending)
                     }
