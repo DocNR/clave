@@ -111,7 +111,11 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                 logger.notice("[App] Using embedded event from push payload")
                 events = [embedded]
             } else {
-                logger.notice("[App] No embedded event; fetching from \(relayUrlString, privacy: .public)")
+                if userInfo["event"] != nil {
+                    logger.warning("[App] event key present but not castable to [String: Any] — falling back to relay fetch")
+                } else {
+                    logger.notice("[App] No embedded event; fetching from \(relayUrlString, privacy: .public)")
+                }
                 let relay = LightRelay(url: relayUrlString)
                 try await relay.connect()
 
