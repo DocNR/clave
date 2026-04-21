@@ -110,32 +110,48 @@ class NotificationService: UNNotificationServiceExtension {
         let relayUrlString = (userInfo["relay_url"] as? String) ?? SharedConstants.relayURL
 
         do {
-            let relay = LightRelay(url: relayUrlString)
-            try await relay.connect()
+            var events: [[String: Any]] = []
 
-            let now = Int(Date().timeIntervalSince1970)
-            // NIP-46 spec: clients MUST include ["p", <signer-pubkey>] on kind:24133
-            let filter: [String: Any] = [
-                "kinds": [24133],
-                "#p": [signerPubkey],
-                "since": now - 60,
-                "limit": 5
-            ]
+            // Prefer the embedded event from the push payload (build 22+). This
+            // bypasses the ephemeral-fetch race where the relay drops kind:24133
+            // before NSE can REQ for it. If absent (older proxy or oversized
+            // event), fall through to the existing fetch-from-relay path.
+            if let embedded = userInfo["event"] as? [String: Any] {
+                logger.notice("[ClaveNSE] Using embedded event from push payload")
+                events = [embedded]
+            } else {
+                if userInfo["event"] != nil {
+                    logger.warning("[ClaveNSE] event key present but not castable to [String: Any] — falling back to relay fetch")
+                } else {
+                    logger.notice("[ClaveNSE] No embedded event; fetching from \(relayUrlString, privacy: .public)")
+                }
+                let relay = LightRelay(url: relayUrlString)
+                try await relay.connect()
 
-            var events = try await relay.fetchEvents(filter: filter, timeout: 10.0)
-
-            if events.isEmpty {
-                try await Task.sleep(nanoseconds: 2_000_000_000)
-                let retryFilter: [String: Any] = [
+                let now = Int(Date().timeIntervalSince1970)
+                // NIP-46 spec: clients MUST include ["p", <signer-pubkey>] on kind:24133
+                let filter: [String: Any] = [
                     "kinds": [24133],
                     "#p": [signerPubkey],
-                    "since": now - 120,
+                    "since": now - 60,
                     "limit": 5
                 ]
-                events = try await relay.fetchEvents(filter: retryFilter, timeout: 10.0)
-            }
 
-            relay.disconnect()
+                events = try await relay.fetchEvents(filter: filter, timeout: 10.0)
+
+                if events.isEmpty {
+                    try await Task.sleep(nanoseconds: 2_000_000_000)
+                    let retryFilter: [String: Any] = [
+                        "kinds": [24133],
+                        "#p": [signerPubkey],
+                        "since": now - 120,
+                        "limit": 5
+                    ]
+                    events = try await relay.fetchEvents(filter: retryFilter, timeout: 10.0)
+                }
+
+                relay.disconnect()
+            }
 
             if events.isEmpty {
                 return SigningResult(status: .noEvents)

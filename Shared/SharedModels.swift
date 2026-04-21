@@ -18,6 +18,16 @@ struct PendingRequest: Codable, Identifiable {
     let eventKind: Int?
     let clientPubkey: String
     let timestamp: Double
+    /// Relay URL the request was received on. Threaded back into
+    /// LightSigner.handleRequest at approval-time so the response publishes
+    /// to the same relay the client is actually subscribed on — not the
+    /// powr.build fallback.
+    ///
+    /// Optional for backward compatibility — Codable decodes missing keys on
+    /// Optional properties as nil without throwing, so pre-build-22 rows in
+    /// UserDefaults decode cleanly and fall back to SharedConstants.relayURL
+    /// at publish time.
+    let responseRelayUrl: String?
 }
 
 struct ConnectedClient: Codable, Identifiable {
