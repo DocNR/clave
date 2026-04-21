@@ -575,6 +575,20 @@ async function dispatchCaughtEvent({ event, sourceUrl, classification }) {
     event_id: event.id,
   };
 
+  // Embed the caught event so NSE doesn't have to race the relay's ephemeral
+  // retention window. APNs alert payload cap is 4KB; 3500B leaves ~300B for
+  // the aps container. Oversized events fall through to NSE's existing
+  // fetch-from-relay path (same broken behavior as build 21, no regression).
+  const eventJSON = JSON.stringify(event);
+  const eventBytes = Buffer.byteLength(eventJSON);
+  if (eventBytes <= 3500) {
+    pushPayload.event = event;
+  } else {
+    console.log(
+      `[Push] Event ${event.id.slice(0, 8)} too large (${eventBytes}B), omitting embed — NSE will fall back to relay fetch`
+    );
+  }
+
   for (const entry of matchingTokens) {
     try {
       const status = await sendPush(entry.token, pushPayload);
