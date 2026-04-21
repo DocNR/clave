@@ -285,7 +285,12 @@ final class AppState {
         }
 
         do {
-            let result = try await LightSigner.handleRequest(privateKey: privateKey, requestEvent: requestEvent, skipProtection: true)
+            let result = try await LightSigner.handleRequest(
+                privateKey: privateKey,
+                requestEvent: requestEvent,
+                skipProtection: true,
+                responseRelayUrl: request.relayUrl
+            )
             SharedStorage.removePendingRequest(id: request.id)
             refreshPendingRequests()
             return result.status == "signed"
