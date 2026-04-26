@@ -112,10 +112,16 @@ final class ForegroundRelaySubscription {
     func stop() {
         guard state != .idle else { return }
         logger.notice("[fg-sub] stop() called from state=\(self.state.rawValue, privacy: .public)")
-        state = .stopping
+        // Cancel the dispatcher and transition to idle synchronously. The
+        // dispatcher exits asynchronously at its next suspension point —
+        // when it does, runDispatcher's tail logic re-asserts state=.idle
+        // (no-op). Setting .idle here keeps the public state machine
+        // observable-consistent: callers see .idle immediately after stop()
+        // returns, regardless of how slowly the dispatcher unwinds.
         dispatcherTask?.cancel()
         dispatcherTask = nil
-        // dispatcher exits inside runDispatcher() which transitions back to .idle
+        state = .idle
+        statusMessage = "Idle"
     }
 
     func resetCounters() {
