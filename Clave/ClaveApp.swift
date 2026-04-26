@@ -144,8 +144,10 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                 relay.disconnect()
             }
 
-            let processedKey = "processedEventIDs"
-            var processedIDs = Set(SharedConstants.sharedDefaults.stringArray(forKey: processedKey) ?? [])
+            // Per-event dedupe is now done inside LightSigner.handleRequest
+            // (audit D.1.1, see SharedStorage.markEventProcessed). Duplicates
+            // arriving via both APNs and the foreground subscription return
+            // status "skipped-duplicate" without doing decrypt work.
 
             var handledCount = 0
             // Process connects first so pairing state exists before other methods.
@@ -159,9 +161,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
             for event in sortedEvents {
                 guard let eventPubkey = event["pubkey"] as? String,
-                      eventPubkey != signerPubkey,
-                      let eventId = event["id"] as? String,
-                      !processedIDs.contains(eventId) else { continue }
+                      eventPubkey != signerPubkey else { continue }
 
                 do {
                     let result = try await LightSigner.handleRequest(
@@ -169,19 +169,17 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                         requestEvent: event,
                         responseRelayUrl: relayUrlString
                     )
-                    processedIDs.insert(eventId)
                     if result.status == "error" && result.errorMessage == "Decrypt failed" {
+                        continue
+                    }
+                    if result.status == "skipped-duplicate" {
                         continue
                     }
                     handledCount += 1
                 } catch {
-                    processedIDs.insert(eventId)
                     logger.notice("[App] Skipping event: \(error.localizedDescription)")
                 }
             }
-
-            let trimmed = Array(processedIDs.suffix(50))
-            SharedConstants.sharedDefaults.set(trimmed, forKey: processedKey)
 
             logger.notice("[App] Foreground handled \(handledCount) requests")
 
