@@ -58,6 +58,35 @@ enum SharedStorage {
         }
     }
 
+    /// Persist the client's URI relay set locally. Mirrors the `/pair-client`
+    /// payload that already gets sent to the proxy. Used by Layer 1's
+    /// foreground subscription to build its target relay set.
+    /// (Pre-L1 the field existed in `ConnectedClient` but was never
+    /// populated — fixed here.)
+    static func setClientRelayUrls(pubkey: String, relayUrls: [String]) {
+        var clients = getConnectedClients()
+        let cleaned = relayUrls.filter { !$0.isEmpty }
+        if let idx = clients.firstIndex(where: { $0.pubkey == pubkey }) {
+            clients[idx].relayUrls = cleaned
+            save(clients, forKey: SharedConstants.connectedClientsKey)
+            logger.notice("[Storage] setClientRelayUrls: \(pubkey.prefix(8), privacy: .public) count=\(cleaned.count)")
+        } else {
+            // Client not yet known — create the entry so the relays are persisted.
+            // updateClient will be called separately when the first request comes in.
+            let now = Date().timeIntervalSince1970
+            clients.append(ConnectedClient(
+                pubkey: pubkey,
+                name: nil,
+                firstSeen: now,
+                lastSeen: now,
+                requestCount: 0,
+                relayUrls: cleaned
+            ))
+            save(clients, forKey: SharedConstants.connectedClientsKey)
+            logger.notice("[Storage] setClientRelayUrls (new client): \(pubkey.prefix(8), privacy: .public) count=\(cleaned.count)")
+        }
+    }
+
     static func getConnectedClients() -> [ConnectedClient] {
         load(forKey: SharedConstants.connectedClientsKey) ?? []
     }

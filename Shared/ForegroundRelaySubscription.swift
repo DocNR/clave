@@ -126,6 +126,24 @@ final class ForegroundRelaySubscription {
         lastError = nil
     }
 
+    /// Recompute the relay set from current `ConnectedClient.relayUrls` and
+    /// reconcile the running dispatcher: connect to newly-added relays,
+    /// disconnect from removed ones. Idempotent; safe to call any number of
+    /// times.
+    ///
+    /// v1 implementation: stop and restart. The ~100ms reconnect bounce is
+    /// acceptable given pair/unpair are infrequent operations. Proper
+    /// add/remove diffing is a follow-up; see plan Task 8 risks.
+    func refreshRelaySet() {
+        guard state == .listening || state == .reconnecting else { return }
+        logger.notice("[fg-sub] refreshRelaySet: stop+restart")
+        stop()
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 100_000_000)  // 100ms
+            self?.start()
+        }
+    }
+
     // MARK: - Latency tracking
 
     fileprivate func recordLatency(_ ms: Double) {

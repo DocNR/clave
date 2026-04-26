@@ -583,6 +583,15 @@ final class AppState {
     /// subscriptions. Fire-and-forget from the caller's perspective; failures
     /// are queued in SharedStorage.pendingPairOps for later retry.
     func pairClientWithProxy(clientPubkey: String, relayUrls: [String]) {
+        // Persist the client's URI relay set locally first (used by Layer 1's
+        // foreground subscription). Idempotent.
+        SharedStorage.setClientRelayUrls(pubkey: clientPubkey, relayUrls: relayUrls)
+
+        // Layer 1: relay-set may have changed; refresh the foreground sub.
+        Task { @MainActor in
+            ForegroundRelaySubscription.shared.refreshRelaySet()
+        }
+
         guard let nsec = SharedKeychain.loadNsec() else { return }
         let privateKey: Data
         do {
@@ -640,6 +649,12 @@ final class AppState {
 
     /// Notify the proxy of an unpair. Same failure semantics as pair.
     func unpairClientWithProxy(clientPubkey: String) {
+        // Layer 1: the unpaired client's URI relays may no longer be needed
+        // in the foreground sub's set. Refresh.
+        Task { @MainActor in
+            ForegroundRelaySubscription.shared.refreshRelaySet()
+        }
+
         guard let nsec = SharedKeychain.loadNsec() else { return }
         let privateKey: Data
         do {
