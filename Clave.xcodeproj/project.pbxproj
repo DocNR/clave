@@ -13,7 +13,6 @@
 		DD90DE0C2D8944D08B23C606 /* ClientPermissions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 894FE9FF88CD485ABCD31C05 /* ClientPermissions.swift */; };
 		DE7E10B2DE7E10B2DE7E10B2 /* DeveloperSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE7E10B1DE7E10B1DE7E10B1 /* DeveloperSettings.swift */; };
 		DE7E10B3DE7E10B3DE7E10B3 /* DeveloperSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE7E10B1DE7E10B1DE7E10B1 /* DeveloperSettings.swift */; };
-		F60FCE012F8BCAE3000FAC0A /* ForegroundRelaySubscription.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60FCE002F8BCAE3000FAC0A /* ForegroundRelaySubscription.swift */; };
 		DE7E10C2DE7E10C2DE7E10C2 /* LogExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE7E10C1DE7E10C1DE7E10C1 /* LogExporter.swift */; };
 		DE7E10C3DE7E10C3DE7E10C3 /* LogExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE7E10C1DE7E10C1DE7E10C1 /* LogExporter.swift */; };
 		EF1963B89F3A6472380F1E0A /* LightRelay.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF3D7A5B2F8BD020005A6545 /* LightRelay.swift */; };
@@ -39,6 +38,7 @@
 		EFBF443D3DA775A267700410 /* Bech32.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF3D7A582F8BD020005A6545 /* Bech32.swift */; };
 		EFC7FD75109694C0A7F86D26 /* SharedModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFCA55B463A619311A35AF3C /* SharedModels.swift */; };
 		EFE12D1EC4CE48622767D427 /* SharedStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFEE4316AC522CDDA35AFAC1 /* SharedStorage.swift */; };
+		F60FCE012F8BCAE3000FAC0A /* ForegroundRelaySubscription.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60FCE002F8BCAE3000FAC0A /* ForegroundRelaySubscription.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -83,7 +83,6 @@
 		34B139A8E147475F9B40B3D5 /* NostrConnectParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NostrConnectParser.swift; sourceTree = "<group>"; };
 		894FE9FF88CD485ABCD31C05 /* ClientPermissions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClientPermissions.swift; sourceTree = "<group>"; };
 		DE7E10B1DE7E10B1DE7E10B1 /* DeveloperSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeveloperSettings.swift; sourceTree = "<group>"; };
-		F60FCE002F8BCAE3000FAC0A /* ForegroundRelaySubscription.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForegroundRelaySubscription.swift; sourceTree = "<group>"; };
 		DE7E10C1DE7E10C1DE7E10C1 /* LogExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogExporter.swift; sourceTree = "<group>"; };
 		EF3D7A0F2F8BCAE3005A6545 /* Clave.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Clave.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		EF3D7A1C2F8BCAE6005A6545 /* ClaveTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ClaveTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -99,6 +98,7 @@
 		EF3D7A5F2F8BD020005A6545 /* SignerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignerService.swift; sourceTree = "<group>"; };
 		EFCA55B463A619311A35AF3C /* SharedModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedModels.swift; sourceTree = "<group>"; };
 		EFEE4316AC522CDDA35AFAC1 /* SharedStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedStorage.swift; sourceTree = "<group>"; };
+		F60FCE002F8BCAE3000FAC0A /* ForegroundRelaySubscription.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForegroundRelaySubscription.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
