@@ -301,24 +301,26 @@ struct SettingsView: View {
                 .textInputAutocapitalization(.never)
                 .font(.system(.body, design: .monospaced))
 
-            HStack {
-                Button {
-                    SharedStorage.setDebugTestRelay(debugTestRelayDraft)
-                    ForegroundRelaySubscription.shared.refreshRelaySet()
-                } label: {
-                    Label("Apply + Refresh", systemImage: "arrow.triangle.2.circlepath")
-                }
-
-                Spacer()
-
-                Button(role: .destructive) {
-                    SharedStorage.setDebugTestRelay(nil)
-                    debugTestRelayDraft = ""
-                    ForegroundRelaySubscription.shared.refreshRelaySet()
-                } label: {
-                    Label("Clear", systemImage: "xmark.circle")
-                }
+            // Each Button gets its own row in the Form. Putting both inside
+            // a single HStack makes SwiftUI treat the whole row as one tap
+            // target and fire both actions on a single tap (observed in
+                // L1 verification: tapping Apply also fired Clear).
+            Button {
+                SharedStorage.setDebugTestRelay(debugTestRelayDraft)
+                ForegroundRelaySubscription.shared.refreshRelaySet()
+            } label: {
+                Label("Apply + Refresh", systemImage: "arrow.triangle.2.circlepath")
             }
+            .buttonStyle(.borderless)
+
+            Button(role: .destructive) {
+                SharedStorage.setDebugTestRelay(nil)
+                debugTestRelayDraft = ""
+                ForegroundRelaySubscription.shared.refreshRelaySet()
+            } label: {
+                Label("Clear", systemImage: "xmark.circle")
+            }
+            .buttonStyle(.borderless)
 
             if let err = fgSub.lastError {
                 Text(err)
