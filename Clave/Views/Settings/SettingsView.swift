@@ -11,7 +11,7 @@ struct SettingsView: View {
     @State private var versionTapTimes: [Date] = []
     @State private var showCopyLogsConfirmation = false
     #if DEBUG
-    @State private var debugTestRelayDraft: String = SharedStorage.getDebugTestRelay() ?? ""
+    @State private var debugTestRelayDraft: String = ""
     @State private var fgSub = ForegroundRelaySubscription.shared
     #endif
 
@@ -31,7 +31,17 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
-            .onAppear { loadSettings() }
+            .onAppear {
+                loadSettings()
+                #if DEBUG
+                // Hydrate from persisted state. Done in onAppear (not in
+                // @State default) so re-creation of the view doesn't blow
+                // away in-progress edits.
+                if debugTestRelayDraft.isEmpty {
+                    debugTestRelayDraft = SharedStorage.getDebugTestRelay() ?? ""
+                }
+                #endif
+            }
             .alert("Delete Key", isPresented: $showDeleteConfirmation) {
                 Button("Delete", role: .destructive) {
                     appState.deleteKey()
