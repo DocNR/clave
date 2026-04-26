@@ -67,7 +67,7 @@ final class ForegroundRelaySubscription {
 
     /// Concurrency cap. Backpressure point that prevents the receive loop
     /// from outrunning the dispatcher under bursts.
-    private let dispatchSemaphore = AsyncSemaphore(Self.defaultConcurrency)
+    private let dispatchSemaphore = AsyncSemaphore(ForegroundRelaySubscription.defaultConcurrency)
 
     private init() {}
 

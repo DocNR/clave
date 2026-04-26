@@ -47,6 +47,21 @@ final class AppState {
         }
     }
 
+    // MARK: - Foreground subscription bridge
+
+    /// Bridges into the `@MainActor`-isolated ForegroundRelaySubscription. Called
+    /// from a SwiftUI scenePhase observer in the root view. AppState itself is
+    /// not `@MainActor`, so the hop happens here.
+    @MainActor
+    func startForegroundSubscription() {
+        ForegroundRelaySubscription.shared.start()
+    }
+
+    @MainActor
+    func stopForegroundSubscription() {
+        ForegroundRelaySubscription.shared.stop()
+    }
+
     var npub: String {
         guard !signerPubkeyHex.isEmpty,
               let pubkey = try? PublicKey.parse(publicKey: signerPubkeyHex) else { return "" }
