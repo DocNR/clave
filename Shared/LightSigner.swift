@@ -27,6 +27,26 @@ enum LightSigner {
                                  status: "error", errorMessage: "Invalid event")
         }
 
+        // Per-event-id dedupe (audit D.1.1). Both NSE and the foreground
+        // relay subscription (Layer 1) call into this function; whichever
+        // marks first wins, others skip. Cross-process semantics are lossy
+        // by design — see SharedStorage.markEventProcessed.
+        let eventId = (requestEvent["id"] as? String) ?? ""
+        let createdAt = (requestEvent["created_at"] as? Double)
+            ?? Double(requestEvent["created_at"] as? Int ?? 0)
+        let nowFallback = Date().timeIntervalSince1970
+        if !eventId.isEmpty,
+           SharedStorage.markEventProcessed(
+               eventId: eventId,
+               createdAt: createdAt > 0 ? createdAt : nowFallback
+           ) == .alreadyProcessed {
+            logger.notice("[LightSigner] skip dedup eid=\(eventId.prefix(8), privacy: .public)")
+            return RequestResult(
+                method: "deduped", eventKind: nil, clientPubkey: senderPubkey,
+                status: "skipped-duplicate", errorMessage: nil
+            )
+        }
+
         guard let senderPubkeyData = Data(hexString: senderPubkey) else {
             logger.error("[LightSigner] Invalid sender pubkey hex")
             return RequestResult(method: "unknown", eventKind: nil, clientPubkey: senderPubkey,
