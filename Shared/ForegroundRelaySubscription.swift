@@ -65,6 +65,10 @@ final class ForegroundRelaySubscription {
     /// invocation; if the publish path hangs, we cancel and free the slot.
     static let perEventBudgetSeconds: UInt64 = 30
 
+    /// Concurrency cap. Backpressure point that prevents the receive loop
+    /// from outrunning the dispatcher under bursts.
+    private let dispatchSemaphore = AsyncSemaphore(Self.defaultConcurrency)
+
     private init() {}
 
     // MARK: - Public API
@@ -246,12 +250,17 @@ final class ForegroundRelaySubscription {
             case "EVENT":
                 guard array.count >= 3,
                       let eventSubId = array[1] as? String, eventSubId == subId,
-                      let _ = array[2] as? [String: Any] else { continue }
+                      let eventDict = array[2] as? [String: Any] else { continue }
 
                 self.eventsReceived += 1
-                // TODO(Task 6): per-event dispatch goes here. For now we just
-                // count receipts so the connection + REQ + receive plumbing
-                // can be smoke-tested in isolation.
+
+                // Backpressure: receive loop awaits a permit before spawning the
+                // per-event task. Five permits is the FINDINGS.md sweet spot.
+                await dispatchSemaphore.acquire()
+                Task { [self] in
+                    defer { Task { await self.dispatchSemaphore.release() } }
+                    await self.processEvent(eventDict, relayURL: conn.url)
+                }
 
             case "EOSE":
                 logger.notice("[fg-sub] EOSE — staying subscribed")
@@ -271,6 +280,101 @@ final class ForegroundRelaySubscription {
         while !Task.isCancelled {
             try await Task.sleep(nanoseconds: 30_000_000_000)  // 30s
             try await conn.ping()
+        }
+    }
+
+    // MARK: - Per-event dispatch
+
+    /// Dispatches a single kind:24133 event through `LightSigner.handleRequest`
+    /// with a per-event 30s budget. Updates counters + latency ring buffer.
+    /// Runs off the MainActor inside a Task spawned by the receive loop.
+    private nonisolated func processEvent(
+        _ eventDict: [String: Any],
+        relayURL: String
+    ) async {
+        guard let nsec = SharedKeychain.loadNsec(),
+              let privateKey = try? Bech32.decodeNsec(nsec) else {
+            await MainActor.run {
+                self.lastError = "Failed to load signer key"
+                self.eventsFailed += 1
+            }
+            return
+        }
+
+        let started = Date()
+
+        // 30s budget enforced via withTaskGroup race: the work task vs.
+        // a sleep-then-cancel watchdog. First to complete wins; the other
+        // is cancelled by the group.
+        let result: LightSigner.RequestResult? = await withTaskGroup(
+            of: LightSigner.RequestResult?.self
+        ) { group in
+            group.addTask {
+                do {
+                    return try await LightSigner.handleRequest(
+                        privateKey: privateKey,
+                        requestEvent: eventDict,
+                        skipProtection: false,
+                        responseRelayUrl: relayURL
+                    )
+                } catch {
+                    return nil
+                }
+            }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: Self.perEventBudgetSeconds * 1_000_000_000)
+                return nil  // timeout sentinel
+            }
+
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first ?? nil
+        }
+
+        let elapsedMs = Date().timeIntervalSince(started) * 1000
+
+        await MainActor.run {
+            // "signed" — completed normally. "skipped-duplicate" — already
+            // handled by NSE or another path. Both count as processed.
+            // Other statuses (error/blocked/pending) count as failed for
+            // L1 telemetry; protected-kind queue prompts go via the
+            // existing path and don't appear here.
+            if let result = result, result.status == "signed" || result.status == "skipped-duplicate" {
+                self.eventsProcessed += 1
+            } else {
+                self.eventsFailed += 1
+            }
+            self.recordLatency(elapsedMs)
+        }
+    }
+}
+
+// MARK: - Async semaphore for receive-loop backpressure
+
+/// Simple actor-isolated counting semaphore. `acquire()` waits if the permit
+/// count is zero; `release()` resumes the next waiter or restores a permit.
+private actor AsyncSemaphore {
+    private var permits: Int
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    init(_ initial: Int) { self.permits = initial }
+
+    func acquire() async {
+        if permits > 0 {
+            permits -= 1
+            return
+        }
+        await withCheckedContinuation { cont in
+            waiters.append(cont)
+        }
+    }
+
+    func release() {
+        if !waiters.isEmpty {
+            let next = waiters.removeFirst()
+            next.resume()
+        } else {
+            permits += 1
         }
     }
 }
