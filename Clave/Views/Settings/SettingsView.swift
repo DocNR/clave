@@ -10,10 +10,6 @@ struct SettingsView: View {
     @State private var devSettings = DeveloperSettings.shared
     @State private var versionTapTimes: [Date] = []
     @State private var showCopyLogsConfirmation = false
-    #if DEBUG
-    @State private var debugTestRelayDraft: String = ""
-    @State private var fgSub = ForegroundRelaySubscription.shared
-    #endif
 
     var body: some View {
         NavigationStack {
@@ -25,22 +21,11 @@ struct SettingsView: View {
                 aboutSection
                 if devSettings.developerMenuUnlocked {
                     developerSection
-                    #if DEBUG
-                    l1TestSection
-                    #endif
                 }
             }
             .navigationTitle("Settings")
             .onAppear {
                 loadSettings()
-                #if DEBUG
-                // Hydrate from persisted state. Done in onAppear (not in
-                // @State default) so re-creation of the view doesn't blow
-                // away in-progress edits.
-                if debugTestRelayDraft.isEmpty {
-                    debugTestRelayDraft = SharedStorage.getDebugTestRelay() ?? ""
-                }
-                #endif
             }
             .alert("Delete Key", isPresented: $showDeleteConfirmation) {
                 Button("Delete", role: .destructive) {
@@ -248,99 +233,4 @@ struct SettingsView: View {
         proxyURL = SharedConstants.sharedDefaults.string(forKey: SharedConstants.proxyURLKey)
             ?? SharedConstants.defaultProxyURL
     }
-
-    #if DEBUG
-    // MARK: - DEBUG: Layer 1 verification
-
-    /// DEBUG-only test override. Lets a developer add an extra relay to
-    /// the L1 foreground subscription set without going through a full
-    /// nostrconnect pair. Used during the L1 verification matrix
-    /// (~/hq/clave/plans/2026-04-26-foreground-relay-subscription.md
-    /// Task 10) to point L1 at `nak serve` on Mac LAN.
-    private var l1TestSection: some View {
-        Section("DEBUG: L1 Test Relay") {
-            HStack {
-                Text("Status")
-                Spacer()
-                HStack(spacing: 4) {
-                    Circle()
-                        .fill(l1StatusColor)
-                        .frame(width: 8, height: 8)
-                    Text(fgSub.state.rawValue)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text("Received")
-                    Spacer()
-                    Text("\(fgSub.eventsReceived)")
-                        .font(.system(.body, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                }
-                HStack {
-                    Text("Processed")
-                    Spacer()
-                    Text("\(fgSub.eventsProcessed)")
-                        .font(.system(.body, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                }
-                HStack {
-                    Text("Failed")
-                    Spacer()
-                    Text("\(fgSub.eventsFailed)")
-                        .font(.system(.body, design: .monospaced))
-                        .foregroundStyle(fgSub.eventsFailed > 0 ? .red : .secondary)
-                }
-            }
-
-            TextField("Extra relay URL (ws:// or wss://)", text: $debugTestRelayDraft)
-                .autocorrectionDisabled()
-                .textInputAutocapitalization(.never)
-                .font(.system(.body, design: .monospaced))
-
-            // Each Button gets its own row in the Form. Putting both inside
-            // a single HStack makes SwiftUI treat the whole row as one tap
-            // target and fire both actions on a single tap (observed in
-                // L1 verification: tapping Apply also fired Clear).
-            Button {
-                SharedStorage.setDebugTestRelay(debugTestRelayDraft)
-                ForegroundRelaySubscription.shared.refreshRelaySet()
-            } label: {
-                Label("Apply + Refresh", systemImage: "arrow.triangle.2.circlepath")
-            }
-            .buttonStyle(.borderless)
-
-            Button(role: .destructive) {
-                SharedStorage.setDebugTestRelay(nil)
-                debugTestRelayDraft = ""
-                ForegroundRelaySubscription.shared.refreshRelaySet()
-            } label: {
-                Label("Clear", systemImage: "xmark.circle")
-            }
-            .buttonStyle(.borderless)
-
-            if let err = fgSub.lastError {
-                Text(err)
-                    .font(.caption2)
-                    .foregroundStyle(.red)
-            }
-
-            Text("Adds an extra relay to L1's foreground subscription set. Used by the nip17-bulk-decrypt harness against `nak serve` on Mac LAN. NOT compiled in Release builds.")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-        }
-    }
-
-    private var l1StatusColor: Color {
-        switch fgSub.state {
-        case .listening: return .green
-        case .starting, .reconnecting: return .yellow
-        case .error: return .red
-        default: return .gray
-        }
-    }
-    #endif
 }

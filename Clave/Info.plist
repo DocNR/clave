@@ -10,14 +10,5 @@
 	<string>Authenticate to view or export your secret key</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
-	<key>NSAppTransportSecurity</key>
-	<dict>
-		<!-- Allow plain ws:// to local-network hosts (e.g. nak serve on
-		     developer's Mac LAN) for the L1 verification matrix. iOS still
-		     enforces TLS for WAN connections; this is local-only. Production
-		     traffic uses wss://relay.powr.build (TLS-required). -->
-		<key>NSAllowsLocalNetworking</key>
-		<true/>
-	</dict>
 </dict>
 </plist>

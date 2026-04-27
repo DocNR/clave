@@ -91,29 +91,6 @@ enum SharedStorage {
         load(forKey: SharedConstants.connectedClientsKey) ?? []
     }
 
-    #if DEBUG
-    /// DEBUG-only L1 verification override. Lets a developer point Layer 1's
-    /// foreground subscription at an arbitrary test relay (e.g. `nak serve`
-    /// on Mac LAN) without going through a fresh nostrconnect pair. Not
-    /// compiled in Release builds.
-    private static let debugTestRelayKey = "debug.l1TestRelay"
-
-    static func getDebugTestRelay() -> String? {
-        let v = defaults.string(forKey: debugTestRelayKey) ?? ""
-        return v.isEmpty ? nil : v
-    }
-
-    static func setDebugTestRelay(_ url: String?) {
-        if let url = url, !url.isEmpty {
-            defaults.set(url, forKey: debugTestRelayKey)
-            logger.notice("[Storage] setDebugTestRelay: \(url, privacy: .public)")
-        } else {
-            defaults.removeObject(forKey: debugTestRelayKey)
-            logger.notice("[Storage] setDebugTestRelay: cleared")
-        }
-    }
-    #endif
-
     // MARK: - Pending Requests
 
     static func queuePendingRequest(_ request: PendingRequest) {

@@ -163,11 +163,6 @@ final class ForegroundRelaySubscription {
 
     /// Returns the union of relayUrls across paired clients, plus the primary
     /// bunker relay as a guaranteed fallback. De-duplicated.
-    ///
-    /// In DEBUG builds, also includes any developer-set test relay (see
-    /// `SharedStorage.getDebugTestRelay`). Used during L1 verification matrix
-    /// when the harness publishes to a non-production relay (e.g. nak serve
-    /// on the developer's Mac LAN).
     private func relaySet() -> [String] {
         var set = Set<String>()
         set.insert(SharedConstants.relayURL)
@@ -176,11 +171,6 @@ final class ForegroundRelaySubscription {
                 set.insert(url)
             }
         }
-        #if DEBUG
-        if let debugRelay = SharedStorage.getDebugTestRelay(), !debugRelay.isEmpty {
-            set.insert(debugRelay)
-        }
-        #endif
         return Array(set)
     }
 
