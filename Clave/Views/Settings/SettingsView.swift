@@ -24,7 +24,9 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
-            .onAppear { loadSettings() }
+            .onAppear {
+                loadSettings()
+            }
             .alert("Delete Key", isPresented: $showDeleteConfirmation) {
                 Button("Delete", role: .destructive) {
                     appState.deleteKey()

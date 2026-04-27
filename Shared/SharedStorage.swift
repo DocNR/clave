@@ -58,6 +58,35 @@ enum SharedStorage {
         }
     }
 
+    /// Persist the client's URI relay set locally. Mirrors the `/pair-client`
+    /// payload that already gets sent to the proxy. Used by Layer 1's
+    /// foreground subscription to build its target relay set.
+    /// (Pre-L1 the field existed in `ConnectedClient` but was never
+    /// populated — fixed here.)
+    static func setClientRelayUrls(pubkey: String, relayUrls: [String]) {
+        var clients = getConnectedClients()
+        let cleaned = relayUrls.filter { !$0.isEmpty }
+        if let idx = clients.firstIndex(where: { $0.pubkey == pubkey }) {
+            clients[idx].relayUrls = cleaned
+            save(clients, forKey: SharedConstants.connectedClientsKey)
+            logger.notice("[Storage] setClientRelayUrls: \(pubkey.prefix(8), privacy: .public) count=\(cleaned.count)")
+        } else {
+            // Client not yet known — create the entry so the relays are persisted.
+            // updateClient will be called separately when the first request comes in.
+            let now = Date().timeIntervalSince1970
+            clients.append(ConnectedClient(
+                pubkey: pubkey,
+                name: nil,
+                firstSeen: now,
+                lastSeen: now,
+                requestCount: 0,
+                relayUrls: cleaned
+            ))
+            save(clients, forKey: SharedConstants.connectedClientsKey)
+            logger.notice("[Storage] setClientRelayUrls (new client): \(pubkey.prefix(8), privacy: .public) count=\(cleaned.count)")
+        }
+    }
+
     static func getConnectedClients() -> [ConnectedClient] {
         load(forKey: SharedConstants.connectedClientsKey) ?? []
     }
@@ -250,6 +279,76 @@ enum SharedStorage {
         perms.lastSeen = Date().timeIntervalSince1970
         perms.requestCount += 1
         saveClientPermissions(perms)
+    }
+
+    // MARK: - Per-event-id dedupe (cross-process via app-group UserDefaults)
+    //
+    // Used by LightSigner.handleRequest to short-circuit duplicate processing
+    // when both NSE and the foreground app's WebSocket sub catch the same event.
+    //
+    // Lossy semantics across processes are acceptable: occasional double-publish
+    // is harmless because NIP-46 clients dedupe responses by `id`. Within one
+    // process, the lock ensures atomic check-and-insert.
+    //
+    // Audit D.1.1: insertion-ordered ring buffer (200 entries) + age bound
+    // (60s based on event.created_at). Replaces the prior Set + .suffix(50)
+    // logic that was duplicated inline in Clave/ClaveApp.swift and
+    // ClaveNSE/NotificationService.swift; those call sites are removed once
+    // LightSigner becomes the single dedupe choke point.
+
+    enum ProcessedStatus { case markedNew, alreadyProcessed }
+
+    private static let processedEventIDsCap = 200
+    private static let processedEventIDsAgeWindow: Double = 60  // seconds
+
+    #if DEBUG
+    nonisolated(unsafe) private static var processedEventIDsKeyOverride: String?
+    static func _setProcessedEventIDsKeyForTesting(_ key: String) { processedEventIDsKeyOverride = key }
+    static func _resetProcessedEventIDsKeyForTesting() { processedEventIDsKeyOverride = nil }
+    #endif
+
+    private static var processedEventIDsKey: String {
+        #if DEBUG
+        return processedEventIDsKeyOverride ?? "processedEventIDs"
+        #else
+        return "processedEventIDs"
+        #endif
+    }
+
+    private static let processedEventIDsLock = NSLock()  // intra-process only
+
+    /// Stored format: array of `"<eventId>:<createdAt>"` strings, insertion order
+    /// preserved by Array semantics. Cross-process races may produce duplicate
+    /// inserts; NIP-46 client-side id-match handles the resulting double-response.
+    static func markEventProcessed(eventId: String, createdAt: Double) -> ProcessedStatus {
+        processedEventIDsLock.lock()
+        defer { processedEventIDsLock.unlock() }
+
+        let now = Date().timeIntervalSince1970
+        var entries = defaults.stringArray(forKey: processedEventIDsKey) ?? []
+
+        // Age-based eviction sweep on every call (cheap — bounded list).
+        entries = entries.filter { entry in
+            let parts = entry.split(separator: ":", maxSplits: 1).map(String.init)
+            guard parts.count == 2, let ts = Double(parts[1]) else { return false }
+            return (now - ts) <= processedEventIDsAgeWindow
+        }
+
+        // Check if eventId already present.
+        let prefix = "\(eventId):"
+        if entries.contains(where: { $0.hasPrefix(prefix) }) {
+            // Refresh storage with the post-eviction list (may have changed).
+            defaults.set(entries, forKey: processedEventIDsKey)
+            return .alreadyProcessed
+        }
+
+        // Insert.
+        entries.append("\(eventId):\(createdAt)")
+        if entries.count > processedEventIDsCap {
+            entries.removeFirst(entries.count - processedEventIDsCap)
+        }
+        defaults.set(entries, forKey: processedEventIDsKey)
+        return .markedNew
     }
 
     // MARK: - Helpers

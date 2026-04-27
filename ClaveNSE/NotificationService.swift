@@ -157,8 +157,10 @@ class NotificationService: UNNotificationServiceExtension {
                 return SigningResult(status: .noEvents)
             }
 
-            let processedKey = "processedEventIDs"
-            var processedIDs = Set(SharedConstants.sharedDefaults.stringArray(forKey: processedKey) ?? [])
+            // Per-event dedupe is now done inside LightSigner.handleRequest
+            // (audit D.1.1, see SharedStorage.markEventProcessed). Duplicates
+            // arriving via both APNs and the foreground subscription return
+            // status "skipped-duplicate" without doing decrypt work.
 
             var lastError: String? = nil
             var handledCount = 0
@@ -178,9 +180,7 @@ class NotificationService: UNNotificationServiceExtension {
 
             for event in sortedEvents {
                 guard let eventPubkey = event["pubkey"] as? String,
-                      eventPubkey != signerPubkey,
-                      let eventId = event["id"] as? String,
-                      !processedIDs.contains(eventId) else { continue }
+                      eventPubkey != signerPubkey else { continue }
 
                 do {
                     let result = try await LightSigner.handleRequest(
@@ -188,9 +188,13 @@ class NotificationService: UNNotificationServiceExtension {
                         requestEvent: event,
                         responseRelayUrl: relayUrlString
                     )
-                    processedIDs.insert(eventId)
                     // Decrypt failures mean "not for us" — skip silently
                     if result.status == "error" && result.errorMessage == "Decrypt failed" {
+                        continue
+                    }
+                    if result.status == "skipped-duplicate" {
+                        // Layer 1 foreground sub or another NSE wake already
+                        // handled this event. No-op.
                         continue
                     }
                     handledCount += 1
@@ -205,13 +209,9 @@ class NotificationService: UNNotificationServiceExtension {
                     }
                 } catch {
                     // Treat errors as non-fatal — event may not be for us
-                    processedIDs.insert(eventId)
                     logger.notice("[ClaveNSE] Skipping event: \(error.localizedDescription)")
                 }
             }
-
-            let trimmed = Array(processedIDs.suffix(50))
-            SharedConstants.sharedDefaults.set(trimmed, forKey: processedKey)
 
             logger.notice("[ClaveNSE] Handled \(handledCount) new requests, skipped \(events.count - handledCount) duplicates")
 
