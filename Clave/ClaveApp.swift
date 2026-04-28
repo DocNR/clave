@@ -42,10 +42,13 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         let token = deviceToken.map { String(format: "%02x", $0) }.joined()
         logger.notice("[APNs] Device token: \(token, privacy: .private)")
         SharedConstants.sharedDefaults.set(token, forKey: SharedConstants.deviceTokenKey)
-        // Registration with the proxy is handled by AppState.importKey/generateKey
-        // (on first-time setup) and by the Settings → Register button (on demand).
-        // The AppDelegate doesn't have access to the signer nsec without duplicating
-        // LightEvent.signNip98 logic, so we no longer register from here.
+        // AppDelegate doesn't have direct access to the signer nsec (would have
+        // to duplicate LightEvent.signNip98 logic), so we signal AppState via
+        // NotificationCenter and let it do the actual NIP-98-signed POST.
+        // Catches: iOS-rotated tokens, proxy-side token loss, fresh installs
+        // where the user already had a key from a prior install. Idempotent on
+        // the proxy side (upsert).
+        NotificationCenter.default.post(name: .apnsDeviceTokenAvailable, object: token)
     }
 
     func application(
@@ -244,4 +247,9 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 extension Notification.Name {
     static let signingCompleted = Notification.Name("signingCompleted")
     static let drainPendingPairOps = Notification.Name("drainPendingPairOps")
+    /// Posted by AppDelegate.didRegisterForRemoteNotificationsWithDeviceToken
+    /// every time iOS hands us a device token (every launch + on rotations).
+    /// AppState observes and re-registers with the proxy if a signer key
+    /// exists. Object is the hex-encoded token string.
+    static let apnsDeviceTokenAvailable = Notification.Name("apnsDeviceTokenAvailable")
 }
