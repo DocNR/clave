@@ -574,16 +574,44 @@ final class AppState {
 
         URLSession.shared.dataTask(with: request) { [weak self] _, response, error in
             DispatchQueue.main.async {
+                let now = Date().timeIntervalSince1970
                 if let http = response as? HTTPURLResponse, http.statusCode == 200 {
+                    SharedConstants.sharedDefaults.set(now, forKey: SharedConstants.lastRegisterSucceededAtKey)
                     self?.drainPendingPairOps()
                     completion?(true, "Registered")
                 } else if let http = response as? HTTPURLResponse {
+                    SharedConstants.sharedDefaults.set(now, forKey: SharedConstants.lastRegisterFailedAtKey)
                     completion?(false, "Failed: HTTP \(http.statusCode)")
                 } else {
+                    SharedConstants.sharedDefaults.set(now, forKey: SharedConstants.lastRegisterFailedAtKey)
                     completion?(false, error?.localizedDescription ?? "Connection failed")
                 }
             }
         }.resume()
+    }
+
+    /// Throttled wrapper around `registerWithProxy()` for opportunistic
+    /// re-register on app foreground. Skips if a recent success exists; gates
+    /// retries after failure with a cooldown so a dead proxy doesn't get
+    /// hammered. Idempotent on the proxy side regardless.
+    ///
+    /// Trigger: `MainTabView.handleScenePhase(.active)`. Catches the case where
+    /// the cold-launch register POST silently failed on bad cellular and the
+    /// user later moved to wifi — without this, they had to tap Settings →
+    /// Register manually (real tester report 2026-04-28).
+    func ensureRegisteredFresh() {
+        guard isKeyImported else { return }
+        let now = Date().timeIntervalSince1970
+        let lastSuccess = SharedConstants.sharedDefaults.double(forKey: SharedConstants.lastRegisterSucceededAtKey)
+        let lastFailure = SharedConstants.sharedDefaults.double(forKey: SharedConstants.lastRegisterFailedAtKey)
+
+        // Skip if we successfully registered within the last 30 minutes.
+        if lastSuccess > 0 && (now - lastSuccess) < 1800 { return }
+        // Apply a 60-second cooldown between failed attempts to avoid hammering
+        // a dead proxy (e.g., during a Cloudflare incident or local network blip).
+        if lastFailure > 0 && (now - lastFailure) < 60 { return }
+
+        registerWithProxy()
     }
 
     /// Unregister the current device token with the proxy. Called from `deleteKey()`

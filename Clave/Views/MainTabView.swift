@@ -1,5 +1,4 @@
 import SwiftUI
-import UserNotifications
 
 struct MainTabView: View {
     @Environment(AppState.self) private var appState
@@ -44,14 +43,11 @@ struct MainTabView: View {
             // backgrounded). The in-process .pendingRequestsUpdated observer
             // in AppState handles the L1 path; this catches NSE-side queues.
             appState.refreshPendingRequests()
-            // Sweep blank Notification Center entries from NSE silent-success
-            // wakes. NSE calls removeDeliveredNotifications immediately after
-            // contentHandler, but the NSE process often exits before iOS has
-            // committed the notification, so the remove no-ops. The L1 dedupe
-            // makes this much more frequent (every NSE wake for an event L1
-            // already processed returns .noEvents → blank entry). Cleaning
-            // here works because the main app process lives long enough for
-            // the async API to actually complete.
+            // Opportunistic re-register if the cached "last success" is stale
+            // or the last attempt failed (e.g. POST timed out on bad cellular).
+            // Cheap idempotent upsert on the proxy side.
+            appState.ensureRegisteredFresh()
+            // Sweep blank NC entries (see NotificationCenterSweep.swift).
             sweepBlankNotifications()
         case .inactive:
             // 2s grace window for app-switcher peeks / control-center swipes.
@@ -61,6 +57,12 @@ struct MainTabView: View {
                 guard !Task.isCancelled else { return }
                 appState.stopForegroundSubscription()
             }
+            // Also sweep on tap-away — catches the case where a tester opens
+            // NC via swipe-down WHILE Clave is the most-recent foreground app
+            // but isn't currently `.active`. Small additional cost (one async
+            // get + filter); harmless in the common case where there are no
+            // blank entries.
+            sweepBlankNotifications()
         case .background:
             // Confirmed background — stop immediately.
             pendingStopTask?.cancel()
@@ -70,23 +72,6 @@ struct MainTabView: View {
             }
         @unknown default:
             break
-        }
-    }
-
-    /// Removes any delivered notification with an empty title — these are NSE
-    /// silent-success / .noEvents wakes that should never have appeared in
-    /// Notification Center but did, due to the NSE-exit-before-iOS-commit
-    /// race. Locally-scheduled pending-approval banners ("Approve Signing
-    /// Request"), sign-failure banners ("Signing Failed"), and any other
-    /// real notification keep their title and are preserved.
-    private func sweepBlankNotifications() {
-        let center = UNUserNotificationCenter.current()
-        center.getDeliveredNotifications { delivered in
-            let blankIds = delivered
-                .filter { $0.request.content.title.isEmpty }
-                .map { $0.request.identifier }
-            guard !blankIds.isEmpty else { return }
-            center.removeDeliveredNotifications(withIdentifiers: blankIds)
         }
     }
 }

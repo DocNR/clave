@@ -385,6 +385,14 @@ final class ForegroundRelaySubscription {
                     eventKind: result.eventKind
                 )
             }
+
+            // Sweep blank NC entries after each L1 event. Catches the case
+            // where Clave is foregrounded and APNs delivers a parallel push
+            // for the same kind:24133 (NSE wakes, returns .noEvents, leaves
+            // a blank NC entry) — the user is actively in Clave, so they're
+            // most annoyed by the accumulating blanks. Cheap async call;
+            // the get-callback no-ops when nothing matches.
+            sweepBlankNotifications()
         }
     }
 }
