@@ -57,6 +57,36 @@ final class AppState {
         ) { [weak self] _ in
             self?.refreshPendingRequests()
         }
+
+        // Re-register with the proxy whenever iOS hands us a device token.
+        // Catches three real-world failure modes that previously left users
+        // silently unable to receive push-wakes:
+        //  1. iOS rotated the token (Apple does this periodically, especially
+        //     after iOS upgrades) — proxy was holding a stale token.
+        //  2. The user reinstalled Clave from TestFlight — fresh install gets
+        //     a new token, but the existing nsec in Keychain means we never
+        //     hit the importKey/generateKey re-register path.
+        //  3. The proxy lost our token entry (e.g. the tokens.json migration
+        //     wiped legacy entries; future bug we haven't hit yet) — re-
+        //     registering on launch transparently recovers.
+        // Idempotent on the proxy side (upsert), so harmless on the common
+        // case where token+pubkey haven't changed.
+        NotificationCenter.default.addObserver(
+            forName: .apnsDeviceTokenAvailable,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            guard let self else { return }
+            if let token = note.object as? String {
+                self.deviceToken = token
+            }
+            // Only register if we already have a key. Onboarding flow handles
+            // the no-key-yet case via the explicit `importKey()` /
+            // `generateKey()` path; no point trying with no nsec to sign.
+            if self.isKeyImported {
+                self.registerWithProxy()
+            }
+        }
     }
 
     // MARK: - Foreground subscription bridge
@@ -102,6 +132,17 @@ final class AppState {
         deviceToken = SharedConstants.sharedDefaults.string(forKey: SharedConstants.deviceTokenKey) ?? ""
         bunkerSecret = SharedStorage.getBunkerSecret()
         loadCachedProfile()
+
+        // Re-register with the proxy on every launch when both a key and a
+        // token are present. Belt to the suspenders of the
+        // .apnsDeviceTokenAvailable observer in init: this catches the
+        // ordering case where iOS handed us the device token *before* loadState
+        // ran (so the observer's `if isKeyImported` check failed at that moment
+        // because the key hadn't been loaded from Keychain yet). Idempotent on
+        // the proxy side.
+        if isKeyImported && !deviceToken.isEmpty {
+            registerWithProxy()
+        }
     }
 
     private func loadCachedProfile() {
