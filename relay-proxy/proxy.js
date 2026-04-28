@@ -28,6 +28,7 @@ const { parseAuthHeader, verifyNip98, sha256Hex } = require("./nip98");
 const { createStorage } = require("./storage");
 const { createClientsStorage } = require("./clients");
 const { createRelayPool } = require("./relayPool");
+const { createApnsClient, shouldPruneToken, parseReason } = require("./apnsClient");
 
 const PUBLIC_PRIMARY_URL = process.env.PUBLIC_RELAY_URL || "wss://relay.powr.build";
 
@@ -58,98 +59,26 @@ function alreadySeen(eventId) {
   return false;
 }
 
-// --- State ---
-let cachedJwt = null;
-let cachedJwtTime = 0;
+// --- APNs client (HTTP/2 with GOAWAY-aware reconnection, see apnsClient.js) ---
+const apnsClient = createApnsClient({
+  host: APNS_HOST,
+  topic: APNS_TOPIC,
+  keyId: APNS_KEY_ID,
+  teamId: APNS_TEAM_ID,
+  keyPath: APNS_KEY_PATH,
+  logger: console,
+});
 
-// --- APNs JWT (ES256) ---
-function derToRaw(derSig) {
-  let offset = 2;
-  if (derSig[0] !== 0x30) throw new Error("Invalid DER");
-  if (derSig[2] !== 0x02) throw new Error("Invalid DER");
-  const rLen = derSig[3];
-  const r = derSig.subarray(4, 4 + rLen);
-  offset = 4 + rLen;
-  if (derSig[offset] !== 0x02) throw new Error("Invalid DER");
-  const sLen = derSig[offset + 1];
-  const s = derSig.subarray(offset + 2, offset + 2 + sLen);
-  const rPad = Buffer.alloc(32);
-  r.copy(rPad, Math.max(0, 32 - r.length), Math.max(0, r.length - 32));
-  const sPad = Buffer.alloc(32);
-  s.copy(sPad, Math.max(0, 32 - s.length), Math.max(0, s.length - 32));
-  return Buffer.concat([rPad, sPad]);
-}
-
-function makeApnsJwt() {
-  // Cache JWT for 50 minutes (Apple allows up to 60)
-  const now = Math.floor(Date.now() / 1000);
-  if (cachedJwt && now - cachedJwtTime < 3000) return cachedJwt;
-
-  const key = fs.readFileSync(APNS_KEY_PATH, "utf8");
-  const header = Buffer.from(
-    JSON.stringify({ alg: "ES256", kid: APNS_KEY_ID })
-  ).toString("base64url");
-  const payload = Buffer.from(
-    JSON.stringify({ iss: APNS_TEAM_ID, iat: now })
-  ).toString("base64url");
-  const sigInput = `${header}.${payload}`;
-  const signer = crypto.createSign("SHA256");
-  signer.update(sigInput);
-  const sig = signer.sign(key);
-  const raw = derToRaw(sig);
-  const signature = raw.toString("base64url");
-  cachedJwt = `${header}.${payload}.${signature}`;
-  cachedJwtTime = now;
-  return cachedJwt;
-}
-
-// --- APNs HTTP/2 Client ---
-let apnsClient = null;
-
-function getApnsClient() {
-  if (apnsClient && !apnsClient.destroyed) return apnsClient;
-  apnsClient = http2.connect(`https://${APNS_HOST}`);
-  apnsClient.on("error", (err) => {
-    console.error("[APNs] Connection error:", err.message);
-    apnsClient = null;
-  });
-  apnsClient.on("close", () => {
-    apnsClient = null;
-  });
-  return apnsClient;
-}
-
-// --- Send APNs Push ---
-function sendPush(token, pushPayload) {
-  const jwt = makeApnsJwt();
-  const body = JSON.stringify(pushPayload);
-  const client = getApnsClient();
-
-  return new Promise((resolve, reject) => {
-    const req = client.request({
-      ":method": "POST",
-      ":path": `/3/device/${token}`,
-      authorization: `bearer ${jwt}`,
-      "apns-topic": APNS_TOPIC,
-      "apns-push-type": "alert",
-      "apns-priority": "10",
-      "content-type": "application/json",
-      "content-length": Buffer.byteLength(body),
-    });
-
-    let data = "";
-    req.on("response", (headers) => {
-      const status = headers[":status"];
-      req.on("data", (d) => (data += d));
-      req.on("end", () => {
-        console.log(`[APNs] ${status} ${data || "OK"}`);
-        resolve(status);
-      });
-    });
-    req.on("error", reject);
-    req.write(body);
-    req.end();
-  });
+/**
+ * Send a push and log the result in the legacy `[APNs] <status> <body>`
+ * format so existing log filters / dashboards keep working. Returns
+ * `{status, body}` from APNs; throws if the request itself failed.
+ */
+async function sendPush(token, pushPayload) {
+  const result = await apnsClient.sendPush(token, pushPayload);
+  const tag = result.retried ? " (retried)" : "";
+  console.log(`[APNs] ${result.status} ${result.body || "OK"}${tag}`);
+  return result;
 }
 
 // --- Relay WebSocket ---
@@ -530,6 +459,7 @@ const server = http.createServer((req, res) => {
         last_event_received_at: global.lastEventReceivedAt || null,
         uptime_seconds: Math.floor(process.uptime()),
         public_relay: process.env.PUBLIC_RELAY_URL || RELAY_URL,
+        apns: apnsClient.getStats(),
       })
     );
   } else {
@@ -591,11 +521,13 @@ async function dispatchCaughtEvent({ event, sourceUrl, classification }) {
 
   for (const entry of matchingTokens) {
     try {
-      const status = await sendPush(entry.token, pushPayload);
-      if (status === 410) {
+      const { status, body } = await sendPush(entry.token, pushPayload);
+      if (shouldPruneToken(status, body)) {
         storage.removeToken({ token: entry.token, pubkey: entry.pubkey });
+        const reason = parseReason(body) || (status === 410 ? "Unregistered" : `HTTP ${status}`);
+        apnsClient.noteTokenPruned(reason);
         console.log(
-          `[APNs] Removed stale token: ${entry.token.slice(0, 8)}... for ${entry.pubkey.slice(0, 8)}...`
+          `[APNs] Removed stale token: ${entry.token.slice(0, 8)}... for ${entry.pubkey.slice(0, 8)}... (${reason})`
         );
       }
     } catch (e) {
@@ -639,3 +571,19 @@ server.listen(HTTP_PORT, () => {
   // Primary sub (ws://localhost:7778) — unchanged behavior, broad filter.
   connectRelay();
 });
+
+// Graceful shutdown — close the APNs session so Apple sees a clean
+// disconnect rather than a half-open socket. Helps the next start come up
+// faster and avoids a tail of stranded streams on Apple's side.
+function gracefulShutdown(signal) {
+  console.log(`[Shutdown] ${signal} received — closing APNs session`);
+  try {
+    apnsClient.close();
+  } catch (e) {
+    console.error(`[Shutdown] apnsClient.close threw: ${e.message}`);
+  }
+  // Give in-flight requests up to 2s to drain, then exit.
+  setTimeout(() => process.exit(0), 2000).unref();
+}
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));
