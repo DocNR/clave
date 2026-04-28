@@ -9,8 +9,12 @@ enum LightSigner {
         let method: String
         let eventKind: Int?
         let clientPubkey: String
-        let status: String          // "signed", "blocked", "pending", "error"
+        let status: String          // "signed", "blocked", "pending", "error", "skipped-duplicate"
         let errorMessage: String?
+        /// Set when status == "pending" so callers can schedule a UNNotificationRequest
+        /// with a stable identifier matching the queued PendingRequest.id.
+        /// nil for all other statuses.
+        var pendingRequestId: String? = nil
     }
 
     static func handleRequest(
@@ -209,6 +213,7 @@ enum LightSigner {
                     logger.notice("[LightSigner] Permission denied for \(method, privacy: .public) — queuing for approval")
 
                     // Serialize the full request event so the app can process it later
+                    var queuedRequestId: String? = nil
                     if let eventData = try? JSONSerialization.data(withJSONObject: requestEvent),
                        let eventJSON = String(data: eventData, encoding: .utf8) {
                         let pending = PendingRequest(
@@ -221,10 +226,12 @@ enum LightSigner {
                             responseRelayUrl: responseRelayUrl
                         )
                         SharedStorage.queuePendingRequest(pending)
+                        queuedRequestId = pending.id
                     }
 
                     let result = RequestResult(method: method, eventKind: eventKind, clientPubkey: senderPubkey,
-                                               status: "pending", errorMessage: "Queued for approval")
+                                               status: "pending", errorMessage: "Queued for approval",
+                                               pendingRequestId: queuedRequestId)
                     logAndTrack(result: result, clientName: clientName)
                     try await sendErrorResponse(
                         requestId: requestId, error: "Permission denied — open Clave to approve",

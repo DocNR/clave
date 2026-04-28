@@ -39,6 +39,10 @@ struct MainTabView: View {
             Task { @MainActor in
                 appState.startForegroundSubscription()
             }
+            // Pull cross-process pending-requests writes (NSE while we were
+            // backgrounded). The in-process .pendingRequestsUpdated observer
+            // in AppState handles the L1 path; this catches NSE-side queues.
+            appState.refreshPendingRequests()
         case .inactive:
             // 2s grace window for app-switcher peeks / control-center swipes.
             pendingStopTask?.cancel()

@@ -68,14 +68,46 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        logger.notice("[App] Foreground push received — processing signing request")
         let userInfo = notification.request.content.userInfo
+        let title = notification.request.content.title
 
+        // Two flavors of notification reach this delegate while the app is
+        // foreground:
+        //
+        //   1. Locally-scheduled UNNotificationRequest from
+        //      PendingApprovalBanner (identifier prefix "pending-approval-").
+        //      These have a meaningful title set by us and userInfo is empty.
+        //      Show them — that's the whole point of scheduling them.
+        //
+        //   2. APNs-delivered pushes for sign requests (userInfo contains the
+        //      proxy's `aps`/`event_id`/`relay_url` keys). NSE has already
+        //      modified their content: empty title for silent success,
+        //      "Approve Signing Request" for pending, "Signing Failed" for
+        //      error. We process the request again locally for L1-style
+        //      handling, AND let iOS display the NSE-modified content if it
+        //      has a real title (pending/error). Suppress for empty title
+        //      (the silent-success case).
+        let identifier = notification.request.identifier
+        let isLocalPendingBanner = identifier.hasPrefix("pending-approval-")
+
+        if isLocalPendingBanner {
+            // Don't re-process — this is our own scheduled banner, no APNs payload to handle.
+            completionHandler([.banner, .sound, .list])
+            return
+        }
+
+        logger.notice("[App] Foreground push received — processing signing request")
         Task {
             await handleForegroundSigningRequest(userInfo: userInfo)
         }
 
-        completionHandler([])  // suppress display
+        if !title.isEmpty {
+            // NSE marked this as pending or error — surface it.
+            completionHandler([.banner, .sound, .list])
+        } else {
+            // NSE marked this as silent success — suppress.
+            completionHandler([])
+        }
     }
 
     private func handleForegroundSigningRequest(userInfo: [AnyHashable: Any]) async {
@@ -176,6 +208,19 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                         continue
                     }
                     handledCount += 1
+                    // Same reason as ForegroundRelaySubscription: when this
+                    // foreground push handler queues a pending approval, NSE
+                    // for the same event will dedupe and produce no banner.
+                    // Schedule one here so the user gets the alert.
+                    if result.status == "pending", let requestId = result.pendingRequestId {
+                        await MainActor.run {
+                            PendingApprovalBanner.schedule(
+                                requestId: requestId,
+                                clientPubkey: result.clientPubkey,
+                                eventKind: result.eventKind
+                            )
+                        }
+                    }
                 } catch {
                     logger.notice("[App] Skipping event: \(error.localizedDescription)")
                 }
