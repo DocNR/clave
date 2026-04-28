@@ -2,6 +2,10 @@ import SwiftUI
 
 struct AvatarView: View {
     let pubkeyHex: String
+    /// Optional human-readable name. When non-empty, the first 1-2 letters of
+    /// the name are shown instead of the first two hex chars of the pubkey.
+    /// The gradient stays pubkey-derived so renames don't change the color.
+    var name: String? = nil
     var size: CGFloat = 48
 
     private var gradient: LinearGradient {
@@ -18,13 +22,39 @@ struct AvatarView: View {
         )
     }
 
+    /// Up to two letters. Prefers initials of the first two whitespace-
+    /// separated words of `name` (e.g. "Joe Bloggs" → "JB"), falls back to
+    /// the first two letters of a single-word name, then to the pubkey
+    /// prefix if name is nil/blank.
+    private var initials: String {
+        if let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty {
+            let words = trimmed.split(whereSeparator: { $0.isWhitespace })
+            if words.count >= 2,
+               let first = words[0].first,
+               let second = words[1].first {
+                return String([first, second]).uppercased()
+            }
+            return String(trimmed.prefix(2)).uppercased()
+        }
+        return String(pubkeyHex.prefix(2)).uppercased()
+    }
+
+    /// Use a monospaced design only for the pubkey-prefix fallback (which is
+    /// hex characters); proportional for actual name initials.
+    private var initialsFont: Font {
+        let isPubkeyFallback = (name?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+        return isPubkeyFallback
+            ? .system(size: size * 0.35, weight: .bold, design: .monospaced)
+            : .system(size: size * 0.4, weight: .bold)
+    }
+
     var body: some View {
         Circle()
             .fill(gradient)
             .frame(width: size, height: size)
             .overlay {
-                Text(String(pubkeyHex.prefix(2)).uppercased())
-                    .font(.system(size: size * 0.35, weight: .bold, design: .monospaced))
+                Text(initials)
+                    .font(initialsFont)
                     .foregroundStyle(.white)
             }
     }

@@ -84,6 +84,7 @@ struct ExportKeySheet: View {
             }
             .onAppear { authenticate() }
         }
+        .snapshotProtected()
     }
 
     private func authenticate() {

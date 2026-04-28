@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		006B17A84C114EDF9B129CAE /* NostrConnectParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34B139A8E147475F9B40B3D5 /* NostrConnectParser.swift */; };
 		6D2C503B9EF64C8EA5101CDB /* NostrConnectParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34B139A8E147475F9B40B3D5 /* NostrConnectParser.swift */; };
+		B0EBA01E2F90AB01000A0001 /* PendingApprovalBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0EBA01E2F90AB01000A0002 /* PendingApprovalBanner.swift */; };
 		BD247C1AD3A7497E8DF29530 /* ClientPermissions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 894FE9FF88CD485ABCD31C05 /* ClientPermissions.swift */; };
 		DD90DE0C2D8944D08B23C606 /* ClientPermissions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 894FE9FF88CD485ABCD31C05 /* ClientPermissions.swift */; };
 		DE7E10B2DE7E10B2DE7E10B2 /* DeveloperSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE7E10B1DE7E10B1DE7E10B1 /* DeveloperSettings.swift */; };
@@ -82,6 +83,7 @@
 /* Begin PBXFileReference section */
 		34B139A8E147475F9B40B3D5 /* NostrConnectParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NostrConnectParser.swift; sourceTree = "<group>"; };
 		894FE9FF88CD485ABCD31C05 /* ClientPermissions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClientPermissions.swift; sourceTree = "<group>"; };
+		B0EBA01E2F90AB01000A0002 /* PendingApprovalBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendingApprovalBanner.swift; sourceTree = "<group>"; };
 		DE7E10B1DE7E10B1DE7E10B1 /* DeveloperSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeveloperSettings.swift; sourceTree = "<group>"; };
 		DE7E10C1DE7E10C1DE7E10C1 /* LogExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogExporter.swift; sourceTree = "<group>"; };
 		EF3D7A0F2F8BCAE3005A6545 /* Clave.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Clave.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -212,6 +214,7 @@
 				894FE9FF88CD485ABCD31C05 /* ClientPermissions.swift */,
 				DE7E10B1DE7E10B1DE7E10B1 /* DeveloperSettings.swift */,
 				F60FCE002F8BCAE3000FAC0A /* ForegroundRelaySubscription.swift */,
+				B0EBA01E2F90AB01000A0002 /* PendingApprovalBanner.swift */,
 				DE7E10C1DE7E10C1DE7E10C1 /* LogExporter.swift */,
 				34B139A8E147475F9B40B3D5 /* NostrConnectParser.swift */,
 				EF3D7A592F8BD020005A6545 /* LightCrypto.swift */,
@@ -427,6 +430,7 @@
 				EF85F076F6C02095C4B6D9C4 /* LightSigner.swift in Sources */,
 				DE7E10B2DE7E10B2DE7E10B2 /* DeveloperSettings.swift in Sources */,
 				F60FCE012F8BCAE3000FAC0A /* ForegroundRelaySubscription.swift in Sources */,
+				B0EBA01E2F90AB01000A0001 /* PendingApprovalBanner.swift in Sources */,
 				DE7E10C2DE7E10C2DE7E10C2 /* LogExporter.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

@@ -369,6 +369,22 @@ final class ForegroundRelaySubscription {
                 self.eventsFailed += 1
             }
             self.recordLatency(elapsedMs)
+
+            // When L1 catches a request that needs user approval, NSE won't
+            // banner-pop for it — NSE will see the markEventProcessed dedupe
+            // and return .noEvents. Schedule the banner here so the user
+            // sees the same alert they'd get pre-L1 (when NSE was the only
+            // path). Identifier matches PendingRequest.id so approve/deny
+            // can clear the delivered banner.
+            if let result = result,
+               result.status == "pending",
+               let requestId = result.pendingRequestId {
+                PendingApprovalBanner.schedule(
+                    requestId: requestId,
+                    clientPubkey: result.clientPubkey,
+                    eventKind: result.eventKind
+                )
+            }
         }
     }
 }

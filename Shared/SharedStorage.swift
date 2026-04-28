@@ -98,6 +98,7 @@ enum SharedStorage {
         pending.append(request)
         if pending.count > 20 { pending = Array(pending.suffix(20)) }
         save(pending, forKey: SharedConstants.pendingRequestsKey)
+        postPendingRequestsUpdated()
     }
 
     static func getPendingRequests() -> [PendingRequest] {
@@ -108,10 +109,12 @@ enum SharedStorage {
         var pending = getPendingRequests()
         pending.removeAll { $0.id == id }
         save(pending, forKey: SharedConstants.pendingRequestsKey)
+        postPendingRequestsUpdated()
     }
 
     static func clearPendingRequests() {
         defaults.removeObject(forKey: SharedConstants.pendingRequestsKey)
+        postPendingRequestsUpdated()
     }
 
     // MARK: - Pending Pair Ops (HTTP failure retry queue)
@@ -351,6 +354,24 @@ enum SharedStorage {
         return .markedNew
     }
 
+    // MARK: - Pending-requests change broadcast
+
+    /// Posts an in-process NotificationCenter event so the main app's UI can
+    /// refresh without waiting for scenePhase or onAppear. Posted from
+    /// queue/remove/clear so any code path that mutates the pending-requests
+    /// list triggers a UI update.
+    ///
+    /// In-process only: NSE and the main app are separate processes, so this
+    /// notification does NOT cross between them. The main app picks up
+    /// NSE-side writes via the MainTabView scenePhase observer when the app
+    /// foregrounds (UserDefaults state is persistent across the process
+    /// boundary; only the wake-up signal is missing). Within the main app
+    /// process (L1 foreground sub, ApprovalSheet approve/deny, AppState),
+    /// this notification gives the UI an immediate refresh signal.
+    private static func postPendingRequestsUpdated() {
+        NotificationCenter.default.post(name: .pendingRequestsUpdated, object: nil)
+    }
+
     // MARK: - Helpers
 
     private static func save<T: Encodable>(_ value: T, forKey key: String) {
@@ -376,4 +397,10 @@ enum SharedStorage {
             return nil
         }
     }
+}
+
+// Defined in Shared/ so both NSE and the main app reference the same name.
+// Currently only posted in-process (see SharedStorage.postPendingRequestsUpdated).
+extension Notification.Name {
+    static let pendingRequestsUpdated = Notification.Name("pendingRequestsUpdated")
 }

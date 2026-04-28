@@ -176,7 +176,7 @@ struct HomeView: View {
                 .frame(width: 48, height: 48)
                 .clipShape(Circle())
         } else {
-            AvatarView(pubkeyHex: appState.signerPubkeyHex)
+            AvatarView(pubkeyHex: appState.signerPubkeyHex, name: appState.profile?.displayName)
         }
     }
 
@@ -253,12 +253,12 @@ struct HomeView: View {
                 AsyncImage(url: url) { image in
                     image.resizable().scaledToFill()
                 } placeholder: {
-                    AvatarView(pubkeyHex: client.pubkey, size: 32)
+                    AvatarView(pubkeyHex: client.pubkey, name: client.name, size: 32)
                 }
                 .frame(width: 32, height: 32)
                 .clipShape(Circle())
             } else {
-                AvatarView(pubkeyHex: client.pubkey, size: 32)
+                AvatarView(pubkeyHex: client.pubkey, name: client.name, size: 32)
             }
 
             VStack(alignment: .leading, spacing: 2) {

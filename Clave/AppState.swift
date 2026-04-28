@@ -45,6 +45,18 @@ final class AppState {
         ) { [weak self] _ in
             self?.drainPendingPairOps()
         }
+
+        // Refresh the pending-requests list whenever any code path mutates
+        // it (L1 foreground sub queue, approve/deny, future code). NSE-side
+        // writes don't cross the process boundary; the MainTabView scenePhase
+        // observer handles those by refreshing on app foreground.
+        NotificationCenter.default.addObserver(
+            forName: .pendingRequestsUpdated,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.refreshPendingRequests()
+        }
     }
 
     // MARK: - Foreground subscription bridge
@@ -307,6 +319,7 @@ final class AppState {
                 responseRelayUrl: request.responseRelayUrl
             )
             SharedStorage.removePendingRequest(id: request.id)
+            PendingApprovalBanner.clear(requestId: request.id)
             refreshPendingRequests()
             return result.status == "signed"
         } catch {
@@ -316,6 +329,7 @@ final class AppState {
 
     func denyPendingRequest(_ request: PendingRequest) {
         SharedStorage.removePendingRequest(id: request.id)
+        PendingApprovalBanner.clear(requestId: request.id)
         refreshPendingRequests()
     }
 

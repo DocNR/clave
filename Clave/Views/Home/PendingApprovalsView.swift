@@ -29,6 +29,10 @@ struct PendingApprovalsView: View {
                 .fill(Color.orange.opacity(0.08))
                 .strokeBorder(Color.orange.opacity(0.3), lineWidth: 1)
         }
+        // The wrapping Section in HomeView strips list-row insets so other
+        // cards (identityBar, statsRow) can self-pad. This mirrors that
+        // pattern so the orange border doesn't touch screen edges.
+        .padding(.horizontal)
     }
 
     private func requestRow(_ request: PendingRequest) -> some View {
