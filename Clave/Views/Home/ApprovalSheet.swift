@@ -37,6 +37,7 @@ struct ApprovalSheet: View {
                 Text("You've paired the maximum 5 clients. Unpair one from Settings → Clients to continue.")
             }
         }
+        .snapshotProtected()
     }
 
     // MARK: - Client Identity Header
@@ -54,11 +55,11 @@ struct ApprovalSheet: View {
                             .frame(width: 64, height: 64)
                             .clipShape(Circle())
                     default:
-                        AvatarView(pubkeyHex: parsedURI.clientPubkey, size: 64)
+                        AvatarView(pubkeyHex: parsedURI.clientPubkey, name: parsedURI.name, size: 64)
                     }
                 }
             } else {
-                AvatarView(pubkeyHex: parsedURI.clientPubkey, size: 64)
+                AvatarView(pubkeyHex: parsedURI.clientPubkey, name: parsedURI.name, size: 64)
             }
 
             Text(parsedURI.name ?? truncatedPubkey)

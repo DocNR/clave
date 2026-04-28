@@ -13,6 +13,7 @@ struct ClientDetailView: View {
     @State private var showOverrideAlert = false
     @State private var pendingTrustLevel: TrustLevel?
     @State private var showPermissions = false
+    @State private var showConnectionInfo = false
     @Environment(\.dismiss) private var dismiss
 
     private let protectedKinds: Set<Int> = SharedStorage.getProtectedKinds()
@@ -25,7 +26,6 @@ struct ClientDetailView: View {
                     trustLevelSection
                     permissionsSection
                     recentActivitySection
-                    actionsSection
                 } else {
                     ContentUnavailableView(
                         "Client Not Found",
@@ -38,7 +38,39 @@ struct ClientDetailView: View {
         }
         .navigationTitle(permissions?.name ?? "Client")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if permissions != nil {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Button {
+                            showConnectionInfo = true
+                        } label: {
+                            Label("Connection Info", systemImage: "info.circle")
+                        }
+                        Button {
+                            renameText = permissions?.name ?? ""
+                            showRename = true
+                        } label: {
+                            Label("Rename", systemImage: "pencil")
+                        }
+                        Divider()
+                        Button(role: .destructive) {
+                            showUnpairConfirm = true
+                        } label: {
+                            Label("Unpair Client", systemImage: "link.badge.plus")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
+                }
+            }
+        }
         .onAppear(perform: loadPermissions)
+        .sheet(isPresented: $showConnectionInfo) {
+            if let perms = permissions {
+                ConnectionInfoSheet(perms: perms)
+            }
+        }
         .alert("Rename Client", isPresented: $showRename) {
             TextField("Client name", text: $renameText)
             Button("Save") { performRename() }
@@ -94,15 +126,28 @@ struct ClientDetailView: View {
                             .frame(width: 72, height: 72)
                             .clipShape(Circle())
                     default:
-                        AvatarView(pubkeyHex: pubkey, size: 72)
+                        AvatarView(pubkeyHex: pubkey, name: perms.name, size: 72)
                     }
                 }
             } else {
-                AvatarView(pubkeyHex: pubkey, size: 72)
+                AvatarView(pubkeyHex: pubkey, name: perms.name, size: 72)
             }
 
-            Text(perms.name ?? truncatedPubkey)
-                .font(.title3.weight(.semibold))
+            Button {
+                renameText = perms.name ?? ""
+                showRename = true
+            } label: {
+                HStack(spacing: 6) {
+                    Text(perms.name ?? truncatedPubkey)
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(.primary)
+                    Image(systemName: "pencil")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("Tap to rename")
 
             if let url = perms.url {
                 Text(url)
@@ -362,31 +407,6 @@ struct ClientDetailView: View {
             }
         }
         .font(.body)
-    }
-
-    // MARK: - Actions
-
-    private var actionsSection: some View {
-        VStack(spacing: 12) {
-            Button {
-                renameText = permissions?.name ?? ""
-                showRename = true
-            } label: {
-                Label("Rename", systemImage: "pencil")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.bordered)
-
-            Button(role: .destructive) {
-                showUnpairConfirm = true
-            } label: {
-                Label("Unpair Client", systemImage: "link.badge.plus")
-                    .symbolRenderingMode(.multicolor)
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.bordered)
-        }
-        .padding(.top, 8)
     }
 
     // MARK: - Persistence

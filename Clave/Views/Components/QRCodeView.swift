@@ -33,6 +33,7 @@ struct QRCodeView: View {
                 }
             }
         }
+        .snapshotProtected()
     }
 
     private var qrImage: Image {
