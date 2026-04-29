@@ -12,7 +12,14 @@ enum LogExporter {
     /// Known log categories used across Clave's main app. NSE's "signer" category also
     /// writes under this subsystem but runs in a different process and is NOT captured
     /// by `.currentProcessIdentifier` scope.
-    static let allCategories: [String] = ["relay", "signer", "storage", "apns", "app"]
+    ///
+    /// Keep this in sync with `Logger(subsystem: "dev.nostr.clave", category:)`
+    /// declarations across `Shared/` and `Clave/`. Categories absent from this list
+    /// are silently filtered out of "Copy Recent Logs" — the user becomes blind
+    /// to that code path's activity.
+    static let allCategories: [String] = [
+        "relay", "signer", "storage", "apns", "app", "fg-sub", "banner", "nc-sweep"
+    ]
 
     /// Fetch main-app logs from the unified log store within the given time window.
     /// Returns an empty array on failure (no exception — this is a debug convenience).

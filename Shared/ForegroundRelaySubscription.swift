@@ -48,6 +48,16 @@ final class ForegroundRelaySubscription {
     private(set) var eventsFailed: Int = 0
     private(set) var lastError: String?
 
+    /// Set when this dispatcher run first reaches `.listening` on any relay,
+    /// cleared on transition to `.idle`. Spans transient `.reconnecting`
+    /// bounces — answer to "how long has L1 been alive?", not "how long
+    /// since the last frame?". `nil` when L1 is not running.
+    private(set) var sessionStartedAt: Date?
+
+    /// Relay URLs the current dispatcher run is subscribed to. Empty when
+    /// L1 is not running. Set at dispatcher entry, cleared at exit.
+    private(set) var currentRelays: [String] = []
+
     /// Ring buffer of last 1024 latencies (ms). Layer 2's progress UI reads this.
     private(set) var recentLatenciesMs: [Double] = []
     private static let latencyRingCap = 1024
@@ -82,27 +92,30 @@ final class ForegroundRelaySubscription {
         let userPubkey = SharedConstants.sharedDefaults.string(forKey: SharedConstants.signerPubkeyHexKey) ?? ""
         if userPubkey.isEmpty {
             lastError = "No signer key configured"
-            state = .error
-            statusMessage = "Error"
+            logger.notice("[fg-sub] start: silent return — no signer key configured")
+            setState(.error, message: "Error")
             return
         }
 
         let relays = relaySet()
         if relays.isEmpty {
             lastError = "No relays configured (no paired clients)"
-            state = .error
-            statusMessage = "Error"
+            logger.notice("[fg-sub] start: silent return — no relays configured")
+            setState(.error, message: "Error")
             return
         }
 
-        state = .starting
-        statusMessage = "Connecting…"
         eventsReceived = 0
         eventsProcessed = 0
         eventsFailed = 0
         lastError = nil
 
-        logger.notice("[fg-sub] start: relays=\(relays.count) user=\(userPubkey.prefix(8), privacy: .public)…")
+        // Privacy-safe: relay URLs are public WSS endpoints, npubs are public.
+        // Logging the actual relay set helps diagnose "L1 connected to wrong
+        // relays" and "single bad relay URL poisons the set" scenarios.
+        logger.notice("[fg-sub] start: relays=[\(relays.joined(separator: ","), privacy: .public)] user=\(userPubkey.prefix(8), privacy: .public)…")
+
+        setState(.starting, message: "Connecting…")
 
         dispatcherTask = Task { [self] in
             await self.runDispatcher(relays: relays, userPubkey: userPubkey)
@@ -120,8 +133,23 @@ final class ForegroundRelaySubscription {
         // returns, regardless of how slowly the dispatcher unwinds.
         dispatcherTask?.cancel()
         dispatcherTask = nil
-        state = .idle
-        statusMessage = "Idle"
+        setState(.idle, message: "Idle")
+    }
+
+    /// Single chokepoint for state transitions. Logs every change to
+    /// `[fg-sub]` so the OSLog buffer contains a full timeline (start →
+    /// starting → listening → reconnecting → listening → idle, etc.) when
+    /// something goes wrong. Always update state via this helper rather
+    /// than direct assignment.
+    private func setState(_ new: State, message: String?) {
+        let old = state
+        if old != new {
+            logger.notice("[fg-sub] state: \(old.rawValue, privacy: .public) → \(new.rawValue, privacy: .public)")
+        }
+        state = new
+        if let message {
+            statusMessage = message
+        }
     }
 
     func resetCounters() {
@@ -177,6 +205,7 @@ final class ForegroundRelaySubscription {
     // MARK: - Dispatcher
 
     private func runDispatcher(relays: [String], userPubkey: String) async {
+        currentRelays = relays
         // One long-lived TaskGroup per dispatcher run. Each child task is a
         // per-relay loop that connects, REQs, processes events, reconnects on
         // failure. The group ends when the dispatcherTask is cancelled (stop()).
@@ -191,9 +220,10 @@ final class ForegroundRelaySubscription {
         }
 
         // Dispatcher exit — return to idle. Triggered by stop() (or unrecoverable error).
-        self.state = .idle
-        self.statusMessage = "Idle"
-        logger.notice("[fg-sub] dispatcher exited; state=idle")
+        sessionStartedAt = nil
+        currentRelays = []
+        setState(.idle, message: "Idle")
+        logger.notice("[fg-sub] dispatcher exited")
     }
 
     private func runRelayLoop(relayURL: String, userPubkey: String) async {
@@ -221,8 +251,14 @@ final class ForegroundRelaySubscription {
                 let reqString = String(data: reqData, encoding: .utf8)!
                 try await conn.send(.string(reqString))
 
-                self.state = .listening
-                self.statusMessage = "Listening on \(relayURL)"
+                setState(.listening, message: "Listening on \(relayURL)")
+                if sessionStartedAt == nil {
+                    // First relay to reach .listening for this dispatcher run
+                    // sets the session timestamp. Subsequent relays in the
+                    // same group don't reset it; transient .reconnecting
+                    // bounces don't clear it. Cleared only on dispatcher exit.
+                    sessionStartedAt = Date()
+                }
                 logger.notice("[fg-sub] subscribed sub=\(subId, privacy: .public) relay=\(relayURL, privacy: .public)")
 
                 // Concurrent: receive loop + heartbeat. Whichever throws first
@@ -242,8 +278,7 @@ final class ForegroundRelaySubscription {
                 let msg = "relay=\(relayURL) error: \(error.localizedDescription)"
                 logger.error("[fg-sub] \(msg, privacy: .public)")
                 self.lastError = msg
-                self.state = .reconnecting
-                self.statusMessage = "Reconnecting in \(backoffSeconds)s…"
+                setState(.reconnecting, message: "Reconnecting in \(backoffSeconds)s…")
 
                 try? await Task.sleep(nanoseconds: backoffSeconds * 1_000_000_000)
                 backoffSeconds = min(backoffSeconds * 2, maxBackoff)
@@ -369,6 +404,16 @@ final class ForegroundRelaySubscription {
                 self.eventsFailed += 1
             }
             self.recordLatency(elapsedMs)
+
+            // Post .signingCompleted unconditionally so HomeView's
+            // signedTodayCount + per-client requestCount badges + ActivityView
+            // refresh after every event L1 catches. SharedStorage.touchClient
+            // and logActivity inside LightSigner.handleRequest persist the
+            // counter changes, but those views never re-read until something
+            // posts this signal. .pendingRequestsUpdated is already posted
+            // by SharedStorage.queuePendingRequest for the protected-kind
+            // path, so AppState's pending list is covered separately.
+            NotificationCenter.default.post(name: .signingCompleted, object: nil)
 
             // When L1 catches a request that needs user approval, NSE won't
             // banner-pop for it — NSE will see the markEventProcessed dedupe

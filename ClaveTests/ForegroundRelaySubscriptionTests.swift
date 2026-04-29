@@ -71,4 +71,51 @@ final class ForegroundRelaySubscriptionTests: XCTestCase {
         // Cleanup
         SharedConstants.sharedDefaults.removeObject(forKey: SharedConstants.signerPubkeyHexKey)
     }
+
+    func test_initialState_sessionStartedAtIsNil() {
+        let sub = ForegroundRelaySubscription.shared
+        XCTAssertNil(sub.sessionStartedAt,
+                     "Idle L1 should report no session start timestamp")
+    }
+
+    func test_initialState_currentRelaysIsEmpty() {
+        let sub = ForegroundRelaySubscription.shared
+        XCTAssertTrue(sub.currentRelays.isEmpty,
+                      "Idle L1 should have no current relays")
+    }
+
+    func test_startWithNoSignerKey_doesNotSetSessionStartedAt() async {
+        SharedConstants.sharedDefaults.removeObject(forKey: SharedConstants.signerPubkeyHexKey)
+
+        let sub = ForegroundRelaySubscription.shared
+        sub.start()
+        XCTAssertEqual(sub.state, .error)
+        XCTAssertNil(sub.sessionStartedAt,
+                     "sessionStartedAt should remain nil when start() bails on no key")
+        XCTAssertTrue(sub.currentRelays.isEmpty,
+                      "currentRelays should remain empty when start() bails on no key")
+    }
+
+    func test_resetCounters_doesNotClearSessionStartedAt() {
+        // sessionStartedAt is a session-lifecycle field, not a counter.
+        // resetCounters must not touch it. Guards against a future regression
+        // where someone "cleans up" by clearing it inside resetCounters.
+        let sub = ForegroundRelaySubscription.shared
+        XCTAssertNil(sub.sessionStartedAt)
+        sub.resetCounters()
+        XCTAssertNil(sub.sessionStartedAt,
+                     "resetCounters should not affect sessionStartedAt")
+    }
+
+    func test_state_rawValuesAreStableForLogging() {
+        // setState's logger call uses state.rawValue; tests against literal
+        // strings so a future rename of an enum case fails this test rather
+        // than silently breaking log greps in user diagnostics.
+        XCTAssertEqual(ForegroundRelaySubscription.State.idle.rawValue, "idle")
+        XCTAssertEqual(ForegroundRelaySubscription.State.starting.rawValue, "starting")
+        XCTAssertEqual(ForegroundRelaySubscription.State.listening.rawValue, "listening")
+        XCTAssertEqual(ForegroundRelaySubscription.State.reconnecting.rawValue, "reconnecting")
+        XCTAssertEqual(ForegroundRelaySubscription.State.stopping.rawValue, "stopping")
+        XCTAssertEqual(ForegroundRelaySubscription.State.error.rawValue, "error")
+    }
 }

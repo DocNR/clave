@@ -128,6 +128,17 @@ final class AppState {
            let keys = try? Keys.parse(secretKey: nsec) {
             signerPubkeyHex = keys.publicKey().toHex()
             isKeyImported = true
+            // Backfill the app-group UserDefaults cache. importKey/generateKey
+            // write this, but loadState (the read-existing-key path) didn't —
+            // so any user who imported their key before this cache became
+            // load-bearing has an empty UserDefaults value. L1's start()
+            // reads from UserDefaults (not AppState), so it was bailing
+            // silently with "no signer key configured" even though the key
+            // was in the Keychain and NSE could sign just fine.
+            let cached = SharedConstants.sharedDefaults.string(forKey: SharedConstants.signerPubkeyHexKey)
+            if cached != signerPubkeyHex {
+                SharedConstants.sharedDefaults.set(signerPubkeyHex, forKey: SharedConstants.signerPubkeyHexKey)
+            }
         }
         deviceToken = SharedConstants.sharedDefaults.string(forKey: SharedConstants.deviceTokenKey) ?? ""
         bunkerSecret = SharedStorage.getBunkerSecret()
