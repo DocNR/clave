@@ -44,4 +44,24 @@ final class LogExporterFormattingTests: XCTestCase {
         let output = LogExporter.format(entries: entries, categories: ["signer"])
         XCTAssertEqual(output, "")
     }
+
+    /// Regression guard: every Logger(category:) declaration in the main app
+    /// must appear in `allCategories`. A missing category silently filters
+    /// that subsystem's output out of "Copy Recent Logs" — the user becomes
+    /// blind to that code path. PR #11 (L1) and PR #13 (PendingApprovalBanner)
+    /// both shipped without updating this list, leaving the user unable to
+    /// see L1 or banner activity for weeks.
+    func testAllCategories_includesEveryShippedCategory() {
+        // Mirror of `private let logger = Logger(subsystem: "dev.nostr.clave",
+        // category: "<x>")` declarations across `Shared/` and `Clave/`.
+        // NSE uses subsystem "dev.nostr.clave.ClaveNSE" and is not captured
+        // by main-app OSLogStore; intentionally excluded.
+        let expected: Set<String> = [
+            "relay", "signer", "storage", "apns", "app",
+            "fg-sub", "banner", "nc-sweep"
+        ]
+        let actual = Set(LogExporter.allCategories)
+        XCTAssertEqual(actual, expected,
+                       "LogExporter.allCategories drifted from shipped Logger categories")
+    }
 }
