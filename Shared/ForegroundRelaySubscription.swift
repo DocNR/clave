@@ -370,6 +370,16 @@ final class ForegroundRelaySubscription {
             }
             self.recordLatency(elapsedMs)
 
+            // Post .signingCompleted unconditionally so HomeView's
+            // signedTodayCount + per-client requestCount badges + ActivityView
+            // refresh after every event L1 catches. SharedStorage.touchClient
+            // and logActivity inside LightSigner.handleRequest persist the
+            // counter changes, but those views never re-read until something
+            // posts this signal. .pendingRequestsUpdated is already posted
+            // by SharedStorage.queuePendingRequest for the protected-kind
+            // path, so AppState's pending list is covered separately.
+            NotificationCenter.default.post(name: .signingCompleted, object: nil)
+
             // When L1 catches a request that needs user approval, NSE won't
             // banner-pop for it — NSE will see the markEventProcessed dedupe
             // and return .noEvents. Schedule the banner here so the user
