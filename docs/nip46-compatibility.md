@@ -162,7 +162,7 @@ When a Nostr client doesn't work with Clave, the natural first question is "whos
 Test the same client against Clave AND a second NIP-46 signer (Amber, nsec.app, nsecBunker). The result narrows the search:
 
 - **Both signers work** → the client has no bug. If you saw a problem earlier, it was probably transient (relay flake, network).
-- **Only Clave fails** → likely signer-side (Clave). File a bug using the [NIP-46 broken client template](https://github.com/DocNR/clave/issues/new?template=nip46-broken-client.md).
+- **Only Clave fails** → likely signer-side (Clave). File an issue using the [NIP-46 interop issue template](https://github.com/DocNR/clave/issues/new?template=nip46-interop-issue.md).
 - **Both signers fail** → does NOT immediately mean the client is buggy. Continue to Step 2.
 
 ### Step 2 — Check whether the signers share a library on the receive side
@@ -222,9 +222,9 @@ If you've used Clave with a client not listed above, please [open a PR](#contrib
 
 There are three ways to contribute to this document.
 
-### Report a broken client
+### Report an interop issue
 
-Open a [GitHub Issue](https://github.com/DocNR/clave/issues/new?template=nip46-broken-client.md) using the **NIP-46 broken client** template. The template asks for:
+Open a [GitHub Issue](https://github.com/DocNR/clave/issues/new?template=nip46-interop-issue.md) using the **NIP-46 interop issue** template. The bug may turn out to be in Clave, the client, a shared library, or in spec ambiguity — we'll triage. The template asks for:
 
 - Client name and URL
 - Platform (web / iOS / Android / desktop)

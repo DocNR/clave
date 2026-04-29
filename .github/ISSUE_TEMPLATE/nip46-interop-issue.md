@@ -1,6 +1,6 @@
 ---
-name: NIP-46 broken client
-about: Report a Nostr client that doesn't work (or works incorrectly) with Clave's NIP-46 signer
+name: NIP-46 interop issue
+about: Report a NIP-46 compatibility issue between Clave and a Nostr client. The bug may be in Clave, the client, a shared library, or in spec ambiguity — we'll triage.
 title: "NIP-46: <client name> — <one-line summary>"
 labels: nip46-compat
 assignees: ''
@@ -10,6 +10,10 @@ assignees: ''
 Thanks for filing! This template captures the info we need to triage a NIP-46 compatibility issue.
 If a field doesn't apply, leave it blank or write "n/a" — partial reports are still useful.
 Please check the existing matrix at docs/nip46-compatibility.md before filing to avoid duplicates.
+
+A note on framing: this isn't a "broken client" report. It's an interop report. Where the bug
+ultimately lives (Clave, client, shared library, or spec) is something we figure out together
+after the report is filed. See the triage guide in docs/nip46-compatibility.md.
 -->
 
 ## Client
