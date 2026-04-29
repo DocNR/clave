@@ -95,6 +95,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
         if isLocalPendingBanner {
             // Don't re-process — this is our own scheduled banner, no APNs payload to handle.
+            logger.notice("[App] willPresent: local banner id=\(identifier, privacy: .public) — show")
             completionHandler([.banner, .sound, .list])
             return
         }
@@ -106,9 +107,11 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
         if !title.isEmpty {
             // NSE marked this as pending or error — surface it.
+            logger.notice("[App] willPresent: APNs push title=\"\(title, privacy: .public)\" — show")
             completionHandler([.banner, .sound, .list])
         } else {
             // NSE marked this as silent success — suppress.
+            logger.notice("[App] willPresent: APNs push empty title — suppress")
             completionHandler([])
         }
     }
