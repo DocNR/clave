@@ -82,27 +82,30 @@ final class ForegroundRelaySubscription {
         let userPubkey = SharedConstants.sharedDefaults.string(forKey: SharedConstants.signerPubkeyHexKey) ?? ""
         if userPubkey.isEmpty {
             lastError = "No signer key configured"
-            state = .error
-            statusMessage = "Error"
+            logger.notice("[fg-sub] start: silent return — no signer key configured")
+            setState(.error, message: "Error")
             return
         }
 
         let relays = relaySet()
         if relays.isEmpty {
             lastError = "No relays configured (no paired clients)"
-            state = .error
-            statusMessage = "Error"
+            logger.notice("[fg-sub] start: silent return — no relays configured")
+            setState(.error, message: "Error")
             return
         }
 
-        state = .starting
-        statusMessage = "Connecting…"
         eventsReceived = 0
         eventsProcessed = 0
         eventsFailed = 0
         lastError = nil
 
-        logger.notice("[fg-sub] start: relays=\(relays.count) user=\(userPubkey.prefix(8), privacy: .public)…")
+        // Privacy-safe: relay URLs are public WSS endpoints, npubs are public.
+        // Logging the actual relay set helps diagnose "L1 connected to wrong
+        // relays" and "single bad relay URL poisons the set" scenarios.
+        logger.notice("[fg-sub] start: relays=[\(relays.joined(separator: ","), privacy: .public)] user=\(userPubkey.prefix(8), privacy: .public)…")
+
+        setState(.starting, message: "Connecting…")
 
         dispatcherTask = Task { [self] in
             await self.runDispatcher(relays: relays, userPubkey: userPubkey)
@@ -120,8 +123,23 @@ final class ForegroundRelaySubscription {
         // returns, regardless of how slowly the dispatcher unwinds.
         dispatcherTask?.cancel()
         dispatcherTask = nil
-        state = .idle
-        statusMessage = "Idle"
+        setState(.idle, message: "Idle")
+    }
+
+    /// Single chokepoint for state transitions. Logs every change to
+    /// `[fg-sub]` so the OSLog buffer contains a full timeline (start →
+    /// starting → listening → reconnecting → listening → idle, etc.) when
+    /// something goes wrong. Always update state via this helper rather
+    /// than direct assignment.
+    private func setState(_ new: State, message: String?) {
+        let old = state
+        if old != new {
+            logger.notice("[fg-sub] state: \(old.rawValue, privacy: .public) → \(new.rawValue, privacy: .public)")
+        }
+        state = new
+        if let message {
+            statusMessage = message
+        }
     }
 
     func resetCounters() {
@@ -191,9 +209,8 @@ final class ForegroundRelaySubscription {
         }
 
         // Dispatcher exit — return to idle. Triggered by stop() (or unrecoverable error).
-        self.state = .idle
-        self.statusMessage = "Idle"
-        logger.notice("[fg-sub] dispatcher exited; state=idle")
+        setState(.idle, message: "Idle")
+        logger.notice("[fg-sub] dispatcher exited")
     }
 
     private func runRelayLoop(relayURL: String, userPubkey: String) async {
@@ -221,8 +238,7 @@ final class ForegroundRelaySubscription {
                 let reqString = String(data: reqData, encoding: .utf8)!
                 try await conn.send(.string(reqString))
 
-                self.state = .listening
-                self.statusMessage = "Listening on \(relayURL)"
+                setState(.listening, message: "Listening on \(relayURL)")
                 logger.notice("[fg-sub] subscribed sub=\(subId, privacy: .public) relay=\(relayURL, privacy: .public)")
 
                 // Concurrent: receive loop + heartbeat. Whichever throws first
@@ -242,8 +258,7 @@ final class ForegroundRelaySubscription {
                 let msg = "relay=\(relayURL) error: \(error.localizedDescription)"
                 logger.error("[fg-sub] \(msg, privacy: .public)")
                 self.lastError = msg
-                self.state = .reconnecting
-                self.statusMessage = "Reconnecting in \(backoffSeconds)s…"
+                setState(.reconnecting, message: "Reconnecting in \(backoffSeconds)s…")
 
                 try? await Task.sleep(nanoseconds: backoffSeconds * 1_000_000_000)
                 backoffSeconds = min(backoffSeconds * 2, maxBackoff)
