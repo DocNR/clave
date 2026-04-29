@@ -48,6 +48,16 @@ final class ForegroundRelaySubscription {
     private(set) var eventsFailed: Int = 0
     private(set) var lastError: String?
 
+    /// Set when this dispatcher run first reaches `.listening` on any relay,
+    /// cleared on transition to `.idle`. Spans transient `.reconnecting`
+    /// bounces — answer to "how long has L1 been alive?", not "how long
+    /// since the last frame?". `nil` when L1 is not running.
+    private(set) var sessionStartedAt: Date?
+
+    /// Relay URLs the current dispatcher run is subscribed to. Empty when
+    /// L1 is not running. Set at dispatcher entry, cleared at exit.
+    private(set) var currentRelays: [String] = []
+
     /// Ring buffer of last 1024 latencies (ms). Layer 2's progress UI reads this.
     private(set) var recentLatenciesMs: [Double] = []
     private static let latencyRingCap = 1024
@@ -195,6 +205,7 @@ final class ForegroundRelaySubscription {
     // MARK: - Dispatcher
 
     private func runDispatcher(relays: [String], userPubkey: String) async {
+        currentRelays = relays
         // One long-lived TaskGroup per dispatcher run. Each child task is a
         // per-relay loop that connects, REQs, processes events, reconnects on
         // failure. The group ends when the dispatcherTask is cancelled (stop()).
@@ -209,6 +220,8 @@ final class ForegroundRelaySubscription {
         }
 
         // Dispatcher exit — return to idle. Triggered by stop() (or unrecoverable error).
+        sessionStartedAt = nil
+        currentRelays = []
         setState(.idle, message: "Idle")
         logger.notice("[fg-sub] dispatcher exited")
     }
@@ -239,6 +252,13 @@ final class ForegroundRelaySubscription {
                 try await conn.send(.string(reqString))
 
                 setState(.listening, message: "Listening on \(relayURL)")
+                if sessionStartedAt == nil {
+                    // First relay to reach .listening for this dispatcher run
+                    // sets the session timestamp. Subsequent relays in the
+                    // same group don't reset it; transient .reconnecting
+                    // bounces don't clear it. Cleared only on dispatcher exit.
+                    sessionStartedAt = Date()
+                }
                 logger.notice("[fg-sub] subscribed sub=\(subId, privacy: .public) relay=\(relayURL, privacy: .public)")
 
                 // Concurrent: receive loop + heartbeat. Whichever throws first
