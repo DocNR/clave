@@ -30,7 +30,7 @@ What works end-to-end:
 - **Per-client permissions** — Full / Medium / Low trust with per-kind overrides; protected kinds (0, 3, 5, 10002, 30078) require approval on Medium trust
 - **NIP-46 methods:** `connect`, `sign_event`, `get_public_key`, `ping`, `describe`, `switch_relays`, `nip04_encrypt`, `nip04_decrypt`, `nip44_encrypt`, `nip44_decrypt`
 - **Activity log + client detail view** — rename, change trust, review per-client history, unpair
-- **Verified with:** Nostur (bunker://) and noStrudel (bunker:// and nostrconnect://)
+- **Verified ✅:** Nostur, fevela.me. Several other clients work with caveats — see [docs/nip46-compatibility.md](docs/nip46-compatibility.md) for the full per-client matrix, library-family notes, and triage guide.
 
 Known limitations:
 
