@@ -217,6 +217,12 @@ struct SettingsView: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
 
+            NavigationLink {
+                L1DiagnosticsView()
+            } label: {
+                Label("L1 Diagnostics", systemImage: "waveform.circle")
+            }
+
             Button(role: .destructive) {
                 devSettings.developerMenuUnlocked = false
                 versionTapTimes = []
