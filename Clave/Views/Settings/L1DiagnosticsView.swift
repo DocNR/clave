@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 import UserNotifications
 import UIKit
 
@@ -102,7 +103,7 @@ struct L1DiagnosticsView: View {
                     Spacer()
                     Text(authText)
                         .font(.footnote.bold())
-                        .foregroundStyle(isAuthorized ? .primary : .red)
+                        .foregroundStyle(isAuthorized ? Color.primary : Color.red)
                 }
                 labeled("Alert", value: settingLabel(s.alertSetting))
                 labeled("Sound", value: settingLabel(s.soundSetting))
