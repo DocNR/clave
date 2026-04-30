@@ -1,0 +1,70 @@
+name: iOS Build + Test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Cancel in-flight runs on a branch when a new commit lands — we only care
+# about the latest revision of any given PR / push.
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Build + unit tests
+    # Use the latest macOS image available; xcodebuild + iOS Simulator
+    # destinations are pre-installed on GitHub Actions macOS runners.
+    runs-on: macos-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show selected Xcode + available simulators
+        # Capture environment up-front so a runner-image change that breaks
+        # the build is easy to diagnose from CI logs.
+        run: |
+          sudo xcode-select -p
+          xcodebuild -version
+          xcrun simctl list devices available | head -40
+
+      - name: Resolve a usable iOS Simulator destination
+        id: pick-sim
+        # `name=iPhone 17` is fragile — the runner image may be on iPhone 16
+        # or earlier. Pick the first available iPhone simulator at runtime
+        # so the workflow doesn't break every Xcode-image bump.
+        run: |
+          DEVICE=$(xcrun simctl list devices available --json \
+            | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"];
+          for runtime, devs in d.items():
+              if "iOS" not in runtime: continue
+              for dev in devs:
+                  if dev.get("isAvailable") and "iPhone" in dev["name"]:
+                      print(dev["name"]); sys.exit(0)
+          sys.exit(1)')
+          echo "Using simulator: $DEVICE"
+          echo "device=$DEVICE" >> "$GITHUB_OUTPUT"
+
+      - name: xcodebuild test
+        env:
+          SIM_DEVICE: ${{ steps.pick-sim.outputs.device }}
+        run: |
+          xcodebuild test \
+            -project Clave.xcodeproj \
+            -scheme Clave \
+            -sdk iphonesimulator \
+            -destination "platform=iOS Simulator,name=$SIM_DEVICE,OS=latest" \
+            -skip-testing:ClaveUITests \
+            -resultBundlePath TestResults.xcresult \
+            CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
+
+      - name: Upload xcresult bundle on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: TestResults-${{ github.run_id }}
+          path: TestResults.xcresult
+          retention-days: 14
