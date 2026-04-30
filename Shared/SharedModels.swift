@@ -17,6 +17,15 @@ struct ActivityEntry: Codable, Identifiable {
     /// (≤120 chars). Pet-name substitution for `@<pubkey>` happens at render
     /// time so renames apply retroactively.
     let signedSummary: String?
+    /// First `e` tag for kinds where the signed event is a wrapper around a
+    /// reference (kind:6 repost, kind:7 reaction, kind:9734 zap request,
+    /// kind:9735 zap receipt). The activity detail view's "Open on njump.me"
+    /// button uses this id instead of `signedEventId` for those kinds —
+    /// linking to a "❤" reaction itself is useless; linking to the
+    /// reacted-to note is what the user actually wants. nil for everything
+    /// else; `signedEventId` always carries the user's actual signed event
+    /// for the Copy button.
+    let signedReferencedEventId: String?
 
     init(
         id: String,
@@ -27,7 +36,8 @@ struct ActivityEntry: Codable, Identifiable {
         status: String,
         errorMessage: String?,
         signedEventId: String? = nil,
-        signedSummary: String? = nil
+        signedSummary: String? = nil,
+        signedReferencedEventId: String? = nil
     ) {
         self.id = id
         self.method = method
@@ -38,11 +48,12 @@ struct ActivityEntry: Codable, Identifiable {
         self.errorMessage = errorMessage
         self.signedEventId = signedEventId
         self.signedSummary = signedSummary
+        self.signedReferencedEventId = signedReferencedEventId
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, method, eventKind, clientPubkey, timestamp, status, errorMessage
-        case signedEventId, signedSummary
+        case signedEventId, signedSummary, signedReferencedEventId
     }
 
     init(from decoder: Decoder) throws {
@@ -56,6 +67,7 @@ struct ActivityEntry: Codable, Identifiable {
         errorMessage = try c.decodeIfPresent(String.self, forKey: .errorMessage)
         signedEventId = try c.decodeIfPresent(String.self, forKey: .signedEventId)
         signedSummary = try c.decodeIfPresent(String.self, forKey: .signedSummary)
+        signedReferencedEventId = try c.decodeIfPresent(String.self, forKey: .signedReferencedEventId)
     }
 }
 

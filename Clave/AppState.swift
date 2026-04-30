@@ -368,6 +368,7 @@ final class AppState {
                 privateKey: privateKey,
                 requestEvent: requestEvent,
                 skipProtection: true,
+                skipDedupe: true,
                 responseRelayUrl: request.responseRelayUrl
             )
             SharedStorage.removePendingRequest(id: request.id)

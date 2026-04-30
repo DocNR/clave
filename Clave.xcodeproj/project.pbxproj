@@ -9,6 +9,10 @@
 /* Begin PBXBuildFile section */
 		006B17A84C114EDF9B129CAE /* NostrConnectParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34B139A8E147475F9B40B3D5 /* NostrConnectParser.swift */; };
 		6D2C503B9EF64C8EA5101CDB /* NostrConnectParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34B139A8E147475F9B40B3D5 /* NostrConnectParser.swift */; };
+		AE01F2A3B4C5D6E700000002 /* ActivitySummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE01F2A3B4C5D6E700000001 /* ActivitySummary.swift */; };
+		AE01F2A3B4C5D6E700000003 /* ActivitySummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE01F2A3B4C5D6E700000001 /* ActivitySummary.swift */; };
+		AE01F2A3B4C5D6E700000005 /* Nip19.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE01F2A3B4C5D6E700000004 /* Nip19.swift */; };
+		AE01F2A3B4C5D6E700000006 /* Nip19.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE01F2A3B4C5D6E700000004 /* Nip19.swift */; };
 		B0EBA01E2F90AB01000A0001 /* PendingApprovalBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0EBA01E2F90AB01000A0002 /* PendingApprovalBanner.swift */; };
 		BD247C1AD3A7497E8DF29530 /* ClientPermissions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 894FE9FF88CD485ABCD31C05 /* ClientPermissions.swift */; };
 		DD90DE0C2D8944D08B23C606 /* ClientPermissions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 894FE9FF88CD485ABCD31C05 /* ClientPermissions.swift */; };
@@ -40,10 +44,6 @@
 		EFC7FD75109694C0A7F86D26 /* SharedModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFCA55B463A619311A35AF3C /* SharedModels.swift */; };
 		EFE12D1EC4CE48622767D427 /* SharedStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFEE4316AC522CDDA35AFAC1 /* SharedStorage.swift */; };
 		F60FCE012F8BCAE3000FAC0A /* ForegroundRelaySubscription.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60FCE002F8BCAE3000FAC0A /* ForegroundRelaySubscription.swift */; };
-		AE01F2A3B4C5D6E700000002 /* ActivitySummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE01F2A3B4C5D6E700000001 /* ActivitySummary.swift */; };
-		AE01F2A3B4C5D6E700000003 /* ActivitySummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE01F2A3B4C5D6E700000001 /* ActivitySummary.swift */; };
-		AE01F2A3B4C5D6E700000005 /* Nip19.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE01F2A3B4C5D6E700000004 /* Nip19.swift */; };
-		AE01F2A3B4C5D6E700000006 /* Nip19.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE01F2A3B4C5D6E700000004 /* Nip19.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -87,6 +87,8 @@
 /* Begin PBXFileReference section */
 		34B139A8E147475F9B40B3D5 /* NostrConnectParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NostrConnectParser.swift; sourceTree = "<group>"; };
 		894FE9FF88CD485ABCD31C05 /* ClientPermissions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClientPermissions.swift; sourceTree = "<group>"; };
+		AE01F2A3B4C5D6E700000001 /* ActivitySummary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivitySummary.swift; sourceTree = "<group>"; };
+		AE01F2A3B4C5D6E700000004 /* Nip19.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Nip19.swift; sourceTree = "<group>"; };
 		B0EBA01E2F90AB01000A0002 /* PendingApprovalBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendingApprovalBanner.swift; sourceTree = "<group>"; };
 		DE7E10B1DE7E10B1DE7E10B1 /* DeveloperSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeveloperSettings.swift; sourceTree = "<group>"; };
 		DE7E10C1DE7E10C1DE7E10C1 /* LogExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogExporter.swift; sourceTree = "<group>"; };
@@ -105,8 +107,6 @@
 		EFCA55B463A619311A35AF3C /* SharedModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedModels.swift; sourceTree = "<group>"; };
 		EFEE4316AC522CDDA35AFAC1 /* SharedStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedStorage.swift; sourceTree = "<group>"; };
 		F60FCE002F8BCAE3000FAC0A /* ForegroundRelaySubscription.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForegroundRelaySubscription.swift; sourceTree = "<group>"; };
-		AE01F2A3B4C5D6E700000001 /* ActivitySummary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivitySummary.swift; sourceTree = "<group>"; };
-		AE01F2A3B4C5D6E700000004 /* Nip19.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Nip19.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -631,7 +631,7 @@
 				CODE_SIGN_ENTITLEMENTS = Clave/Clave.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 30;
+				CURRENT_PROJECT_VERSION = 31;
 				DEVELOPMENT_TEAM = 944AF56S27;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -669,7 +669,7 @@
 				CODE_SIGN_IDENTITY = "Apple Development";
 				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "iPhone Distribution";
 				CODE_SIGN_STYLE = Manual;
-				CURRENT_PROJECT_VERSION = 30;
+				CURRENT_PROJECT_VERSION = 31;
 				DEVELOPMENT_TEAM = "";
 				"DEVELOPMENT_TEAM[sdk=iphoneos*]" = 944AF56S27;
 				ENABLE_PREVIEWS = YES;
@@ -705,7 +705,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 30;
+				CURRENT_PROJECT_VERSION = 31;
 				DEVELOPMENT_TEAM = 944AF56S27;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.4;
@@ -727,7 +727,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 30;
+				CURRENT_PROJECT_VERSION = 31;
 				DEVELOPMENT_TEAM = 944AF56S27;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.4;
@@ -748,7 +748,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 30;
+				CURRENT_PROJECT_VERSION = 31;
 				DEVELOPMENT_TEAM = 944AF56S27;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 0.1.0;
@@ -768,7 +768,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 30;
+				CURRENT_PROJECT_VERSION = 31;
 				DEVELOPMENT_TEAM = 944AF56S27;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 0.1.0;
@@ -789,7 +789,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = ClaveNSE/ClaveNSE.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 30;
+				CURRENT_PROJECT_VERSION = 31;
 				DEVELOPMENT_TEAM = 944AF56S27;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = ClaveNSE/Info.plist;
@@ -820,7 +820,7 @@
 				CODE_SIGN_ENTITLEMENTS = ClaveNSE/ClaveNSE.entitlements;
 				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "iPhone Distribution";
 				CODE_SIGN_STYLE = Manual;
-				CURRENT_PROJECT_VERSION = 30;
+				CURRENT_PROJECT_VERSION = 31;
 				DEVELOPMENT_TEAM = "";
 				"DEVELOPMENT_TEAM[sdk=iphoneos*]" = 944AF56S27;
 				GENERATE_INFOPLIST_FILE = YES;

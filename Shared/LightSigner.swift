@@ -23,12 +23,17 @@ enum LightSigner {
         /// kind + tags via `ActivitySummary.signedSummary`. Forwarded into
         /// ActivityEntry verbatim.
         var signedSummary: String? = nil
+        /// First `e` tag for wrapper-around-reference kinds (6, 7, 9734,
+        /// 9735). Forwarded into ActivityEntry to redirect the njump
+        /// button to the more-meaningful target.
+        var signedReferencedEventId: String? = nil
     }
 
     static func handleRequest(
         privateKey: Data,
         requestEvent: [String: Any],
         skipProtection: Bool = false,
+        skipDedupe: Bool = false,
         responseRelays: [LightRelay]? = nil,
         responseRelayUrl: String? = nil
     ) async throws -> RequestResult {
@@ -43,11 +48,20 @@ enum LightSigner {
         // relay subscription (Layer 1) call into this function; whichever
         // marks first wins, others skip. Cross-process semantics are lossy
         // by design — see SharedStorage.markEventProcessed.
+        //
+        // `skipDedupe` is set by the pending-approval replay path
+        // (`AppState.approvePendingRequest`): NSE marked the event id as
+        // processed when it queued the request, so a fast approve (<60s
+        // window) would otherwise short-circuit here without producing the
+        // "signed" activity entry. Pending approvals are not new arrivals
+        // racing other processes — they are a deliberate replay of a
+        // known-queued event, so dedupe doesn't apply.
         let eventId = (requestEvent["id"] as? String) ?? ""
         let createdAt = (requestEvent["created_at"] as? Double)
             ?? Double(requestEvent["created_at"] as? Int ?? 0)
         let nowFallback = Date().timeIntervalSince1970
-        if !eventId.isEmpty,
+        if !skipDedupe,
+           !eventId.isEmpty,
            SharedStorage.markEventProcessed(
                eventId: eventId,
                createdAt: createdAt > 0 ? createdAt : nowFallback
@@ -342,32 +356,45 @@ enum LightSigner {
         // updates the persisted contact-set snapshot used for diffing.
         var signedEventId: String? = nil
         var signedSummary: String? = nil
+        var signedReferencedEventId: String? = nil
         if status == "signed", method == "sign_event", let json = responseResult {
-            (signedEventId, signedSummary) = extractSignedEventEnrichment(signedEventJSON: json)
+            let enrichment = extractSignedEventEnrichment(signedEventJSON: json)
+            signedEventId = enrichment.eventId
+            signedSummary = enrichment.summary
+            signedReferencedEventId = enrichment.referencedEventId
         }
 
         let result = RequestResult(method: method, eventKind: eventKind, clientPubkey: senderPubkey,
                                    status: status, errorMessage: errorMsg,
-                                   signedEventId: signedEventId, signedSummary: signedSummary)
+                                   signedEventId: signedEventId, signedSummary: signedSummary,
+                                   signedReferencedEventId: signedReferencedEventId)
         logAndTrack(result: result, clientName: clientName)
         return result
     }
 
+    /// Kinds where the signed event is a wrapper around a referenced event
+    /// (first `e` tag). For these, the activity detail's njump button should
+    /// link to the referenced event, not the wrapper itself — a "❤" reaction
+    /// or repost is meaningless on njump in isolation.
+    static let wrapperKinds: Set<Int> = [6, 7, 9734, 9735]
+
     /// Parse the signed-event JSON returned by `processRequest("sign_event", …)`
     /// to extract the event id and build the activity summary. For kind:3, also
     /// reads + updates the stored contact-set snapshot so the next sign can diff.
-    /// Failures are best-effort — returns (nil, nil) and lets logging proceed.
-    private static func extractSignedEventEnrichment(signedEventJSON: String) -> (String?, String?) {
+    /// Failures are best-effort — returns (nil, nil, nil) and lets logging proceed.
+    /// Internal (not private) so unit tests can verify enrichment shape without
+    /// constructing a full encrypted NIP-46 envelope.
+    static func extractSignedEventEnrichment(signedEventJSON: String) -> (eventId: String?, summary: String?, referencedEventId: String?) {
         guard let data = signedEventJSON.data(using: .utf8),
               let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return (nil, nil)
+            return (nil, nil, nil)
         }
         let id = dict["id"] as? String
         let kind = dict["kind"] as? Int
         let rawTags = dict["tags"] as? [[Any]] ?? []
         let tags: [[String]] = rawTags.map { row in row.compactMap { $0 as? String } }
 
-        guard let kind else { return (id, nil) }
+        guard let kind else { return (id, nil, nil) }
 
         // Kind:3 uses the prior snapshot to compute follow add/remove diffs.
         // Update the snapshot post-summary so the diff reflects what changed
@@ -393,7 +420,23 @@ enum LightSigner {
             }
         }
 
-        return (id, summary)
+        // Pull the first `e` tag for wrapper kinds so the njump button can
+        // redirect to the referenced event (e.g., the note that was reacted
+        // to, not the reaction itself). Validated as 64-char hex to avoid
+        // crashing the encoder on malformed tags.
+        var referencedEventId: String? = nil
+        if wrapperKinds.contains(kind) {
+            for tag in tags where tag.first == "e" && tag.count >= 2 {
+                let candidate = tag[1]
+                if candidate.count == 64,
+                   candidate.allSatisfy({ $0.isHexDigit }) {
+                    referencedEventId = candidate
+                    break
+                }
+            }
+        }
+
+        return (id, summary, referencedEventId)
     }
 
     // MARK: - Request Processing
@@ -512,7 +555,8 @@ enum LightSigner {
             status: result.status,
             errorMessage: result.errorMessage,
             signedEventId: result.signedEventId,
-            signedSummary: result.signedSummary
+            signedSummary: result.signedSummary,
+            signedReferencedEventId: result.signedReferencedEventId
         )
         SharedStorage.logActivity(entry)
         if result.clientPubkey != "unknown" && result.status != "blocked"

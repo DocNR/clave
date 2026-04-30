@@ -10,6 +10,12 @@ struct ActivityDetailView: View {
         0, 1, 3, 6, 7, 1985, 9734, 9735, 30023, 30311
     ]
 
+    /// Wrapper kinds where the user-meaningful target is the *referenced*
+    /// event (`signedReferencedEventId`), not the wrapper itself. njump-ing
+    /// to a "❤" reaction is useless; njump-ing to the reacted-to note is
+    /// what the user wants. For these kinds the button label changes too.
+    private static let wrapperKinds: Set<Int> = [6, 7, 9734, 9735]
+
     private let knownKinds: [Int: String] = [
         0: "Profile Metadata",
         1: "Short Note",
@@ -94,21 +100,36 @@ struct ActivityDetailView: View {
                     Label("Copy Event ID", systemImage: "doc.on.doc")
                 }
 
-                if shouldShowNjumpLink, let url = njumpURL(for: eventId) {
-                    Link(destination: url) {
-                        Label("Open on njump.me", systemImage: "safari")
-                    }
+                njumpButton
+            }
+        }
+    }
+
+    /// Build the "Open on njump.me" button if we have a meaningful target.
+    /// For wrapper kinds (reaction/repost/zap), the target is the referenced
+    /// event (so njump renders the reacted-to note, not the bare "❤").
+    /// For other renderable kinds, the target is the user's own signed event.
+    /// Returns nil if the kind isn't njump-renderable or we don't have an id.
+    @ViewBuilder
+    private var njumpButton: some View {
+        if let kind = entry.eventKind, Self.njumpRenderableKinds.contains(kind) {
+            let isWrapper = Self.wrapperKinds.contains(kind)
+            // For wrapper kinds, the wrapper itself isn't useful on njump;
+            // require a referenced id and skip the button if absent.
+            let targetId: String? = isWrapper ? entry.signedReferencedEventId : entry.signedEventId
+            let label = isWrapper ? "Open referenced event on njump.me" : "Open on njump.me"
+            if let id = targetId, let url = njumpURL(for: id, kindHint: isWrapper ? nil : kind) {
+                Link(destination: url) {
+                    Label(label, systemImage: "safari")
                 }
             }
         }
     }
 
-    private var shouldShowNjumpLink: Bool {
-        guard let kind = entry.eventKind else { return false }
-        return Self.njumpRenderableKinds.contains(kind)
-    }
-
-    private func njumpURL(for eventId: String) -> URL? {
+    /// `kindHint` is the kind to embed in the nevent TLV. For wrapper kinds
+    /// we pass nil because we don't know the referenced event's kind from
+    /// the activity log alone (could be a kind:1 note, kind:30023 article, etc.).
+    private func njumpURL(for eventId: String, kindHint: Int?) -> URL? {
         let connection = SharedStorage.getConnectedClients().first { $0.pubkey == entry.clientPubkey }
         let relays = connection?.relayUrls ?? []
         let bech32: String
@@ -119,7 +140,7 @@ struct ActivityDetailView: View {
             guard let nevent = try? Nip19.encodeNevent(
                 eventId: eventId,
                 relays: relays,
-                kind: entry.eventKind
+                kind: kindHint
             ) else {
                 // Fall back to plain note if nevent encoding fails for any reason
                 return (try? Nip19.encodeNote(eventId: eventId)).flatMap { URL(string: "https://njump.me/\($0)") }
