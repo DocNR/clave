@@ -8,6 +8,67 @@ struct ActivityEntry: Codable, Identifiable {
     let timestamp: Double
     let status: String       // "signed", "blocked", "error"
     let errorMessage: String?
+    /// Hex id of the resulting signed event. Set only for `sign_event` with
+    /// status `"signed"`. Powers the njump deep link + Copy ID button in
+    /// ActivityDetailView. nil for everything else.
+    let signedEventId: String?
+    /// One-line characterization of what was signed, built at log-time from
+    /// kind + tags via `ActivitySummary.signedSummary`. Stored verbatim
+    /// (≤120 chars). Pet-name substitution for `@<pubkey>` happens at render
+    /// time so renames apply retroactively.
+    let signedSummary: String?
+    /// First `e` tag for kinds where the signed event is a wrapper around a
+    /// reference (kind:6 repost, kind:7 reaction, kind:9734 zap request,
+    /// kind:9735 zap receipt). The activity detail view's "Open on njump.me"
+    /// button uses this id instead of `signedEventId` for those kinds —
+    /// linking to a "❤" reaction itself is useless; linking to the
+    /// reacted-to note is what the user actually wants. nil for everything
+    /// else; `signedEventId` always carries the user's actual signed event
+    /// for the Copy button.
+    let signedReferencedEventId: String?
+
+    init(
+        id: String,
+        method: String,
+        eventKind: Int?,
+        clientPubkey: String,
+        timestamp: Double,
+        status: String,
+        errorMessage: String?,
+        signedEventId: String? = nil,
+        signedSummary: String? = nil,
+        signedReferencedEventId: String? = nil
+    ) {
+        self.id = id
+        self.method = method
+        self.eventKind = eventKind
+        self.clientPubkey = clientPubkey
+        self.timestamp = timestamp
+        self.status = status
+        self.errorMessage = errorMessage
+        self.signedEventId = signedEventId
+        self.signedSummary = signedSummary
+        self.signedReferencedEventId = signedReferencedEventId
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, method, eventKind, clientPubkey, timestamp, status, errorMessage
+        case signedEventId, signedSummary, signedReferencedEventId
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        method = try c.decode(String.self, forKey: .method)
+        eventKind = try c.decodeIfPresent(Int.self, forKey: .eventKind)
+        clientPubkey = try c.decode(String.self, forKey: .clientPubkey)
+        timestamp = try c.decode(Double.self, forKey: .timestamp)
+        status = try c.decode(String.self, forKey: .status)
+        errorMessage = try c.decodeIfPresent(String.self, forKey: .errorMessage)
+        signedEventId = try c.decodeIfPresent(String.self, forKey: .signedEventId)
+        signedSummary = try c.decodeIfPresent(String.self, forKey: .signedSummary)
+        signedReferencedEventId = try c.decodeIfPresent(String.self, forKey: .signedReferencedEventId)
+    }
 }
 
 /// A signing request for a protected kind, queued by the NSE for in-app approval.

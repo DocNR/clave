@@ -22,6 +22,12 @@ enum SharedConstants {
     static let pairedClientsKey = "pairedClients"
     static let clientPermissionsKey = "clientPermissions"
     static let cachedProfileKey = "cachedProfile"
+    /// Snapshot of the user's last signed kind:3 contact-list pubkey set,
+    /// stored as a JSON-encoded `[String]` (sorted hex pubkeys). Used by
+    /// `ActivitySummary` to compute add/remove diffs on subsequent kind:3
+    /// signs so the activity summary reads "Followed @alice" instead of
+    /// "Followed 712 accounts". Skipped when the new kind:3 has >2000 p tags.
+    static let lastContactSetKey = "lastContactSet"
     /// `Date.timeIntervalSince1970` of the most recent successful POST to
     /// `/register`. Used by `AppState.ensureRegisteredFresh()` to throttle
     /// opportunistic re-registers to ~30 min while still self-healing from

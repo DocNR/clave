@@ -2,6 +2,10 @@ import SwiftUI
 
 struct ActivityRowView: View {
     let entry: ActivityEntry
+    /// When false, omits the pet-name segment from the subtitle. Used by
+    /// `ClientDetailView`'s "Recent Activity" section where the connection
+    /// is already implied by the surrounding nav title.
+    var showsClientName: Bool = true
 
     var body: some View {
         HStack(spacing: 10) {
@@ -21,13 +25,24 @@ struct ActivityRowView: View {
                     }
                 }
 
-                HStack(spacing: 4) {
-                    Text(truncatedPubkey(entry.clientPubkey))
-                        .font(.caption2)
+                if let summary = entry.signedSummary, !summary.isEmpty {
+                    Text(summary)
+                        .font(.caption)
                         .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
 
-                    Text("·")
-                        .foregroundStyle(.tertiary)
+                HStack(spacing: 4) {
+                    if showsClientName {
+                        Text(clientLabel)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+
+                        Text("·")
+                            .foregroundStyle(.tertiary)
+                    }
 
                     Text(relativeTime)
                         .font(.caption2)
@@ -70,5 +85,13 @@ struct ActivityRowView: View {
     private func truncatedPubkey(_ hex: String) -> String {
         guard hex.count > 12 else { return hex }
         return String(hex.prefix(8)) + "..." + String(hex.suffix(4))
+    }
+
+    private var clientLabel: String {
+        if let name = SharedStorage.getClientPermissions(for: entry.clientPubkey)?.name,
+           !name.isEmpty {
+            return name
+        }
+        return truncatedPubkey(entry.clientPubkey)
     }
 }
