@@ -48,6 +48,26 @@ jobs:
           echo "Using simulator: $DEVICE"
           echo "device=$DEVICE" >> "$GITHUB_OUTPUT"
 
+      - name: Pre-trust Swift package plugins
+        # Without trusted fingerprints, `swift-secp256k1`'s SharedSourcesPlugin
+        # silently fails to enable optional libsecp256k1 modules (ECDH,
+        # extrakeys, recovery, schnorrsig) — local-only symbols like
+        # `_secp256k1_ecdh` end up undefined at link time. Setting these
+        # defaults BEFORE resolving packages allows plugins to run with full
+        # define expansion. `-skipPackagePluginValidation` alone is not enough.
+        run: |
+          defaults write com.apple.dt.Xcode IDEPackageSupportUseBuiltinSCM YES
+          defaults write com.apple.dt.Xcode IDESkipPackagePluginFingerprintValidatation -bool YES
+          defaults write com.apple.dt.Xcode IDESkipMacroFingerprintValidation -bool YES
+
+      - name: Resolve packages
+        run: |
+          xcodebuild -resolvePackageDependencies \
+            -project Clave.xcodeproj \
+            -scheme Clave \
+            -skipPackagePluginValidation \
+            -skipMacroValidation
+
       - name: xcodebuild test
         env:
           SIM_DEVICE: ${{ steps.pick-sim.outputs.device }}
