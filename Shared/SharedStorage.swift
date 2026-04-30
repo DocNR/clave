@@ -284,6 +284,28 @@ enum SharedStorage {
         saveClientPermissions(perms)
     }
 
+    // MARK: - Last contact-list snapshot (kind:3 diff)
+
+    /// The most-recently-signed kind:3 contact-list pubkey set, or nil if no
+    /// kind:3 has been signed yet on this install. Used by `ActivitySummary`
+    /// to compute add/remove diffs.
+    static func getLastContactSet() -> Set<String>? {
+        guard let arr: [String] = load(forKey: SharedConstants.lastContactSetKey) else {
+            return nil
+        }
+        return Set(arr)
+    }
+
+    /// Replace the snapshot with the given pubkey set. Stored as a sorted
+    /// array for stable serialization. Pass `nil` to clear.
+    static func saveLastContactSet(_ set: Set<String>?) {
+        guard let set else {
+            defaults.removeObject(forKey: SharedConstants.lastContactSetKey)
+            return
+        }
+        save(Array(set).sorted(), forKey: SharedConstants.lastContactSetKey)
+    }
+
     // MARK: - Per-event-id dedupe (cross-process via app-group UserDefaults)
     //
     // Used by LightSigner.handleRequest to short-circuit duplicate processing

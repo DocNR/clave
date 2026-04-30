@@ -34,6 +34,61 @@ enum Bech32 {
         return data
     }
 
+    /// Encode raw bytes with the given HRP. Inverse of `decode`.
+    /// Used by NIP-19 to build `npub`, `note`, `nevent`, etc.
+    static func encode(hrp: String, data: Data) throws -> String {
+        let lowerHrp = hrp.lowercased()
+        let bytes5 = try convertBits(data: Array(data), fromBits: 8, toBits: 5, pad: true)
+        let checksum = createChecksum(hrp: lowerHrp, data: bytes5)
+        let combined = bytes5 + checksum
+        var payload = ""
+        for v in combined {
+            let idx = charset.index(charset.startIndex, offsetBy: Int(v))
+            payload.append(charset[idx])
+        }
+        return "\(lowerHrp)1\(payload)"
+    }
+
+    // MARK: - Polymod / checksum (BIP-173)
+
+    private static let generator: [UInt32] = [
+        0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3
+    ]
+
+    private static func polymod(_ values: [UInt8]) -> UInt32 {
+        var chk: UInt32 = 1
+        for v in values {
+            let top = chk >> 25
+            chk = ((chk & 0x1ffffff) << 5) ^ UInt32(v)
+            for i in 0..<5 where ((top >> i) & 1) == 1 {
+                chk ^= generator[i]
+            }
+        }
+        return chk
+    }
+
+    private static func hrpExpand(_ hrp: String) -> [UInt8] {
+        var ret: [UInt8] = []
+        for c in hrp.unicodeScalars {
+            ret.append(UInt8(c.value >> 5))
+        }
+        ret.append(0)
+        for c in hrp.unicodeScalars {
+            ret.append(UInt8(c.value & 31))
+        }
+        return ret
+    }
+
+    private static func createChecksum(hrp: String, data: [UInt8]) -> [UInt8] {
+        let values = hrpExpand(hrp) + data + [0, 0, 0, 0, 0, 0]
+        let mod = polymod(values) ^ 1
+        var ret: [UInt8] = []
+        for i in 0..<6 {
+            ret.append(UInt8((mod >> (5 * (5 - i))) & 31))
+        }
+        return ret
+    }
+
     private static func convertBits(data: [UInt8], fromBits: Int, toBits: Int, pad: Bool) throws -> [UInt8] {
         var acc: Int = 0
         var bits: Int = 0

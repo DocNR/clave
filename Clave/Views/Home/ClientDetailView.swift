@@ -347,7 +347,14 @@ struct ClientDetailView: View {
             } else {
                 VStack(spacing: 0) {
                     ForEach(entries) { entry in
-                        activityRow(entry)
+                        NavigationLink {
+                            ActivityDetailView(entry: entry)
+                        } label: {
+                            activityRow(entry)
+                        }
+                        .buttonStyle(.plain)
+                        .contentShape(Rectangle())
+
                         if entry.id != entries.last?.id {
                             Divider()
                         }
@@ -373,7 +380,13 @@ struct ClientDetailView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(entry.method)
                     .font(.subheadline.weight(.medium))
-                if let kind = entry.eventKind {
+                    .foregroundStyle(.primary)
+                if let summary = entry.signedSummary {
+                    Text(summary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                } else if let kind = entry.eventKind {
                     Text(KnownKinds.label(for: kind))
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -384,6 +397,10 @@ struct ClientDetailView: View {
 
             Text(relativeTime(entry.timestamp))
                 .font(.caption2)
+                .foregroundStyle(.tertiary)
+
+            Image(systemName: "chevron.right")
+                .font(.caption2.weight(.semibold))
                 .foregroundStyle(.tertiary)
         }
         .padding(.vertical, 6)

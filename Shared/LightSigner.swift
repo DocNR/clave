@@ -15,6 +15,14 @@ enum LightSigner {
         /// with a stable identifier matching the queued PendingRequest.id.
         /// nil for all other statuses.
         var pendingRequestId: String? = nil
+        /// Hex id of the resulting signed event. Set only for successful
+        /// `sign_event` results; nil otherwise. Forwarded into ActivityEntry
+        /// to power the njump deep link in the activity detail view.
+        var signedEventId: String? = nil
+        /// One-line summary of what was signed, derived at sign-time from
+        /// kind + tags via `ActivitySummary.signedSummary`. Forwarded into
+        /// ActivityEntry verbatim.
+        var signedSummary: String? = nil
     }
 
     static func handleRequest(
@@ -329,10 +337,63 @@ enum LightSigner {
             logger.error("[LightSigner] Relay did not accept response event")
         }
 
+        // Enrich activity log for successful sign_event with the resulting
+        // event id and a tag-derived one-liner. Side-effect: kind:3 also
+        // updates the persisted contact-set snapshot used for diffing.
+        var signedEventId: String? = nil
+        var signedSummary: String? = nil
+        if status == "signed", method == "sign_event", let json = responseResult {
+            (signedEventId, signedSummary) = extractSignedEventEnrichment(signedEventJSON: json)
+        }
+
         let result = RequestResult(method: method, eventKind: eventKind, clientPubkey: senderPubkey,
-                                   status: status, errorMessage: errorMsg)
+                                   status: status, errorMessage: errorMsg,
+                                   signedEventId: signedEventId, signedSummary: signedSummary)
         logAndTrack(result: result, clientName: clientName)
         return result
+    }
+
+    /// Parse the signed-event JSON returned by `processRequest("sign_event", …)`
+    /// to extract the event id and build the activity summary. For kind:3, also
+    /// reads + updates the stored contact-set snapshot so the next sign can diff.
+    /// Failures are best-effort — returns (nil, nil) and lets logging proceed.
+    private static func extractSignedEventEnrichment(signedEventJSON: String) -> (String?, String?) {
+        guard let data = signedEventJSON.data(using: .utf8),
+              let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return (nil, nil)
+        }
+        let id = dict["id"] as? String
+        let kind = dict["kind"] as? Int
+        let rawTags = dict["tags"] as? [[Any]] ?? []
+        let tags: [[String]] = rawTags.map { row in row.compactMap { $0 as? String } }
+
+        guard let kind else { return (id, nil) }
+
+        // Kind:3 uses the prior snapshot to compute follow add/remove diffs.
+        // Update the snapshot post-summary so the diff reflects what changed
+        // *with this sign*, not what would have changed against a stale set.
+        let previous: Set<String>?
+        if kind == 3 {
+            previous = SharedStorage.getLastContactSet()
+        } else {
+            previous = nil
+        }
+
+        let summary = ActivitySummary.signedSummary(kind: kind, tags: tags, previousContactSet: previous)
+
+        if kind == 3 {
+            let newSet = Set(tags.compactMap { tag -> String? in
+                guard tag.first == "p", tag.count >= 2 else { return nil }
+                return tag[1]
+            })
+            // Only persist when within the diff cap; over-cap kind:3 doesn't
+            // benefit from a snapshot (we fall back to "Updated contact list (N follows)").
+            if newSet.count <= ActivitySummary.kind3DiffCap {
+                SharedStorage.saveLastContactSet(newSet)
+            }
+        }
+
+        return (id, summary)
     }
 
     // MARK: - Request Processing
@@ -449,7 +510,9 @@ enum LightSigner {
             clientPubkey: result.clientPubkey,
             timestamp: Date().timeIntervalSince1970,
             status: result.status,
-            errorMessage: result.errorMessage
+            errorMessage: result.errorMessage,
+            signedEventId: result.signedEventId,
+            signedSummary: result.signedSummary
         )
         SharedStorage.logActivity(entry)
         if result.clientPubkey != "unknown" && result.status != "blocked"

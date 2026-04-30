@@ -40,6 +40,10 @@
 		EFC7FD75109694C0A7F86D26 /* SharedModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFCA55B463A619311A35AF3C /* SharedModels.swift */; };
 		EFE12D1EC4CE48622767D427 /* SharedStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFEE4316AC522CDDA35AFAC1 /* SharedStorage.swift */; };
 		F60FCE012F8BCAE3000FAC0A /* ForegroundRelaySubscription.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60FCE002F8BCAE3000FAC0A /* ForegroundRelaySubscription.swift */; };
+		AE01F2A3B4C5D6E700000002 /* ActivitySummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE01F2A3B4C5D6E700000001 /* ActivitySummary.swift */; };
+		AE01F2A3B4C5D6E700000003 /* ActivitySummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE01F2A3B4C5D6E700000001 /* ActivitySummary.swift */; };
+		AE01F2A3B4C5D6E700000005 /* Nip19.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE01F2A3B4C5D6E700000004 /* Nip19.swift */; };
+		AE01F2A3B4C5D6E700000006 /* Nip19.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE01F2A3B4C5D6E700000004 /* Nip19.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -101,6 +105,8 @@
 		EFCA55B463A619311A35AF3C /* SharedModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedModels.swift; sourceTree = "<group>"; };
 		EFEE4316AC522CDDA35AFAC1 /* SharedStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedStorage.swift; sourceTree = "<group>"; };
 		F60FCE002F8BCAE3000FAC0A /* ForegroundRelaySubscription.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForegroundRelaySubscription.swift; sourceTree = "<group>"; };
+		AE01F2A3B4C5D6E700000001 /* ActivitySummary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivitySummary.swift; sourceTree = "<group>"; };
+		AE01F2A3B4C5D6E700000004 /* Nip19.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Nip19.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -210,6 +216,7 @@
 		EF3D7A572F8BD011005A6545 /* Shared */ = {
 			isa = PBXGroup;
 			children = (
+				AE01F2A3B4C5D6E700000001 /* ActivitySummary.swift */,
 				EF3D7A582F8BD020005A6545 /* Bech32.swift */,
 				894FE9FF88CD485ABCD31C05 /* ClientPermissions.swift */,
 				DE7E10B1DE7E10B1DE7E10B1 /* DeveloperSettings.swift */,
@@ -221,6 +228,7 @@
 				EF3D7A5A2F8BD020005A6545 /* LightEvent.swift */,
 				EF3D7A5B2F8BD020005A6545 /* LightRelay.swift */,
 				EF3D7A5C2F8BD020005A6545 /* LightSigner.swift */,
+				AE01F2A3B4C5D6E700000004 /* Nip19.swift */,
 				EF3D7A5D2F8BD020005A6545 /* SharedConstants.swift */,
 				EF3D7A5E2F8BD020005A6545 /* SharedKeychain.swift */,
 				EFCA55B463A619311A35AF3C /* SharedModels.swift */,
@@ -432,6 +440,8 @@
 				F60FCE012F8BCAE3000FAC0A /* ForegroundRelaySubscription.swift in Sources */,
 				B0EBA01E2F90AB01000A0001 /* PendingApprovalBanner.swift in Sources */,
 				DE7E10C2DE7E10C2DE7E10C2 /* LogExporter.swift in Sources */,
+				AE01F2A3B4C5D6E700000002 /* ActivitySummary.swift in Sources */,
+				AE01F2A3B4C5D6E700000005 /* Nip19.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -466,6 +476,8 @@
 				006B17A84C114EDF9B129CAE /* NostrConnectParser.swift in Sources */,
 				DE7E10B3DE7E10B3DE7E10B3 /* DeveloperSettings.swift in Sources */,
 				DE7E10C3DE7E10C3DE7E10C3 /* LogExporter.swift in Sources */,
+				AE01F2A3B4C5D6E700000003 /* ActivitySummary.swift in Sources */,
+				AE01F2A3B4C5D6E700000006 /* Nip19.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

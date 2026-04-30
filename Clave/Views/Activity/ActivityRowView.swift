@@ -22,9 +22,11 @@ struct ActivityRowView: View {
                 }
 
                 HStack(spacing: 4) {
-                    Text(truncatedPubkey(entry.clientPubkey))
+                    Text(clientLabel)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
 
                     Text("·")
                         .foregroundStyle(.tertiary)
@@ -70,5 +72,13 @@ struct ActivityRowView: View {
     private func truncatedPubkey(_ hex: String) -> String {
         guard hex.count > 12 else { return hex }
         return String(hex.prefix(8)) + "..." + String(hex.suffix(4))
+    }
+
+    private var clientLabel: String {
+        if let name = SharedStorage.getClientPermissions(for: entry.clientPubkey)?.name,
+           !name.isEmpty {
+            return name
+        }
+        return truncatedPubkey(entry.clientPubkey)
     }
 }
