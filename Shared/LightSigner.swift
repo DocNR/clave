@@ -130,8 +130,16 @@ enum LightSigner {
             let expectedSecret = SharedStorage.getBunkerSecret(for: signerPubkey)
 
             if !providedSecret.isEmpty && providedSecret == expectedSecret {
-                // Valid secret — check cap before creating new permissions
-                let isExistingClient = SharedStorage.getClientPermissions(for: senderPubkey) != nil
+                // Valid secret — check cap before creating new permissions.
+                // Bug E fix: scope existence check to (current signer, sender)
+                // so a client paired with one account doesn't skip permissions
+                // creation when bunker-connecting to a different account.
+                // Previously the legacy `getClientPermissions(for:)` scanned
+                // all signers, so isExistingClient=true for any cross-paired
+                // client → row never written for the new (signer, client)
+                // pair → HomeView's signer-scoped list missed the connection
+                // and per-connection activity lookups returned no entries.
+                let isExistingClient = SharedStorage.getClientPermissions(signer: signerPubkey, client: senderPubkey) != nil
                 if !isExistingClient {
                     let currentCount = SharedStorage.getConnectedClients().count
                     if currentCount >= 5 {
@@ -173,8 +181,11 @@ enum LightSigner {
                     logger.notice("[LightSigner] Existing client re-paired with valid secret")
                 }
                 _ = SharedStorage.rotateBunkerSecret(for: signerPubkey)
-            } else if SharedStorage.getClientPermissions(for: senderPubkey) != nil {
-                // Already has permissions — allow reconnect without secret
+            } else if SharedStorage.getClientPermissions(signer: signerPubkey, client: senderPubkey) != nil {
+                // Already paired with THIS (signer, client) — allow reconnect
+                // without secret. Bug E fix: scope to current signer so a
+                // client paired with account A can't reconnect to account B
+                // without re-providing B's bunker secret.
                 logger.notice("[LightSigner] Already-paired client reconnecting")
             } else {
                 // Wrong or missing secret and no permissions — reject
@@ -192,7 +203,14 @@ enum LightSigner {
                 return result
             }
         } else {
-            let perms = SharedStorage.getClientPermissions(for: senderPubkey)
+            // Bug E fix: scope to (current signer, sender). The legacy
+            // `getClientPermissions(for: senderPubkey)` returned a row for
+            // any signer that had paired this client — letting a sign_event
+            // RPC with `p`-tag pointing at signer B be signed by B's nsec
+            // even though only signer A had approved this client. Real
+            // authorization leak. Now the gate requires explicit (signer,
+            // client) consent.
+            let perms = SharedStorage.getClientPermissions(signer: signerPubkey, client: senderPubkey)
 
             if perms == nil {
                 // Unpaired clients may ONLY send `connect` — everything else (including kind:22242
