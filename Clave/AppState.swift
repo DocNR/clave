@@ -710,9 +710,12 @@ final class AppState {
             SharedConstants.sharedDefaults.set(data, forKey: SharedConstants.pendingRequestsKey)
         }
 
-        // 6. Remove cached profile image file (per-pubkey naming would be
-        //    Task 8 work; for now the global file is shared across
-        //    deletions in the rare multi-account-then-delete-current case).
+        // 6. Remove cached profile image file. Bug F3 fix: also delete the
+        //    per-pubkey cache file. Without this, deleted accounts left
+        //    `cached-profile-<pubkey>.dat` orphans on disk forever.
+        try? FileManager.default.removeItem(at: cachedImageURL(for: pubkey))
+        // Legacy global file: only meaningful for users who never went through
+        // Task 8 migration. Keep the cleanup for hygiene.
         let container = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: SharedConstants.appGroup)
         if let imageURL = container?.appendingPathComponent("profile_image.jpg") {
             try? FileManager.default.removeItem(at: imageURL)
@@ -799,14 +802,29 @@ final class AppState {
         cachedImageURL(for: signerPubkeyHex)
     }
 
-    private func cacheImage(from urlString: String) async {
-        guard let url = URL(string: urlString) else { return }
+    /// Download a profile image and write it to the per-account cache file.
+    /// Bug F fix: takes an explicit `pubkey` so the file path is bound to the
+    /// account that initiated the fetch, not whichever account happens to be
+    /// current at write-time. Without this, a fetch in flight while the user
+    /// switches accounts would overwrite the new current's cached image with
+    /// the old current's image — visible as "the test account's PFP suddenly
+    /// disappeared / shows wrong avatar" after rapid switching.
+    private func cacheImage(from urlString: String, pubkey: String) async {
+        guard let url = URL(string: urlString),
+              !pubkey.isEmpty else { return }
         do {
             let (data, _) = try await URLSession.shared.data(from: url)
             guard let image = UIImage(data: data) else { return }
-            try data.write(to: cachedImageURL)
+            // File write is unconditional on the captured pubkey — the image
+            // belongs on disk for that account regardless of which account
+            // is currently active. The in-memory `profileImage` update IS
+            // guarded so we don't replace the visible avatar with a fetch
+            // result for a different account.
+            try data.write(to: cachedImageURL(for: pubkey))
             await MainActor.run {
-                self.profileImage = image
+                if self.currentAccount?.pubkeyHex == pubkey {
+                    self.profileImage = image
+                }
             }
         } catch {
             // Silently fail
@@ -858,7 +876,10 @@ final class AppState {
                 }
 
                 if let pic = cached.pictureURL, !pic.isEmpty {
-                    await cacheImage(from: pic)
+                    // Pass `pubkey` (captured at fetchProfileIfNeeded entry)
+                    // so the cache file is bound to the account that triggered
+                    // this fetch, not whichever happens to be current now.
+                    await cacheImage(from: pic, pubkey: pubkey)
                 }
             }
         }
