@@ -27,11 +27,34 @@ enum ClaveError: LocalizedError {
 
 @Observable
 final class AppState {
-    var isKeyImported = false
-    var signerPubkeyHex = ""
+    // MARK: - Multi-account state (Task 5)
+
+    /// All accounts owned by this device. Populated by `loadAccounts()` from
+    /// `accountsKey` UserDefaults; mutated by `addAccount` /
+    /// `generateAccount` / `deleteAccount` / `renamePetname`.
+    var accounts: [Account] = []
+
+    /// The current account scope for the UI. Stays synchronized with
+    /// `currentSignerPubkeyHexKey` UserDefaults. NSE never reads this — NSE
+    /// routes via the APNs payload pubkey (Task 6).
+    var currentAccount: Account?
+
+    /// Hex pubkey of the current account, derived. Empty string means no
+    /// current account (no key imported / fresh install). Source-compat
+    /// shim: existing call sites read this property; was a stored
+    /// property before Task 5.
+    var signerPubkeyHex: String { currentAccount?.pubkeyHex ?? "" }
+
+    /// kind:0 profile metadata for the current account, derived. Setter
+    /// is provided via `updateCurrentProfile(_:)` which writes through to
+    /// the accounts list and persists.
+    var profile: CachedProfile? {
+        currentAccount?.profile
+    }
+
+    var isKeyImported: Bool { currentAccount != nil }
     var deviceToken = ""
     var pendingRequests: [PendingRequest] = []
-    var profile: CachedProfile?
     var profileImage: UIImage?
 
     init() {
@@ -109,7 +132,10 @@ final class AppState {
         return (try? pubkey.toBech32()) ?? ""
     }
 
-    var bunkerSecret = ""
+    // `bunkerSecret` removed in Task 5 — was a stored cache mirroring
+    // `SharedStorage.getBunkerSecret(for:)`. Zero view callers; all reads
+    // now go through `bunkerURI` (which calls SharedStorage directly) so
+    // the cache adds no value.
 
     var bunkerURI: String {
         guard !signerPubkeyHex.isEmpty else { return "" }
@@ -123,54 +149,330 @@ final class AppState {
     }
 
     func loadState() {
-        if let nsec = SharedKeychain.loadNsec(),
-           let keys = try? Keys.parse(secretKey: nsec) {
-            signerPubkeyHex = keys.publicKey().toHex()
-            isKeyImported = true
-            // Backfill the app-group UserDefaults cache. importKey/generateKey
-            // write this, but loadState (the read-existing-key path) didn't —
-            // so any user who imported their key before this cache became
-            // load-bearing has an empty UserDefaults value. L1's start()
-            // reads from UserDefaults (not AppState), so it was bailing
-            // silently with "no signer key configured" even though the key
-            // was in the Keychain and NSE could sign just fine.
-            let cached = SharedConstants.sharedDefaults.string(forKey: SharedConstants.signerPubkeyHexKey)
-            if cached != signerPubkeyHex {
-                SharedConstants.sharedDefaults.set(signerPubkeyHex, forKey: SharedConstants.signerPubkeyHexKey)
-            }
-        }
-        deviceToken = SharedConstants.sharedDefaults.string(forKey: SharedConstants.deviceTokenKey) ?? ""
-        bunkerSecret = SharedStorage.getBunkerSecret(for: signerPubkeyHex)
-        loadCachedProfile()
+        // 1. One-shot bootstrap of build-31 single-account state into
+        //    multi-account format. After this runs, the legacy Keychain
+        //    entry is gone and the new pubkey-keyed entry exists. No-op
+        //    on subsequent launches.
+        bootstrapFromLegacyKeychainIfNeeded()
 
-        // Re-register with the proxy on every launch when both a key and a
-        // token are present. Belt to the suspenders of the
-        // .apnsDeviceTokenAvailable observer in init: this catches the
-        // ordering case where iOS handed us the device token *before* loadState
-        // ran (so the observer's `if isKeyImported` check failed at that moment
-        // because the key hadn't been loaded from Keychain yet). Idempotent on
-        // the proxy side.
+        // 2. Hydrate the accounts list + currentAccount from UserDefaults.
+        loadAccounts()
+
+        // 3. Defensive sweep — handles the rare race where bootstrap's
+        //    saveNsec(for:) succeeded but the legacy deleteNsec() failed
+        //    on a previous launch. Idempotent: usually a no-op.
+        cleanupOrphanLegacyKeychainEntry()
+
+        // 4. Load cached profile from disk (currentAccount.profile is the
+        //    primary source post-Task-8; this still reads the legacy
+        //    cachedProfileKey for now, populating profileImage).
+        loadCachedProfileImage()
+
+        deviceToken = SharedConstants.sharedDefaults.string(forKey: SharedConstants.deviceTokenKey) ?? ""
+
+        // 5. Re-register with the proxy on every launch when both a key and a
+        //    token are present. Belt to the suspenders of the
+        //    .apnsDeviceTokenAvailable observer in init: this catches the
+        //    ordering case where iOS handed us the device token *before* loadState
+        //    ran (so the observer's `if isKeyImported` check failed at that moment
+        //    because the key hadn't been loaded from Keychain yet). Idempotent on
+        //    the proxy side.
         if isKeyImported && !deviceToken.isEmpty {
             registerWithProxy()
         }
     }
 
-    private func loadCachedProfile() {
-        guard let data = SharedConstants.sharedDefaults.data(forKey: SharedConstants.cachedProfileKey),
-              let cached = try? JSONDecoder().decode(CachedProfile.self, from: data) else { return }
-        profile = cached
+    // MARK: - Multi-account loading + bootstrap (Task 5)
 
+    /// One-shot bootstrap: if accountsKey is empty AND a legacy
+    /// `kSecAttrAccount = "signer-nsec"` Keychain entry exists, copy the
+    /// nsec to the new pubkey-keyed entry, delete the legacy entry, and
+    /// seed accountsKey + currentSignerPubkeyHexKey. Build-31 testers
+    /// upgrade transparently with no re-import / no re-pair / no lost
+    /// nsec.
+    ///
+    /// SECURITY (audit 2026-04-30): scope-limited memory exposure of
+    /// `legacyNsec` String matches the existing importKey/loadState
+    /// pattern; not a regression. No log line interpolates `legacyNsec`
+    /// or any nsec-derived data — only the pubkey prefix.
+    private func bootstrapFromLegacyKeychainIfNeeded() {
+        let defaults = SharedConstants.sharedDefaults
+        guard defaults.data(forKey: SharedConstants.accountsKey) == nil else {
+            return  // Already in multi-account format; bootstrap not needed
+        }
+        guard let legacyNsec = SharedKeychain.loadNsec(),
+              let keys = try? Keys.parse(secretKey: legacyNsec) else {
+            return  // Fresh install; OnboardingView will show
+        }
+
+        let pubkeyHex = keys.publicKey().toHex()
+
+        // Copy to new pubkey-keyed slot BEFORE deleting legacy. If the
+        // save fails, leave legacy in place for retry on next launch
+        // (idempotent — the accountsKey guard above stays unmet).
+        do {
+            try SharedKeychain.saveNsec(legacyNsec, for: pubkeyHex)
+        } catch {
+            // Don't proceed; legacy entry preserved
+            return
+        }
+
+        // Delete legacy. Failure here means the orphan persists; the
+        // every-launch cleanup pass (cleanupOrphanLegacyKeychainEntry)
+        // catches it on next launch.
+        SharedKeychain.deleteNsec()
+
+        // Seed multi-account state.
+        let account = Account(
+            pubkeyHex: pubkeyHex,
+            petname: nil,
+            addedAt: Date().timeIntervalSince1970,
+            profile: nil  // Refreshed by fetchProfileIfNeeded on next launch
+        )
+        persistAccountsList([account])
+        defaults.set(pubkeyHex, forKey: SharedConstants.currentSignerPubkeyHexKey)
+        // Keep legacy signerPubkeyHexKey in sync — still read by
+        // ForegroundRelaySubscription.swift:354 until Task 6 ships.
+        defaults.set(pubkeyHex, forKey: SharedConstants.signerPubkeyHexKey)
+    }
+
+    /// Hydrate `accounts` + `currentAccount` from UserDefaults.
+    private func loadAccounts() {
+        let defaults = SharedConstants.sharedDefaults
+        if let data = defaults.data(forKey: SharedConstants.accountsKey),
+           let decoded = try? JSONDecoder().decode([Account].self, from: data) {
+            accounts = decoded
+        } else {
+            accounts = []
+        }
+        let currentHex = defaults.string(forKey: SharedConstants.currentSignerPubkeyHexKey) ?? ""
+        currentAccount = accounts.first { $0.pubkeyHex == currentHex } ?? accounts.first
+        // Persist back if we picked a different one (current pointer was
+        // stale because the named account got deleted out from under us).
+        if currentAccount?.pubkeyHex != currentHex {
+            persistCurrentAccountPubkey()
+        }
+    }
+
+    /// Defensive: if accounts.count >= 1 AND the legacy fixed-account
+    /// Keychain entry still exists, the bootstrap's delete must have
+    /// failed previously. Retry the delete idempotently.
+    private func cleanupOrphanLegacyKeychainEntry() {
+        guard !accounts.isEmpty,
+              SharedKeychain.loadNsec() != nil else { return }
+        SharedKeychain.deleteNsec()
+    }
+
+    /// Replaces `loadCachedProfile()` — only loads the on-disk image cache
+    /// (profile metadata is now sourced from `currentAccount.profile`).
+    /// Profile image filename is per-pubkey (Task 8 will move existing
+    /// `profile_image.jpg` to per-pubkey naming); for now we read the
+    /// legacy file path which still works for the migrated single account.
+    private func loadCachedProfileImage() {
         if let imageData = try? Data(contentsOf: cachedImageURL),
            let image = UIImage(data: imageData) {
             profileImage = image
         }
     }
 
-    private func saveCachedProfile(_ profile: CachedProfile) {
-        if let data = try? JSONEncoder().encode(profile) {
-            SharedConstants.sharedDefaults.set(data, forKey: SharedConstants.cachedProfileKey)
+    private func persistAccountsList(_ list: [Account]) {
+        accounts = list
+        if let data = try? JSONEncoder().encode(list) {
+            SharedConstants.sharedDefaults.set(data, forKey: SharedConstants.accountsKey)
         }
     }
+
+    private func persistAccounts() {
+        persistAccountsList(accounts)
+    }
+
+    private func persistCurrentAccountPubkey() {
+        let pk = currentAccount?.pubkeyHex ?? ""
+        let defaults = SharedConstants.sharedDefaults
+        defaults.set(pk, forKey: SharedConstants.currentSignerPubkeyHexKey)
+        // Legacy key write-through — read by ForegroundRelaySubscription.swift:354
+        // until Task 6 updates that callsite.
+        defaults.set(pk, forKey: SharedConstants.signerPubkeyHexKey)
+    }
+
+    // MARK: - Multi-account methods (Task 5)
+
+    /// Switch the UI scope to a different account. No-op if pubkey isn't
+    /// in the accounts list. Synchronous and cheap — the heavy work
+    /// (profile refresh, etc.) happens via existing observers.
+    func switchToAccount(pubkey: String) {
+        guard let next = accounts.first(where: { $0.pubkeyHex == pubkey }) else { return }
+        currentAccount = next
+        persistCurrentAccountPubkey()
+    }
+
+    /// Add an account by pasting an nsec. Idempotent: if the same nsec
+    /// is added twice, switches to the existing account and returns it
+    /// (matches noauth's silent dedupe; Phase 2 UI surfaces a toast).
+    @discardableResult
+    func addAccount(nsec: String, petname: String? = nil) throws -> Account {
+        let trimmed = nsec.trimmingCharacters(in: .whitespacesAndNewlines)
+        let keys = try Keys.parse(secretKey: trimmed)
+        let bech32 = try keys.secretKey().toBech32()
+        let pubkeyHex = keys.publicKey().toHex()
+
+        // Already in accounts? Just switch + return.
+        if let existing = accounts.first(where: { $0.pubkeyHex == pubkeyHex }) {
+            switchToAccount(pubkey: pubkeyHex)
+            return existing
+        }
+
+        // Save to Keychain first — if this fails, no UserDefaults rows
+        // get written.
+        try SharedKeychain.saveNsec(bech32, for: pubkeyHex)
+
+        let sanitizedPetname = sanitizePetname(petname)
+        let account = Account(
+            pubkeyHex: pubkeyHex,
+            petname: sanitizedPetname,
+            addedAt: Date().timeIntervalSince1970,
+            profile: nil
+        )
+        accounts.append(account)
+        persistAccounts()
+
+        currentAccount = account
+        persistCurrentAccountPubkey()
+
+        // Async: register this account's pubkey with the proxy + fetch
+        // kind:0 profile. Fire-and-forget.
+        registerWithProxy()
+        fetchProfileIfNeeded()
+
+        return account
+    }
+
+    /// Generate a fresh keypair as a new account.
+    @discardableResult
+    func generateAccount(petname: String? = nil) throws -> Account {
+        let keys = Keys.generate()
+        let bech32 = try keys.secretKey().toBech32()
+        return try addAccount(nsec: bech32, petname: petname)
+    }
+
+    /// Delete an account from this device. Audit 2026-04-30 finding A2:
+    /// ordering is unpair-clients FIRST (still has nsec) → Keychain
+    /// delete → bunker secret cleanup → records cleanup → accountsKey
+    /// write. If interrupted mid-way, the worst case is a visible
+    /// Account row that fails to load — recoverable by re-deleting.
+    func deleteAccount(pubkey: String) {
+        // 1. Unpair this account's clients with the proxy. Best-effort —
+        //    failures enqueue retry. Keychain entry must still exist for
+        //    NIP-98 signing.
+        let clientsToUnpair = SharedStorage.getConnectedClients(for: pubkey)
+        for client in clientsToUnpair {
+            unpairClientWithProxy(clientPubkey: client.pubkey)
+        }
+        // Drop any pending pair ops for this signer (proxy will GC its rows).
+        let pairOpsToDrop = SharedStorage.getPendingPairOps(for: pubkey)
+        for op in pairOpsToDrop {
+            SharedStorage.removePendingPairOp(id: op.id)
+        }
+
+        // 2. Unregister this account from the proxy.
+        unregisterWithProxy()
+
+        // 3. Delete Keychain entry.
+        SharedKeychain.deleteNsec(for: pubkey)
+
+        // 4. Remove this signer's bunker secret from the per-signer dict.
+        //    rotateBunkerSecret(for:) overwrites with random — equivalent
+        //    to deletion for security purposes (the old secret can't be
+        //    recovered) but leaves an unused entry. Acceptable hygiene.
+        _ = SharedStorage.rotateBunkerSecret(for: pubkey)
+
+        // 5. Remove this account's records — scoped, NEVER touches other
+        //    accounts' rows.
+        SharedStorage.unpairAllClients(for: pubkey)
+        // Filter activity / pending / pendingPairOps by signer
+        var activity = SharedStorage.getActivityLog()
+        activity.removeAll { $0.signerPubkeyHex == pubkey }
+        // Save back via direct UserDefaults write (no public scoped activity-clear API)
+        if let data = try? JSONEncoder().encode(activity) {
+            SharedConstants.sharedDefaults.set(data, forKey: SharedConstants.activityLogKey)
+        }
+        var pending = SharedStorage.getPendingRequests()
+        pending.removeAll { $0.signerPubkeyHex == pubkey }
+        if let data = try? JSONEncoder().encode(pending) {
+            SharedConstants.sharedDefaults.set(data, forKey: SharedConstants.pendingRequestsKey)
+        }
+
+        // 6. Remove cached profile image file (per-pubkey naming would be
+        //    Task 8 work; for now the global file is shared across
+        //    deletions in the rare multi-account-then-delete-current case).
+        let container = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: SharedConstants.appGroup)
+        if let imageURL = container?.appendingPathComponent("profile_image.jpg") {
+            try? FileManager.default.removeItem(at: imageURL)
+        }
+
+        // 7. Remove from accounts list, persist accountsKey.
+        accounts.removeAll { $0.pubkeyHex == pubkey }
+        persistAccounts()
+
+        // 8. Auto-switch or clear current.
+        if currentAccount?.pubkeyHex == pubkey {
+            currentAccount = accounts.first
+            persistCurrentAccountPubkey()
+            // In-memory state belongs to the deleted account; clear it.
+            profileImage = nil
+            pendingRequests = []
+        }
+    }
+
+    /// Edit the petname for an account. Audit 2026-04-30 finding A3:
+    /// trim whitespace + strip newlines + cap at 64 chars to prevent
+    /// control-char injection into log lines / notification bodies and
+    /// DoS via huge strings.
+    func renamePetname(for pubkey: String, to petname: String?) {
+        guard let idx = accounts.firstIndex(where: { $0.pubkeyHex == pubkey }) else { return }
+        accounts[idx] = Account(
+            pubkeyHex: accounts[idx].pubkeyHex,
+            petname: sanitizePetname(petname),
+            addedAt: accounts[idx].addedAt,
+            profile: accounts[idx].profile
+        )
+        persistAccounts()
+        if currentAccount?.pubkeyHex == pubkey {
+            currentAccount = accounts[idx]
+        }
+    }
+
+    private func sanitizePetname(_ petname: String?) -> String? {
+        guard let petname else { return nil }
+        let normalized = petname
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .filter { !$0.isNewline }
+        let capped = String(normalized.prefix(64))
+        return capped.isEmpty ? nil : capped
+    }
+
+    /// Write through to the current account's profile (for fetchProfile
+    /// path). Updates `accounts` list + persists.
+    private func updateCurrentProfile(_ profile: CachedProfile?) {
+        guard let pk = currentAccount?.pubkeyHex,
+              let idx = accounts.firstIndex(where: { $0.pubkeyHex == pk }) else { return }
+        accounts[idx] = Account(
+            pubkeyHex: accounts[idx].pubkeyHex,
+            petname: accounts[idx].petname,
+            addedAt: accounts[idx].addedAt,
+            profile: profile
+        )
+        currentAccount = accounts[idx]
+        persistAccounts()
+    }
+
+    // `loadCachedProfile()` and `saveCachedProfile(_:)` removed in Task 5.
+    // Profile metadata now lives inside `currentAccount.profile`
+    // (persisted via `persistAccounts()` → `accountsKey`). The legacy
+    // `cachedProfileKey` UserDefaults entry is no longer the source of
+    // truth; Task 8 will explicitly remove it as part of full migration.
+    // Profile image still loads from disk via `loadCachedProfileImage()`
+    // (called from loadState).
 
     private var cachedImageURL: URL {
         let container = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: SharedConstants.appGroup)!
@@ -192,8 +494,12 @@ final class AppState {
     }
 
     /// Fetch kind 0 profile from multiple relays in parallel. First valid result wins.
+    /// Writes through to `currentAccount.profile` and persists the
+    /// accounts list (Task 5: replaces the previous global
+    /// `cachedProfileKey` write).
     func fetchProfileIfNeeded() {
-        guard !signerPubkeyHex.isEmpty else { return }
+        let pubkey = signerPubkeyHex
+        guard !pubkey.isEmpty else { return }
 
         // Only refetch if cache is older than 1 hour
         if let existing = profile, Date().timeIntervalSince1970 - existing.fetchedAt < 3600 { return }
@@ -209,8 +515,8 @@ final class AppState {
         Task {
             await withTaskGroup(of: CachedProfile?.self) { group in
                 for url in relays {
-                    group.addTask { [signerPubkeyHex] in
-                        await Self.fetchProfile(from: url, pubkey: signerPubkeyHex)
+                    group.addTask {
+                        await Self.fetchProfile(from: url, pubkey: pubkey)
                     }
                 }
 
@@ -226,8 +532,9 @@ final class AppState {
                 guard let cached = newest else { return }
 
                 await MainActor.run {
-                    self.profile = cached
-                    self.saveCachedProfile(cached)
+                    // Only update if the user hasn't switched accounts mid-fetch
+                    guard self.currentAccount?.pubkeyHex == pubkey else { return }
+                    self.updateCurrentProfile(cached)
                 }
 
                 if let pic = cached.pictureURL, !pic.isEmpty {
@@ -277,87 +584,46 @@ final class AppState {
     }
 
     func rotateBunkerSecret() {
-        bunkerSecret = SharedStorage.rotateBunkerSecret(for: signerPubkeyHex)
+        guard !signerPubkeyHex.isEmpty else { return }
+        _ = SharedStorage.rotateBunkerSecret(for: signerPubkeyHex)
     }
 
+    // Legacy wrappers — preserved for OnboardingView and SettingsView call
+    // sites. Phase 2 UI will call addAccount/generateAccount/deleteAccount
+    // directly.
+
     func importKey(nsec: String) throws {
-        let keys = try Keys.parse(secretKey: nsec.trimmingCharacters(in: .whitespacesAndNewlines))
-        let bech32 = try keys.secretKey().toBech32()
-        try SharedKeychain.saveNsec(bech32)
-        signerPubkeyHex = keys.publicKey().toHex()
-        SharedConstants.sharedDefaults.set(signerPubkeyHex, forKey: SharedConstants.signerPubkeyHexKey)
-        isKeyImported = true
-        // Now that a key exists, register with the proxy so we start receiving
-        // push-wake for signing requests. AppDelegate skips this on launch when
-        // no key is present.
-        registerWithProxy()
+        _ = try addAccount(nsec: nsec, petname: nil)
     }
 
     func generateKey() throws {
-        let keys = Keys.generate()
-        let bech32 = try keys.secretKey().toBech32()
-        try SharedKeychain.saveNsec(bech32)
-        signerPubkeyHex = keys.publicKey().toHex()
-        SharedConstants.sharedDefaults.set(signerPubkeyHex, forKey: SharedConstants.signerPubkeyHexKey)
-        isKeyImported = true
-        registerWithProxy()
+        _ = try generateAccount(petname: nil)
     }
 
     func deleteKey() {
-        // Unregister BEFORE wiping the keychain — needs the nsec to sign the NIP-98 header.
-        // Also bulk-unpair every known client first (best-effort) so the proxy releases its
-        // secondary relay refs. Any failures become 90-day-GC'd orphans on the proxy.
-        //
-        // NOTE (Task 4): in the multi-account world this is the
-        // single-account `deleteKey` path; Task 5 will rewrite it as
-        // `deleteAccount(pubkey:)` with scoped per-signer cleanup that
-        // does NOT clobber other accounts' rows. For now, scoped to the
-        // current `signerPubkeyHex` keeps Phase-1 behavior identical
-        // while using the new scoped variants.
-        let currentSigner = signerPubkeyHex
-        let clientsToUnpair = SharedStorage.getConnectedClients()
-        for client in clientsToUnpair {
-            unpairClientWithProxy(clientPubkey: client.pubkey)
-        }
-        SharedStorage.clearPendingPairOps()  // nuking the key; drop any queued ops
-        unregisterWithProxy()
-        SharedKeychain.deleteNsec()
-        SharedConstants.sharedDefaults.removeObject(forKey: SharedConstants.signerPubkeyHexKey)
-        SharedConstants.sharedDefaults.removeObject(forKey: SharedConstants.cachedProfileKey)
-        SharedStorage.clearActivityLog()
-        SharedStorage.clearPendingRequests()
-        SharedStorage.unpairAllClients(for: currentSigner)
-        SharedConstants.sharedDefaults.removeObject(forKey: SharedConstants.clientPermissionsKey)
-        // Clear connected clients
-        SharedConstants.sharedDefaults.removeObject(forKey: SharedConstants.connectedClientsKey)
-        // Rotate bunker secret for the new key
-        if !currentSigner.isEmpty {
-            _ = SharedStorage.rotateBunkerSecret(for: currentSigner)
-        }
-        // Clear cached profile image
-        let container = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: SharedConstants.appGroup)
-        if let imageURL = container?.appendingPathComponent("profile_image.jpg") {
-            try? FileManager.default.removeItem(at: imageURL)
-        }
-        signerPubkeyHex = ""
-        profile = nil
-        profileImage = nil
-        pendingRequests = []
-        isKeyImported = false
+        guard let pubkey = currentAccount?.pubkeyHex else { return }
+        deleteAccount(pubkey: pubkey)
     }
 
     func refreshPendingRequests() {
         pendingRequests = SharedStorage.getPendingRequests()
     }
 
-    /// Reload the bunker secret from SharedDefaults (picks up NSE-rotated secrets)
+    /// `bunkerURI` getter reads SharedStorage directly each access. This
+    /// helper is now a no-op kept for source-compat with any caller; was
+    /// previously a manual cache reload (the cache was removed in Task 5).
     func refreshBunkerSecret() {
-        bunkerSecret = SharedStorage.getBunkerSecret(for: signerPubkeyHex)
+        // No-op: bunkerURI reads SharedStorage on every access now.
     }
 
     /// Approve a pending request: sign and publish the response from the app.
+    /// Task 5: load by the request's signer pubkey (PendingRequest.signerPubkeyHex,
+    /// added in Task 3). Falls back to current account for legacy rows or when
+    /// the request was queued without a signer (pre-Task-3 NSE writes).
     func approvePendingRequest(_ request: PendingRequest) async -> Bool {
-        guard let nsec = SharedKeychain.loadNsec() else { return false }
+        let signer = request.signerPubkeyHex.isEmpty ? signerPubkeyHex : request.signerPubkeyHex
+        guard !signer.isEmpty,
+              let nsec = SharedKeychain.loadNsec(for: signer) else { return false }
 
         let privateKey: Data
         do {
@@ -404,7 +670,10 @@ final class AppState {
         parsedURI: NostrConnectParser.ParsedURI,
         permissions: ClientPermissions
     ) async throws {
-        guard let nsec = SharedKeychain.loadNsec() else {
+        // Task 5: handleNostrConnect uses the current account (the user
+        // is in the UI explicitly accepting the pairing).
+        guard !signerPubkeyHex.isEmpty,
+              let nsec = SharedKeychain.loadNsec(for: signerPubkeyHex) else {
             throw ClaveError.noSignerKey
         }
         let privateKey = try Bech32.decodeNsec(nsec)
@@ -545,7 +814,11 @@ final class AppState {
             return
         }
 
-        guard let nsec = SharedKeychain.loadNsec() else {
+        // Task 5: load the current account's nsec (multi-account world
+        // would call this with an explicit signer parameter; Phase 1
+        // ships single-account UI, so currentAccount is the source).
+        guard !signerPubkeyHex.isEmpty,
+              let nsec = SharedKeychain.loadNsec(for: signerPubkeyHex) else {
             completion?(false, "No signer key")
             return
         }
@@ -593,18 +866,22 @@ final class AppState {
         request.setValue(authHeader, forHTTPHeaderField: "X-Clave-Auth")
         request.httpBody = bodyData
 
+        // Capture signer for the closure — derived properties are
+        // accessed at completion time, but currentAccount may have
+        // changed by then, so freeze the value used to make this request.
+        let signerForTimestamp = signerPubkeyHex
         URLSession.shared.dataTask(with: request) { [weak self] _, response, error in
             DispatchQueue.main.async {
                 let now = Date().timeIntervalSince1970
                 if let http = response as? HTTPURLResponse, http.statusCode == 200 {
-                    SharedConstants.sharedDefaults.set(now, forKey: SharedConstants.lastRegisterSucceededAtKey)
+                    SharedStorage.setLastRegisterSucceededAt(now, for: signerForTimestamp)
                     self?.drainPendingPairOps()
                     completion?(true, "Registered")
                 } else if let http = response as? HTTPURLResponse {
-                    SharedConstants.sharedDefaults.set(now, forKey: SharedConstants.lastRegisterFailedAtKey)
+                    SharedStorage.setLastRegisterFailedAt(now, for: signerForTimestamp)
                     completion?(false, "Failed: HTTP \(http.statusCode)")
                 } else {
-                    SharedConstants.sharedDefaults.set(now, forKey: SharedConstants.lastRegisterFailedAtKey)
+                    SharedStorage.setLastRegisterFailedAt(now, for: signerForTimestamp)
                     completion?(false, error?.localizedDescription ?? "Connection failed")
                 }
             }
@@ -621,10 +898,12 @@ final class AppState {
     /// user later moved to wifi — without this, they had to tap Settings →
     /// Register manually (real tester report 2026-04-28).
     func ensureRegisteredFresh() {
-        guard isKeyImported else { return }
+        guard isKeyImported, !signerPubkeyHex.isEmpty else { return }
         let now = Date().timeIntervalSince1970
-        let lastSuccess = SharedConstants.sharedDefaults.double(forKey: SharedConstants.lastRegisterSucceededAtKey)
-        let lastFailure = SharedConstants.sharedDefaults.double(forKey: SharedConstants.lastRegisterFailedAtKey)
+        // Task 5: per-signer throttle/cooldown — each account tracks its
+        // own register success/failure independently.
+        let lastSuccess = SharedStorage.getLastRegisterSucceededAt(for: signerPubkeyHex) ?? 0
+        let lastFailure = SharedStorage.getLastRegisterFailedAt(for: signerPubkeyHex) ?? 0
 
         // Skip if we successfully registered within the last 30 minutes.
         if lastSuccess > 0 && (now - lastSuccess) < 1800 { return }
@@ -635,14 +914,16 @@ final class AppState {
         registerWithProxy()
     }
 
-    /// Unregister the current device token with the proxy. Called from `deleteKey()`
-    /// before clearing the keychain, so we still have access to the nsec for NIP-98 signing.
-    /// Fire-and-forget — we don't block deleteKey on the result.
+    /// Unregister the current device token with the proxy. Called from
+    /// `deleteAccount()` before clearing the keychain, so the nsec is
+    /// still available for NIP-98 signing. Fire-and-forget — we don't
+    /// block deleteAccount on the result.
     func unregisterWithProxy() {
         let token = SharedConstants.sharedDefaults.string(forKey: SharedConstants.deviceTokenKey) ?? ""
         guard !token.isEmpty else { return }
 
-        guard let nsec = SharedKeychain.loadNsec() else { return }
+        guard !signerPubkeyHex.isEmpty,
+              let nsec = SharedKeychain.loadNsec(for: signerPubkeyHex) else { return }
         let privateKey: Data
         do {
             privateKey = try Bech32.decodeNsec(nsec)
@@ -696,7 +977,9 @@ final class AppState {
             ForegroundRelaySubscription.shared.refreshRelaySet()
         }
 
-        guard let nsec = SharedKeychain.loadNsec() else { return }
+        // Task 5: pair on behalf of the current account.
+        guard !signerPubkeyHex.isEmpty,
+              let nsec = SharedKeychain.loadNsec(for: signerPubkeyHex) else { return }
         let privateKey: Data
         do {
             privateKey = try Bech32.decodeNsec(nsec)
@@ -759,7 +1042,9 @@ final class AppState {
             ForegroundRelaySubscription.shared.refreshRelaySet()
         }
 
-        guard let nsec = SharedKeychain.loadNsec() else { return }
+        // Task 5: unpair on behalf of the current account.
+        guard !signerPubkeyHex.isEmpty,
+              let nsec = SharedKeychain.loadNsec(for: signerPubkeyHex) else { return }
         let privateKey: Data
         do {
             privateKey = try Bech32.decodeNsec(nsec)
@@ -835,10 +1120,14 @@ final class AppState {
     }
 
     private func retryPairOp(op: PairOp, relayUrls: [String]) {
+        // Task 5: each PairOp now carries signerPubkeyHex (Task 3).
+        // Fall back to current account for legacy ops written pre-Task-3.
+        let signer = op.signerPubkeyHex.isEmpty ? signerPubkeyHex : op.signerPubkeyHex
         // No-nsec / setup-failure early returns: remove the op rather than let it
         // sit forever. A PairOp without a signable key is meaningless — the op
         // was queued before a key rotation or delete.
-        guard let nsec = SharedKeychain.loadNsec() else {
+        guard !signer.isEmpty,
+              let nsec = SharedKeychain.loadNsec(for: signer) else {
             SharedStorage.removePendingPairOp(id: op.id)
             return
         }
@@ -897,7 +1186,11 @@ final class AppState {
     }
 
     private func retryUnpairOp(op: PairOp) {
-        guard let nsec = SharedKeychain.loadNsec() else {
+        // Task 5: scope by op's signer (Task 3 added field), with current
+        // fallback for legacy queue entries.
+        let signer = op.signerPubkeyHex.isEmpty ? signerPubkeyHex : op.signerPubkeyHex
+        guard !signer.isEmpty,
+              let nsec = SharedKeychain.loadNsec(for: signer) else {
             SharedStorage.removePendingPairOp(id: op.id)
             return
         }
