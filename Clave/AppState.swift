@@ -105,8 +105,11 @@ final class AppState {
             // Only register if we already have a key. Onboarding flow handles
             // the no-key-yet case via the explicit `importKey()` /
             // `generateKey()` path; no point trying with no nsec to sign.
+            // Register every account so APNs can route to any of them (Bug B
+            // fix: pre-build-34 only registered current account, leaving
+            // non-current accounts unreachable for background signing).
             if self.isKeyImported {
-                self.registerWithProxy()
+                self.registerAllAccountsWithProxy()
             }
         }
     }
@@ -197,9 +200,10 @@ final class AppState {
         //    ordering case where iOS handed us the device token *before* loadState
         //    ran (so the observer's `if isKeyImported` check failed at that moment
         //    because the key hadn't been loaded from Keychain yet). Idempotent on
-        //    the proxy side.
+        //    the proxy side. Multi-account: registers every account on launch so
+        //    APNs can route to any of them.
         if isKeyImported && !deviceToken.isEmpty {
-            registerWithProxy()
+            registerAllAccountsWithProxy()
         }
     }
 
@@ -1113,7 +1117,37 @@ final class AppState {
         }
     }
 
+    /// Register the current account's pubkey/token mapping with the proxy.
+    /// Thin wrapper around `registerSignerWithProxy(signer:)` for callers
+    /// in single-account contexts (Settings manual button, Onboarding flow,
+    /// addAccount post-switch).
     func registerWithProxy(completion: ((Bool, String) -> Void)? = nil) {
+        registerSignerWithProxy(signer: signerPubkeyHex, completion: completion)
+    }
+
+    /// Register every account's signer pubkey with the proxy. Each account
+    /// needs an independent (deviceToken, signerPubkey) mapping so APNs can
+    /// route incoming kind:24133 requests for any account, not just the
+    /// currently-selected one. Without this, the proxy receives events for
+    /// non-current account pubkeys and drops them with "no registered tokens"
+    /// — surfaced during build 33 multi-account smoke test on real device.
+    ///
+    /// Idempotent on the proxy side. Fire-and-forget per-account; failures
+    /// get retried on the next `ensureAllRegisteredFresh()` trigger or app
+    /// launch. Per-signer throttle/cooldown state lives in
+    /// `SharedStorage.lastRegisterTimes`.
+    func registerAllAccountsWithProxy() {
+        for account in accounts {
+            registerSignerWithProxy(signer: account.pubkeyHex)
+        }
+    }
+
+    /// Per-account register implementation. Loads the signer-specific nsec
+    /// from Keychain, signs NIP-98 with that key, POSTs `/register` so the
+    /// proxy stores `(deviceToken, signerPubkey)` for APNs routing. Records
+    /// per-signer success/failure timestamps via `SharedStorage` so the
+    /// throttled wrapper knows which accounts need a retry.
+    private func registerSignerWithProxy(signer signerPubkeyHex: String, completion: ((Bool, String) -> Void)? = nil) {
         // Reload token from SharedDefaults in case it arrived after loadState()
         let token = SharedConstants.sharedDefaults.string(forKey: SharedConstants.deviceTokenKey) ?? ""
         if !token.isEmpty && deviceToken.isEmpty { deviceToken = token }
@@ -1123,9 +1157,6 @@ final class AppState {
             return
         }
 
-        // Task 5: load the current account's nsec (multi-account world
-        // would call this with an explicit signer parameter; Phase 1
-        // ships single-account UI, so currentAccount is the source).
         guard !signerPubkeyHex.isEmpty,
               let nsec = SharedKeychain.loadNsec(for: signerPubkeyHex) else {
             completion?(false, "No signer key")
@@ -1175,22 +1206,18 @@ final class AppState {
         request.setValue(authHeader, forHTTPHeaderField: "X-Clave-Auth")
         request.httpBody = bodyData
 
-        // Capture signer for the closure — derived properties are
-        // accessed at completion time, but currentAccount may have
-        // changed by then, so freeze the value used to make this request.
-        let signerForTimestamp = signerPubkeyHex
         URLSession.shared.dataTask(with: request) { [weak self] _, response, error in
             DispatchQueue.main.async {
                 let now = Date().timeIntervalSince1970
                 if let http = response as? HTTPURLResponse, http.statusCode == 200 {
-                    SharedStorage.setLastRegisterSucceededAt(now, for: signerForTimestamp)
+                    SharedStorage.setLastRegisterSucceededAt(now, for: signerPubkeyHex)
                     self?.drainPendingPairOps()
                     completion?(true, "Registered")
                 } else if let http = response as? HTTPURLResponse {
-                    SharedStorage.setLastRegisterFailedAt(now, for: signerForTimestamp)
+                    SharedStorage.setLastRegisterFailedAt(now, for: signerPubkeyHex)
                     completion?(false, "Failed: HTTP \(http.statusCode)")
                 } else {
-                    SharedStorage.setLastRegisterFailedAt(now, for: signerForTimestamp)
+                    SharedStorage.setLastRegisterFailedAt(now, for: signerPubkeyHex)
                     completion?(false, error?.localizedDescription ?? "Connection failed")
                 }
             }
@@ -1198,14 +1225,14 @@ final class AppState {
     }
 
     /// Throttled wrapper around `registerWithProxy()` for opportunistic
-    /// re-register on app foreground. Skips if a recent success exists; gates
-    /// retries after failure with a cooldown so a dead proxy doesn't get
-    /// hammered. Idempotent on the proxy side regardless.
+    /// re-register of the current account on app foreground. Skips if a
+    /// recent success exists; gates retries after failure with a cooldown
+    /// so a dead proxy doesn't get hammered. Idempotent on the proxy side
+    /// regardless.
     ///
-    /// Trigger: `MainTabView.handleScenePhase(.active)`. Catches the case where
-    /// the cold-launch register POST silently failed on bad cellular and the
-    /// user later moved to wifi — without this, they had to tap Settings →
-    /// Register manually (real tester report 2026-04-28).
+    /// Single-account variant; multi-account callers should prefer
+    /// `ensureAllRegisteredFresh()`. Kept for callers that explicitly want
+    /// current-only behavior.
     func ensureRegisteredFresh() {
         guard isKeyImported, !signerPubkeyHex.isEmpty else { return }
         let now = Date().timeIntervalSince1970
@@ -1221,6 +1248,27 @@ final class AppState {
         if lastFailure > 0 && (now - lastFailure) < 60 { return }
 
         registerWithProxy()
+    }
+
+    /// Multi-account variant of `ensureRegisteredFresh()`. On scene .active,
+    /// iterates every account and registers any whose per-signer cooldown
+    /// allows it. Each account has independent throttle state; one account's
+    /// recent failure does not block another's retry.
+    ///
+    /// Trigger: `MainTabView.handleScenePhase(.active)`. Catches the case
+    /// where a cold-launch register POST silently failed on bad cellular for
+    /// one account and the user later moved to wifi.
+    func ensureAllRegisteredFresh() {
+        guard isKeyImported, !accounts.isEmpty else { return }
+        let now = Date().timeIntervalSince1970
+        for account in accounts {
+            let pk = account.pubkeyHex
+            let lastSuccess = SharedStorage.getLastRegisterSucceededAt(for: pk) ?? 0
+            let lastFailure = SharedStorage.getLastRegisterFailedAt(for: pk) ?? 0
+            if lastSuccess > 0 && (now - lastSuccess) < 1800 { continue }
+            if lastFailure > 0 && (now - lastFailure) < 60 { continue }
+            registerSignerWithProxy(signer: pk)
+        }
     }
 
     /// Unregister the current device token with the proxy. Called from
