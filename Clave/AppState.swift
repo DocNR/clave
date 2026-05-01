@@ -603,6 +603,15 @@ final class AppState {
         guard let next = accounts.first(where: { $0.pubkeyHex == pubkey }) else { return }
         currentAccount = next
         persistCurrentAccountPubkey()
+        // Bug G fix: clear stale image and reload from the new account's
+        // on-disk cache, then opportunistically fetch (1-hour cooldown).
+        // Without this, `profileImage` stayed bound to the previous
+        // account's PFP across switches because loadCachedProfileImage()
+        // was only invoked at app cold-launch — producing the visible
+        // "wrong avatar persists across account switches" symptom.
+        profileImage = nil
+        loadCachedProfileImage()
+        fetchProfileIfNeeded()
     }
 
     /// Add an account by pasting an nsec. Idempotent: if the same nsec
@@ -637,6 +646,13 @@ final class AppState {
 
         currentAccount = account
         persistCurrentAccountPubkey()
+
+        // Bug G fix: clear stale image from previous account so the UI
+        // doesn't show the wrong avatar between switch and fetch completion.
+        // The new account has no cached image yet (just created), so
+        // loadCachedProfileImage is a no-op; fetchProfileIfNeeded will
+        // populate once the relay reply arrives.
+        profileImage = nil
 
         // Async: register this account's pubkey with the proxy + fetch
         // kind:0 profile. Fire-and-forget.
