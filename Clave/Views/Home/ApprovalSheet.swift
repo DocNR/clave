@@ -267,7 +267,8 @@ struct ApprovalSheet: View {
             imageURL: parsedURI.imageURL,
             connectedAt: Date().timeIntervalSince1970,
             lastSeen: Date().timeIntervalSince1970,
-            requestCount: 0
+            requestCount: 0,
+            signerPubkeyHex: currentSigner
         )
         onApprove(permissions)
         // Don't call dismiss() here — ConnectSheet handles dismissal

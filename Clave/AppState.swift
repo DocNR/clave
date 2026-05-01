@@ -177,6 +177,15 @@ final class AppState {
         //    legacy keys were already cleaned.
         migrateRemainingLegacyKeysIfNeeded()
 
+        // 5b. Stamp any empty-signer rows with the current account's
+        //     pubkey when we're confidently in a single-account state.
+        //     Catches the build-32 bug where new ClientPermissions/
+        //     ConnectedClient/PendingRequest/PairOp rows were created
+        //     without `signerPubkeyHex` populated. Skipped when 2+
+        //     accounts exist — can't reliably guess which account a
+        //     row belongs to retroactively.
+        cleanupEmptySignerRowsIfSafe()
+
         // 6. Load cached profile image from disk for the current account.
         loadCachedProfileImage()
 
@@ -395,6 +404,26 @@ final class AppState {
         // missing legacy keys → no-op; present keys → migrate + delete.
         migrateLegacyUserDefaultsKeys(to: pubkey)
         migrateLegacyProfileImageFile(to: pubkey)
+    }
+
+    /// Stamp `signerPubkeyHex` on any empty-signer SharedStorage rows
+    /// using the current account's pubkey. Workaround for the build-32
+    /// regression where new ClientPermissions / ConnectedClient /
+    /// PendingRequest / PairOp / ActivityEntry rows were created
+    /// without `signerPubkeyHex` populated (Task 4/5/7 oversight; fixed
+    /// in build 33 by threading the signer through every construction
+    /// site).
+    ///
+    /// Skipped when 2+ accounts exist — can't reliably guess which
+    /// account an empty-signer row belongs to retroactively. Multi-
+    /// account users on build 32 will need to delete + re-pair the
+    /// affected client manually after upgrading to build 33+.
+    ///
+    /// Idempotent: rows already stamped are skipped by the underlying
+    /// `backfillSignerPubkeyHex` helper.
+    private func cleanupEmptySignerRowsIfSafe() {
+        guard accounts.count == 1, let pubkey = currentAccount?.pubkeyHex else { return }
+        backfillSignerPubkeyHex(for: pubkey)
     }
 
     /// Stamp `signerPubkeyHex` on every record with an empty signer field.
@@ -982,7 +1011,8 @@ final class AppState {
                 clientPubkey: parsedURI.clientPubkey,
                 timestamp: Date().timeIntervalSince1970,
                 status: "error",
-                errorMessage: "Could not connect to any relay"
+                errorMessage: "Could not connect to any relay",
+                signerPubkeyHex: signerPubkey
             )
             SharedStorage.logActivity(entry)
             throw ClaveError.noRelay
@@ -1037,7 +1067,8 @@ final class AppState {
                         clientPubkey: parsedURI.clientPubkey,
                         timestamp: Date().timeIntervalSince1970,
                         status: success ? "signed" : "error",
-                        errorMessage: success ? nil : "All relays rejected connect response"
+                        errorMessage: success ? nil : "All relays rejected connect response",
+                        signerPubkeyHex: signerPubkey
                     )
                     SharedStorage.logActivity(entry)
                     activityLogged = true
@@ -1248,16 +1279,20 @@ final class AppState {
     func pairClientWithProxy(clientPubkey: String, relayUrls: [String]) {
         // Persist the client's URI relay set locally first (used by Layer 1's
         // foreground subscription). Idempotent.
-        SharedStorage.setClientRelayUrls(pubkey: clientPubkey, relayUrls: relayUrls)
+        SharedStorage.setClientRelayUrls(pubkey: clientPubkey, relayUrls: relayUrls, signer: signerPubkeyHex)
 
         // Layer 1: relay-set may have changed; refresh the foreground sub.
         Task { @MainActor in
             ForegroundRelaySubscription.shared.refreshRelaySet()
         }
 
-        // Task 5: pair on behalf of the current account.
-        guard !signerPubkeyHex.isEmpty,
-              let nsec = SharedKeychain.loadNsec(for: signerPubkeyHex) else { return }
+        // Task 5: pair on behalf of the current account. Capture the
+        // signer at this moment so the URLSession failure closure (which
+        // may run after a user-driven account switch) enqueues the
+        // PairOp under the correct account.
+        let capturedSigner = signerPubkeyHex
+        guard !capturedSigner.isEmpty,
+              let nsec = SharedKeychain.loadNsec(for: capturedSigner) else { return }
         let privateKey: Data
         do {
             privateKey = try Bech32.decodeNsec(nsec)
@@ -1306,7 +1341,8 @@ final class AppState {
                 clientPubkey: clientPubkey,
                 relayUrls: relayUrls,
                 createdAt: Date().timeIntervalSince1970,
-                failCount: 0
+                failCount: 0,
+                signerPubkeyHex: capturedSigner
             )
             SharedStorage.enqueuePendingPairOp(op)
         }.resume()
@@ -1320,9 +1356,12 @@ final class AppState {
             ForegroundRelaySubscription.shared.refreshRelaySet()
         }
 
-        // Task 5: unpair on behalf of the current account.
-        guard !signerPubkeyHex.isEmpty,
-              let nsec = SharedKeychain.loadNsec(for: signerPubkeyHex) else { return }
+        // Task 5: unpair on behalf of the current account. Capture
+        // signer for the URLSession failure closure (same rationale as
+        // pairClientWithProxy).
+        let capturedSigner = signerPubkeyHex
+        guard !capturedSigner.isEmpty,
+              let nsec = SharedKeychain.loadNsec(for: capturedSigner) else { return }
         let privateKey: Data
         do {
             privateKey = try Bech32.decodeNsec(nsec)
@@ -1367,7 +1406,8 @@ final class AppState {
                 clientPubkey: clientPubkey,
                 relayUrls: nil,
                 createdAt: Date().timeIntervalSince1970,
-                failCount: 0
+                failCount: 0,
+                signerPubkeyHex: capturedSigner
             )
             SharedStorage.enqueuePendingPairOp(op)
         }.resume()

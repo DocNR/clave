@@ -30,10 +30,14 @@ enum SharedStorage {
 
     // MARK: - Connected Clients
 
-    static func updateClient(pubkey: String, name: String?) {
+    static func updateClient(pubkey: String, name: String?, signer signerPubkeyHex: String) {
         var clients = getConnectedClients()
         let now = Date().timeIntervalSince1970
-        if let idx = clients.firstIndex(where: { $0.pubkey == pubkey }) {
+        // Match on composite (signer, client) — same client paired with
+        // multiple accounts produces distinct rows.
+        if let idx = clients.firstIndex(where: {
+            $0.signerPubkeyHex == signerPubkeyHex && $0.pubkey == pubkey
+        }) {
             clients[idx].lastSeen = now
             clients[idx].requestCount += 1
             if let name, !name.isEmpty { clients[idx].name = name }
@@ -43,11 +47,12 @@ enum SharedStorage {
                 name: name,
                 firstSeen: now,
                 lastSeen: now,
-                requestCount: 1
+                requestCount: 1,
+                signerPubkeyHex: signerPubkeyHex
             ))
         }
         save(clients, forKey: SharedConstants.connectedClientsKey)
-        logger.notice("[Storage] updateClient: \(pubkey.prefix(8), privacy: .public) total=\(clients.count)")
+        logger.notice("[Storage] updateClient: \(pubkey.prefix(8), privacy: .public) signer=\(signerPubkeyHex.prefix(8), privacy: .public) total=\(clients.count)")
     }
 
     static func renameClient(pubkey: String, name: String?) {
@@ -63,13 +68,16 @@ enum SharedStorage {
     /// foreground subscription to build its target relay set.
     /// (Pre-L1 the field existed in `ConnectedClient` but was never
     /// populated — fixed here.)
-    static func setClientRelayUrls(pubkey: String, relayUrls: [String]) {
+    static func setClientRelayUrls(pubkey: String, relayUrls: [String], signer signerPubkeyHex: String) {
         var clients = getConnectedClients()
         let cleaned = relayUrls.filter { !$0.isEmpty }
-        if let idx = clients.firstIndex(where: { $0.pubkey == pubkey }) {
+        // Match on composite (signer, client) — see updateClient rationale.
+        if let idx = clients.firstIndex(where: {
+            $0.signerPubkeyHex == signerPubkeyHex && $0.pubkey == pubkey
+        }) {
             clients[idx].relayUrls = cleaned
             save(clients, forKey: SharedConstants.connectedClientsKey)
-            logger.notice("[Storage] setClientRelayUrls: \(pubkey.prefix(8), privacy: .public) count=\(cleaned.count)")
+            logger.notice("[Storage] setClientRelayUrls: \(pubkey.prefix(8), privacy: .public) signer=\(signerPubkeyHex.prefix(8), privacy: .public) count=\(cleaned.count)")
         } else {
             // Client not yet known — create the entry so the relays are persisted.
             // updateClient will be called separately when the first request comes in.
@@ -80,10 +88,11 @@ enum SharedStorage {
                 firstSeen: now,
                 lastSeen: now,
                 requestCount: 0,
-                relayUrls: cleaned
+                relayUrls: cleaned,
+                signerPubkeyHex: signerPubkeyHex
             ))
             save(clients, forKey: SharedConstants.connectedClientsKey)
-            logger.notice("[Storage] setClientRelayUrls (new client): \(pubkey.prefix(8), privacy: .public) count=\(cleaned.count)")
+            logger.notice("[Storage] setClientRelayUrls (new client): \(pubkey.prefix(8), privacy: .public) signer=\(signerPubkeyHex.prefix(8), privacy: .public) count=\(cleaned.count)")
         }
     }
 

@@ -164,7 +164,8 @@ enum LightSigner {
                         imageURL: nil,
                         connectedAt: Date().timeIntervalSince1970,
                         lastSeen: Date().timeIntervalSince1970,
-                        requestCount: 0
+                        requestCount: 0,
+                        signerPubkeyHex: signerPubkey
                     )
                     SharedStorage.saveClientPermissions(perms)
                     logger.notice("[LightSigner] New client paired with valid secret")
@@ -253,7 +254,8 @@ enum LightSigner {
                             eventKind: eventKind ?? 0,
                             clientPubkey: senderPubkey,
                             timestamp: Date().timeIntervalSince1970,
-                            responseRelayUrl: responseRelayUrl
+                            responseRelayUrl: responseRelayUrl,
+                            signerPubkeyHex: signerPubkey
                         )
                         SharedStorage.queuePendingRequest(pending)
                         queuedRequestId = pending.id
