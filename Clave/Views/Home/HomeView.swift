@@ -91,6 +91,15 @@ struct HomeView: View {
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active { refreshData() }
             }
+            // Bug H fix: refresh clients + activity when the user switches
+            // account via the identity-bar Menu. Without this, the npub label
+            // (read directly from appState.currentAccount) updates correctly
+            // but the @State `clients` and `activityLog` arrays were only
+            // reloaded by refreshData() — which fired on appear / scenePhase
+            // / signingCompleted but never on currentAccount change.
+            .onChange(of: appState.currentAccount?.pubkeyHex) { _, _ in
+                refreshData()
+            }
             .onReceive(NotificationCenter.default.publisher(for: .signingCompleted)) { _ in
                 refreshData()
             }
