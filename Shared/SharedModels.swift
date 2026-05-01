@@ -148,6 +148,68 @@ struct ConnectedClient: Codable, Identifiable {
     }
 }
 
+// MARK: - Multi-account models (added 2026-04-30, feat/multi-account)
+//
+// These types underpin the Account model in `accountsKey` UserDefaults +
+// the per-account profile cache. `CachedProfile` was previously inline in
+// `Clave/AppState.swift`; extracted here so multi-account code in Shared/
+// can reference it. Field shapes preserved so existing UserDefaults rows
+// decode without migration.
+
+/// kind:0 profile metadata cache for an account. Refreshed by
+/// `AppState.fetchProfileIfNeeded` from a small relay set (see AppState
+/// for the relay list); cached for ~1h before refresh.
+struct CachedProfile: Codable, Equatable {
+    var displayName: String?
+    var pictureURL: String?
+    var fetchedAt: Double  // timeIntervalSince1970
+}
+
+/// One Nostr identity owned by this device. Persisted as part of
+/// `[Account]` under `SharedConstants.accountsKey`. Pubkey is the foreign
+/// key for every per-account record (Keychain entry, ClientPermissions,
+/// activity log, pending requests, bunker secret, etc.).
+///
+/// Display name resolves: `petname ?? profile?.displayName ??
+/// truncatedNpub`. Avatar resolves: cached profile picture → AvatarView's
+/// initials+gradient generated from `pubkeyHex` + display name.
+struct Account: Codable, Identifiable, Equatable {
+    var id: String { pubkeyHex }
+
+    /// Hex-encoded 32-byte secp256k1 public key. Stable across petname
+    /// renames + profile refreshes; used as the kSecAttrAccount for the
+    /// account's Keychain entry, and as the foreign key on every
+    /// per-account SharedStorage record.
+    let pubkeyHex: String
+
+    /// User-supplied label, optional. Preferred display name when set.
+    /// Sanitized at write time (trimmed, newlines stripped, capped at 64
+    /// chars) — see `AppState.renamePetname` (Task 5).
+    var petname: String?
+
+    /// `Date.timeIntervalSince1970` of when this account was added on
+    /// this device. Used for "Added on …" rows in account detail views.
+    var addedAt: Double
+
+    /// Most-recently-fetched kind:0 metadata for this pubkey. nil when
+    /// the relay fetch hasn't completed yet (e.g., right after import or
+    /// after reinstall recovery). Refreshed by AppState on a per-account
+    /// schedule.
+    var profile: CachedProfile?
+
+    init(
+        pubkeyHex: String,
+        petname: String? = nil,
+        addedAt: Double,
+        profile: CachedProfile? = nil
+    ) {
+        self.pubkeyHex = pubkeyHex
+        self.petname = petname
+        self.addedAt = addedAt
+        self.profile = profile
+    }
+}
+
 /// Queued pair/unpair operation awaiting delivery to the proxy.
 /// Persisted in SharedStorage.pendingPairOps. FIFO, cap 10, drop-oldest on
 /// overflow. Drained on applicationDidBecomeActive and after /register success.

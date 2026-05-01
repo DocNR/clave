@@ -20,11 +20,10 @@ enum ClaveError: LocalizedError {
     }
 }
 
-struct CachedProfile: Codable {
-    var displayName: String?
-    var pictureURL: String?
-    var fetchedAt: Double  // timeIntervalSince1970
-}
+// `CachedProfile` extracted to Shared/SharedModels.swift on 2026-04-30
+// (feat/multi-account, Task 1) so multi-account code in Shared/ can
+// reference it. Field shape preserved; existing UserDefaults rows decode
+// identically.
 
 @Observable
 final class AppState {
