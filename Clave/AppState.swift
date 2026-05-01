@@ -662,10 +662,15 @@ final class AppState {
     func deleteAccount(pubkey: String) {
         // 1. Unpair this account's clients with the proxy. Best-effort —
         //    failures enqueue retry. Keychain entry must still exist for
-        //    NIP-98 signing.
+        //    NIP-98 signing. Bug D fix: pass `signer: pubkey` so the unpair
+        //    is signed with the to-be-deleted account's nsec, targeting the
+        //    correct (signer, client) row on the proxy. Without this, the
+        //    unpair signed with current's nsec hit `(signer=current, client=X)`
+        //    which doesn't exist → 200 "no pair found" → proxy keeps the real
+        //    `(signer=deleted, client=X)` row as an orphan.
         let clientsToUnpair = SharedStorage.getConnectedClients(for: pubkey)
         for client in clientsToUnpair {
-            unpairClientWithProxy(clientPubkey: client.pubkey)
+            unpairClientWithProxy(clientPubkey: client.pubkey, signer: pubkey)
         }
         // Drop any pending pair ops for this signer (proxy will GC its rows).
         let pairOpsToDrop = SharedStorage.getPendingPairOps(for: pubkey)
@@ -673,8 +678,12 @@ final class AppState {
             SharedStorage.removePendingPairOp(id: op.id)
         }
 
-        // 2. Unregister this account from the proxy.
-        unregisterWithProxy()
+        // 2. Unregister this account from the proxy. Bug D fix: explicit
+        //    signer ensures the unregister is auth'd by the to-be-deleted
+        //    account, removing its (token, deletedPubkey) mapping. Without
+        //    this, a deleted non-current account stayed registered on the
+        //    proxy and kept receiving APNs pushes the device couldn't action.
+        unregisterWithProxy(signer: pubkey)
 
         // 3. Delete Keychain entry.
         SharedKeychain.deleteNsec(for: pubkey)
@@ -1275,12 +1284,20 @@ final class AppState {
     /// `deleteAccount()` before clearing the keychain, so the nsec is
     /// still available for NIP-98 signing. Fire-and-forget — we don't
     /// block deleteAccount on the result.
-    func unregisterWithProxy() {
+    /// Unregister a signer's `(deviceToken, signerPubkey)` mapping with the proxy.
+    /// Defaults to the current account; `deleteAccount` passes the to-be-deleted
+    /// pubkey explicitly so the unregister is signed with the deleted account's
+    /// nsec (still in Keychain at call-time per audit A2 ordering). Without this,
+    /// deleting a non-current account left an orphan registration on the proxy
+    /// — the deleted account's pubkey kept receiving APNs pushes that NSE
+    /// silently dropped (no nsec to sign with).
+    func unregisterWithProxy(signer: String? = nil) {
         let token = SharedConstants.sharedDefaults.string(forKey: SharedConstants.deviceTokenKey) ?? ""
         guard !token.isEmpty else { return }
 
-        guard !signerPubkeyHex.isEmpty,
-              let nsec = SharedKeychain.loadNsec(for: signerPubkeyHex) else { return }
+        let signerToUse = signer ?? signerPubkeyHex
+        guard !signerToUse.isEmpty,
+              let nsec = SharedKeychain.loadNsec(for: signerToUse) else { return }
         let privateKey: Data
         do {
             privateKey = try Bech32.decodeNsec(nsec)
@@ -1397,17 +1414,24 @@ final class AppState {
     }
 
     /// Notify the proxy of an unpair. Same failure semantics as pair.
-    func unpairClientWithProxy(clientPubkey: String) {
+    /// Unpair a (signer, client) pair from the proxy. Defaults to the current
+    /// account; `deleteAccount` passes the to-be-deleted pubkey explicitly so
+    /// the unpair targets the right (signer, client) row on the proxy. Without
+    /// this, deleting a non-current account left orphan pair entries on the
+    /// proxy that kept secondary-relay subscriptions open — proxy-side resource
+    /// leak surfaced during build 33 multi-account smoke test as
+    /// "no pair found" log noise during pendingPairOps drains.
+    func unpairClientWithProxy(clientPubkey: String, signer: String? = nil) {
         // Layer 1: the unpaired client's URI relays may no longer be needed
         // in the foreground sub's set. Refresh.
         Task { @MainActor in
             ForegroundRelaySubscription.shared.refreshRelaySet()
         }
 
-        // Task 5: unpair on behalf of the current account. Capture
-        // signer for the URLSession failure closure (same rationale as
-        // pairClientWithProxy).
-        let capturedSigner = signerPubkeyHex
+        // Capture signer at call-time (default current) so the URLSession
+        // failure closure enqueues the PairOp under the correct account
+        // even if the user-driven account switch races the in-flight request.
+        let capturedSigner = signer ?? signerPubkeyHex
         guard !capturedSigner.isEmpty,
               let nsec = SharedKeychain.loadNsec(for: capturedSigner) else { return }
         let privateKey: Data
