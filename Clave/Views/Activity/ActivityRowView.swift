@@ -88,7 +88,14 @@ struct ActivityRowView: View {
     }
 
     private var clientLabel: String {
-        if let name = SharedStorage.getClientPermissions(for: entry.clientPubkey)?.name,
+        // Task 7: scope by entry's signer. Falls back to current account
+        // for legacy entries with empty signer. Without scoping, the
+        // same client paired with two accounts could surface the wrong
+        // account's pet-name in the activity row.
+        let entrySigner = entry.signerPubkeyHex.isEmpty
+            ? (SharedConstants.sharedDefaults.string(forKey: SharedConstants.currentSignerPubkeyHexKey) ?? "")
+            : entry.signerPubkeyHex
+        if let name = SharedStorage.getClientPermissions(signer: entrySigner, client: entry.clientPubkey)?.name,
            !name.isEmpty {
             return name
         }

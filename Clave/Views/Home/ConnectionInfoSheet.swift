@@ -10,7 +10,10 @@ struct ConnectionInfoSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     private var connectedClient: ConnectedClient? {
-        SharedStorage.getConnectedClients().first { $0.pubkey == perms.pubkey }
+        // Task 7: scope to (signer, client). `perms` carries
+        // signerPubkeyHex (Task 3); use it so the same client paired
+        // with multiple accounts produces the correct row per account.
+        SharedStorage.getConnectedClients(for: perms.signerPubkeyHex).first { $0.pubkey == perms.pubkey }
     }
 
     private var npub: String {

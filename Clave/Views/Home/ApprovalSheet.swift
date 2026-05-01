@@ -241,10 +241,16 @@ struct ApprovalSheet: View {
     }
 
     private func buildAndApprove() {
-        // Free-tier cap: 5 paired clients total (bunker + nostrconnect combined).
-        // Counts the union in SharedStorage.connectedClients. Re-pairing an
-        // existing client (same pubkey) isn't blocked since no new row is added.
-        let connected = SharedStorage.getConnectedClients()
+        // Free-tier cap: 5 paired clients PER ACCOUNT (Task 7 — was
+        // global before multi-account, but the cap is conceptually
+        // per-account: each account independently maintains its own
+        // pairings). Counts SharedStorage.connectedClients scoped to
+        // the current signer. Re-pairing an existing client (same
+        // pubkey) isn't blocked since no new row is added.
+        let currentSigner = SharedConstants.sharedDefaults.string(
+            forKey: SharedConstants.currentSignerPubkeyHexKey
+        ) ?? ""
+        let connected = SharedStorage.getConnectedClients(for: currentSigner)
         let alreadyPaired = connected.contains { $0.pubkey == parsedURI.clientPubkey }
         if !alreadyPaired && connected.count >= 5 {
             capExceeded = true

@@ -111,8 +111,15 @@ struct PendingApprovalsView: View {
     }
 
     private func alwaysAllow(_ request: PendingRequest) {
+        // Task 7: use the request's own signer (Task 3 added this field).
+        // Falls back to current account for legacy rows where signer is
+        // empty. Without scoping, the same client paired to multiple
+        // accounts could update the wrong account's permissions row.
+        let signer = request.signerPubkeyHex.isEmpty
+            ? appState.signerPubkeyHex
+            : request.signerPubkeyHex
         if let kind = request.eventKind,
-           var perms = SharedStorage.getClientPermissions(for: request.clientPubkey) {
+           var perms = SharedStorage.getClientPermissions(signer: signer, client: request.clientPubkey) {
             perms.kindOverrides[kind] = true
             SharedStorage.saveClientPermissions(perms)
         }

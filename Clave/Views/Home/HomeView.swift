@@ -309,7 +309,10 @@ struct HomeView: View {
     private func refreshData() {
         SharedStorage.migrateIfNeeded()
         clients = SharedStorage.getClientPermissions()
-        activityLog = SharedStorage.getActivityLog()
+        // Task 7: scope to the current account. Phase 1 single-account
+        // user sees the same data as before; Phase 2 multi-account user
+        // sees only the current account's activity.
+        activityLog = SharedStorage.getActivityLog(for: appState.signerPubkeyHex)
         appState.refreshPendingRequests()
         appState.refreshBunkerSecret()
     }

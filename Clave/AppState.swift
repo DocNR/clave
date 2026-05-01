@@ -234,6 +234,120 @@ final class AppState {
         // Keep legacy signerPubkeyHexKey in sync — still read by
         // ForegroundRelaySubscription.swift:354 until Task 6 ships.
         defaults.set(pubkeyHex, forKey: SharedConstants.signerPubkeyHexKey)
+
+        // Backfill signerPubkeyHex on every legacy record. Without this,
+        // post-Task-7 filtered view reads (e.g., `getActivityLog(for:
+        // signer)`) would return 0 rows for build-31 testers who upgrade
+        // — their existing records have signerPubkeyHex = "" (Task 3
+        // default for missing keys). All existing data belongs to the
+        // single migrated account, so stamp it with the migrated pubkey.
+        // Idempotent: rows with non-empty signerPubkeyHex are skipped.
+        backfillSignerPubkeyHex(for: pubkeyHex)
+    }
+
+    /// Stamp `signerPubkeyHex` on every record with an empty signer field.
+    /// Called from `bootstrapFromLegacyKeychainIfNeeded` so build-31
+    /// testers' activity, pending, clients, and pair ops survive the
+    /// upgrade visible-to-the-UI. Idempotent — only writes back if any
+    /// row actually changed, avoiding spurious UserDefaults churn.
+    private func backfillSignerPubkeyHex(for pubkeyHex: String) {
+        let defaults = SharedConstants.sharedDefaults
+
+        // ActivityEntry
+        var activity = SharedStorage.getActivityLog()
+        var activityChanged = false
+        for i in activity.indices where activity[i].signerPubkeyHex.isEmpty {
+            activity[i] = ActivityEntry(
+                id: activity[i].id, method: activity[i].method,
+                eventKind: activity[i].eventKind, clientPubkey: activity[i].clientPubkey,
+                timestamp: activity[i].timestamp, status: activity[i].status,
+                errorMessage: activity[i].errorMessage,
+                signedEventId: activity[i].signedEventId,
+                signedSummary: activity[i].signedSummary,
+                signedReferencedEventId: activity[i].signedReferencedEventId,
+                signerPubkeyHex: pubkeyHex
+            )
+            activityChanged = true
+        }
+        if activityChanged, let data = try? JSONEncoder().encode(activity) {
+            defaults.set(data, forKey: SharedConstants.activityLogKey)
+        }
+
+        // PendingRequest
+        var pending = SharedStorage.getPendingRequests()
+        var pendingChanged = false
+        for i in pending.indices where pending[i].signerPubkeyHex.isEmpty {
+            pending[i] = PendingRequest(
+                id: pending[i].id, requestEventJSON: pending[i].requestEventJSON,
+                method: pending[i].method, eventKind: pending[i].eventKind,
+                clientPubkey: pending[i].clientPubkey, timestamp: pending[i].timestamp,
+                responseRelayUrl: pending[i].responseRelayUrl,
+                signerPubkeyHex: pubkeyHex
+            )
+            pendingChanged = true
+        }
+        if pendingChanged, let data = try? JSONEncoder().encode(pending) {
+            defaults.set(data, forKey: SharedConstants.pendingRequestsKey)
+        }
+
+        // ConnectedClient
+        var clients = SharedStorage.getConnectedClients()
+        var clientsChanged = false
+        for i in clients.indices where clients[i].signerPubkeyHex.isEmpty {
+            clients[i] = ConnectedClient(
+                pubkey: clients[i].pubkey, name: clients[i].name,
+                firstSeen: clients[i].firstSeen, lastSeen: clients[i].lastSeen,
+                requestCount: clients[i].requestCount,
+                relayUrls: clients[i].relayUrls,
+                signerPubkeyHex: pubkeyHex
+            )
+            clientsChanged = true
+        }
+        if clientsChanged, let data = try? JSONEncoder().encode(clients) {
+            defaults.set(data, forKey: SharedConstants.connectedClientsKey)
+        }
+
+        // ClientPermissions
+        var perms = SharedStorage.getClientPermissions()
+        var permsChanged = false
+        for i in perms.indices where perms[i].signerPubkeyHex.isEmpty {
+            perms[i] = ClientPermissions(
+                pubkey: perms[i].pubkey, trustLevel: perms[i].trustLevel,
+                kindOverrides: perms[i].kindOverrides,
+                methodPermissions: perms[i].methodPermissions,
+                name: perms[i].name, url: perms[i].url, imageURL: perms[i].imageURL,
+                connectedAt: perms[i].connectedAt, lastSeen: perms[i].lastSeen,
+                requestCount: perms[i].requestCount,
+                signerPubkeyHex: pubkeyHex
+            )
+            permsChanged = true
+        }
+        if permsChanged, let data = try? JSONEncoder().encode(perms) {
+            defaults.set(data, forKey: SharedConstants.clientPermissionsKey)
+        }
+
+        // PairOp
+        var ops = SharedStorage.getPendingPairOps()
+        var opsChanged = false
+        for i in ops.indices where ops[i].signerPubkeyHex.isEmpty {
+            ops[i] = PairOp(
+                id: ops[i].id, kind: ops[i].kind,
+                clientPubkey: ops[i].clientPubkey, relayUrls: ops[i].relayUrls,
+                createdAt: ops[i].createdAt, failCount: ops[i].failCount,
+                signerPubkeyHex: pubkeyHex
+            )
+            opsChanged = true
+        }
+        if opsChanged, let data = try? JSONEncoder().encode(ops) {
+            defaults.set(data, forKey: SharedConstants.pendingPairOpsKey)
+        }
+
+        if activityChanged || pendingChanged || clientsChanged || permsChanged || opsChanged {
+            // Don't log counts (could leak record-count side channels);
+            // just mark that backfill happened. Idempotent on next launch.
+            // Use a simple notice with no row data.
+            // (No logger.notice here — backfill is silent by design.)
+        }
     }
 
     /// Hydrate `accounts` + `currentAccount` from UserDefaults.

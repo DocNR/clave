@@ -273,6 +273,58 @@ final class AppStateMultiAccountTests: XCTestCase {
 
     // MARK: - Defensive cleanup of orphan legacy entry
 
+    // MARK: - Bootstrap backfill of legacy records (Task 7 dependency)
+
+    func testBootstrap_backfillsSignerPubkeyHexOnLegacyRecords() throws {
+        // Setup: legacy state — single nsec under fixed-account name, the
+        // legacy signerPubkeyHexKey set, AND existing records with empty
+        // signerPubkeyHex (Task 3 default for missing wire-format key).
+        try SharedKeychain.saveNsec(testNsecA)  // legacy
+        SharedConstants.sharedDefaults.set(testPubkeyA, forKey: SharedConstants.signerPubkeyHexKey)
+        SharedConstants.sharedDefaults.removeObject(forKey: SharedConstants.accountsKey)
+
+        // Pre-bootstrap: stash records with empty signer (build-31 shape)
+        SharedStorage.logActivity(ActivityEntry(
+            id: "legacy-1", method: "sign_event", eventKind: 1,
+            clientPubkey: "client-1", timestamp: 1, status: "signed",
+            errorMessage: nil
+            // signerPubkeyHex defaulted to ""
+        ))
+        SharedStorage.queuePendingRequest(PendingRequest(
+            id: "legacy-pending-1", requestEventJSON: "{}", method: "sign_event",
+            eventKind: 1, clientPubkey: "client-1", timestamp: 1,
+            responseRelayUrl: nil
+        ))
+        SharedStorage.saveClientPermissions(ClientPermissions(
+            pubkey: "client-1", trustLevel: .full,
+            kindOverrides: [:], methodPermissions: [],
+            connectedAt: 0, lastSeen: 0, requestCount: 0
+        ))
+
+        // Pre-bootstrap sanity: no signer stamped
+        XCTAssertEqual(SharedStorage.getActivityLog().first?.signerPubkeyHex, "")
+        XCTAssertEqual(SharedStorage.getPendingRequests().first?.signerPubkeyHex, "")
+        XCTAssertEqual(SharedStorage.getClientPermissions().first?.signerPubkeyHex, "")
+
+        // Trigger bootstrap
+        let fresh = AppState()
+        fresh.loadState()
+
+        // Post-bootstrap: every legacy record has signerPubkeyHex stamped
+        XCTAssertEqual(SharedStorage.getActivityLog().first?.signerPubkeyHex, testPubkeyA,
+                       "ActivityEntry must be backfilled with the bootstrapped pubkey")
+        XCTAssertEqual(SharedStorage.getPendingRequests().first?.signerPubkeyHex, testPubkeyA,
+                       "PendingRequest must be backfilled")
+        XCTAssertEqual(SharedStorage.getClientPermissions().first?.signerPubkeyHex, testPubkeyA,
+                       "ClientPermissions must be backfilled")
+
+        // Filtered readers (Task 4) now find the records — Task 7 view
+        // reads will work post-bootstrap.
+        XCTAssertEqual(SharedStorage.getActivityLog(for: testPubkeyA).count, 1)
+        XCTAssertEqual(SharedStorage.getPendingRequests(for: testPubkeyA).count, 1)
+        XCTAssertEqual(SharedStorage.getClientPermissions(forSigner: testPubkeyA).count, 1)
+    }
+
     func testCleanupOrphanLegacyKeychainEntry_idempotent() throws {
         // Setup: simulate the rare race where bootstrap saved the new
         // entry but failed to delete legacy. accounts.count >= 1, AND

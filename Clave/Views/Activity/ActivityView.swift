@@ -123,6 +123,14 @@ struct ActivityView: View {
     }
 
     private func refreshData() {
-        entries = SharedStorage.getActivityLog()
+        // Task 7: scope to current account. ActivityView is the
+        // top-level Activity tab; per the locked decision, activity is
+        // always per-account (no merged toggle). Phase-1 single-account
+        // user sees the same data as before; Phase-2 multi-account user
+        // sees only the current account's history.
+        let currentSigner = SharedConstants.sharedDefaults.string(
+            forKey: SharedConstants.currentSignerPubkeyHexKey
+        ) ?? ""
+        entries = SharedStorage.getActivityLog(for: currentSigner)
     }
 }
