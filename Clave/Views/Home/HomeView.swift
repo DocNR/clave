@@ -134,27 +134,55 @@ struct HomeView: View {
 
     private var identityBar: some View {
         HStack(spacing: 12) {
-            profileAvatar
-
-            VStack(alignment: .leading, spacing: 4) {
-                if let name = appState.profile?.displayName, !name.isEmpty {
-                    Text(name)
-                        .font(.subheadline.bold())
-                }
-
-                HStack(spacing: 6) {
-                    Text(truncatedNpub)
-                        .font(.system(.caption, design: .monospaced))
-                        .foregroundStyle(.secondary)
-
+            // Tap-to-switch account menu. Wraps the avatar+name+npub block;
+            // the copy-npub button stays separate so tapping it doesn't
+            // open the menu. Stage C will replace this with a richer bottom-
+            // sheet picker (see ~/.claude/plans/doesnt-each-account-have-
+            // dreamy-journal.md), but a Menu is the smallest possible
+            // interim affordance for testers who don't want to dig into
+            // Settings → dev menu every time they switch accounts.
+            Menu {
+                ForEach(appState.accounts) { account in
                     Button {
-                        UIPasteboard.general.string = appState.npub
+                        appState.switchToAccount(pubkey: account.pubkeyHex)
                         UIImpactFeedbackGenerator(style: .light).impactOccurred()
                     } label: {
-                        Image(systemName: "doc.on.doc")
-                            .font(.caption2)
+                        if account.pubkeyHex == appState.currentAccount?.pubkeyHex {
+                            Label(accountLabel(account), systemImage: "checkmark")
+                        } else {
+                            Text(accountLabel(account))
+                        }
                     }
                 }
+            } label: {
+                HStack(spacing: 12) {
+                    profileAvatar
+                    VStack(alignment: .leading, spacing: 4) {
+                        if let name = appState.profile?.displayName, !name.isEmpty {
+                            Text(name)
+                                .font(.subheadline.bold())
+                                .foregroundStyle(.primary)
+                        }
+                        Text(truncatedNpub)
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+                    if appState.accounts.count > 1 {
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                UIPasteboard.general.string = appState.npub
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            } label: {
+                Image(systemName: "doc.on.doc")
+                    .font(.caption2)
             }
 
             Spacer()
@@ -173,6 +201,17 @@ struct HomeView: View {
         .padding(.horizontal)
         .padding(.top, 8)
         .onAppear { appState.fetchProfileIfNeeded() }
+    }
+
+    /// Display label for the account picker menu item. Prefers explicit
+    /// petname, falls back to kind:0 displayName, then to a truncated
+    /// pubkey hex.
+    private func accountLabel(_ account: Account) -> String {
+        if let petname = account.petname, !petname.isEmpty { return petname }
+        if let display = account.profile?.displayName, !display.isEmpty { return display }
+        let pk = account.pubkeyHex
+        guard pk.count > 12 else { return pk }
+        return String(pk.prefix(8)) + "…" + String(pk.suffix(4))
     }
 
     @ViewBuilder
