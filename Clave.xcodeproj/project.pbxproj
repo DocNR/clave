@@ -13,6 +13,7 @@
 		AE01F2A3B4C5D6E700000003 /* ActivitySummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE01F2A3B4C5D6E700000001 /* ActivitySummary.swift */; };
 		AE01F2A3B4C5D6E700000005 /* Nip19.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE01F2A3B4C5D6E700000004 /* Nip19.swift */; };
 		AE01F2A3B4C5D6E700000006 /* Nip19.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE01F2A3B4C5D6E700000004 /* Nip19.swift */; };
+		AE01F2A3B4C5D6E700000008 /* SharedKeychain+Enumeration.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE01F2A3B4C5D6E700000007 /* SharedKeychain+Enumeration.swift */; };
 		B0EBA01E2F90AB01000A0001 /* PendingApprovalBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0EBA01E2F90AB01000A0002 /* PendingApprovalBanner.swift */; };
 		BD247C1AD3A7497E8DF29530 /* ClientPermissions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 894FE9FF88CD485ABCD31C05 /* ClientPermissions.swift */; };
 		DD90DE0C2D8944D08B23C606 /* ClientPermissions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 894FE9FF88CD485ABCD31C05 /* ClientPermissions.swift */; };
@@ -89,6 +90,7 @@
 		894FE9FF88CD485ABCD31C05 /* ClientPermissions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClientPermissions.swift; sourceTree = "<group>"; };
 		AE01F2A3B4C5D6E700000001 /* ActivitySummary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivitySummary.swift; sourceTree = "<group>"; };
 		AE01F2A3B4C5D6E700000004 /* Nip19.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Nip19.swift; sourceTree = "<group>"; };
+		AE01F2A3B4C5D6E700000007 /* SharedKeychain+Enumeration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SharedKeychain+Enumeration.swift"; sourceTree = "<group>"; };
 		B0EBA01E2F90AB01000A0002 /* PendingApprovalBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendingApprovalBanner.swift; sourceTree = "<group>"; };
 		DE7E10B1DE7E10B1DE7E10B1 /* DeveloperSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeveloperSettings.swift; sourceTree = "<group>"; };
 		DE7E10C1DE7E10C1DE7E10C1 /* LogExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogExporter.swift; sourceTree = "<group>"; };
@@ -231,6 +233,7 @@
 				AE01F2A3B4C5D6E700000004 /* Nip19.swift */,
 				EF3D7A5D2F8BD020005A6545 /* SharedConstants.swift */,
 				EF3D7A5E2F8BD020005A6545 /* SharedKeychain.swift */,
+				AE01F2A3B4C5D6E700000007 /* SharedKeychain+Enumeration.swift */,
 				EFCA55B463A619311A35AF3C /* SharedModels.swift */,
 				EFEE4316AC522CDDA35AFAC1 /* SharedStorage.swift */,
 				EF3D7A5F2F8BD020005A6545 /* SignerService.swift */,
@@ -442,6 +445,7 @@
 				DE7E10C2DE7E10C2DE7E10C2 /* LogExporter.swift in Sources */,
 				AE01F2A3B4C5D6E700000002 /* ActivitySummary.swift in Sources */,
 				AE01F2A3B4C5D6E700000005 /* Nip19.swift in Sources */,
+				AE01F2A3B4C5D6E700000008 /* SharedKeychain+Enumeration.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
