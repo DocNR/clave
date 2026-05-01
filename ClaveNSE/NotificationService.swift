@@ -83,12 +83,18 @@ class NotificationService: UNNotificationServiceExtension {
     }
 
     private func handleSigningRequest(userInfo: [AnyHashable: Any]) async -> SigningResult {
-        guard let nsec = SharedKeychain.loadNsec() else {
-            // No key set up yet — silently drop. User hasn't onboarded; they
-            // should never see a "Signing Failed" banner for events that aren't
-            // for them. The proxy broadcasts pushes to all registered tokens
-            // (multi-signer refactor is a separate backlog item).
-            logger.notice("[ClaveNSE] No nsec in Keychain — silently dropping push")
+        // Task 6: pubkey-route the Keychain lookup. APNs payload's
+        // `signer_pubkey` field (Stage A proxy addition) is the primary
+        // source; falls back to `currentSignerPubkeyHexKey` UserDefaults
+        // for the case where the proxy hasn't shipped Stage A yet.
+        let signerPubkey = SharedKeychain.resolveSignerPubkey(userInfo: userInfo)
+        guard !signerPubkey.isEmpty,
+              let nsec = SharedKeychain.loadNsec(for: signerPubkey) else {
+            // No key for this signer — silently drop. User hasn't onboarded
+            // (or APNs payload referenced an account we don't have); they
+            // should never see a "Signing Failed" banner for events that
+            // aren't for them.
+            logger.notice("[ClaveNSE] No nsec for resolved signer (\(signerPubkey.prefix(8), privacy: .public)) — silently dropping push")
             return SigningResult(status: .noEvents)
         }
 
@@ -100,11 +106,20 @@ class NotificationService: UNNotificationServiceExtension {
             return SigningResult(status: .error("Invalid signer key"))
         }
 
-        let signerPubkey: String
+        // Defense-in-depth: verify the loaded nsec actually derives to the
+        // pubkey we routed by. Catches the rare case where a Keychain
+        // entry was tagged with one pubkey but the underlying value has
+        // since drifted — shouldn't happen, but a mismatch here would
+        // produce signing failures downstream.
+        let derivedPubkey: String
         do {
-            signerPubkey = try LightEvent.pubkeyHex(from: privateKey)
+            derivedPubkey = try LightEvent.pubkeyHex(from: privateKey)
         } catch {
             return SigningResult(status: .error("Failed to derive pubkey"))
+        }
+        guard derivedPubkey == signerPubkey else {
+            logger.error("[ClaveNSE] Pubkey mismatch: resolved=\(signerPubkey.prefix(8), privacy: .public) derived=\(derivedPubkey.prefix(8), privacy: .public)")
+            return SigningResult(status: .error("Signer pubkey mismatch"))
         }
 
         let relayUrlString = (userInfo["relay_url"] as? String) ?? SharedConstants.relayURL

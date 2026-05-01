@@ -117,8 +117,12 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     }
 
     private func handleForegroundSigningRequest(userInfo: [AnyHashable: Any]) async {
-        guard let nsec = SharedKeychain.loadNsec() else {
-            logger.error("[App] No nsec in Keychain")
+        // Task 6: pubkey-route the Keychain lookup. Same payload-first /
+        // currentSignerPubkeyHexKey fallback as NSE.
+        let signerPubkey = SharedKeychain.resolveSignerPubkey(userInfo: userInfo)
+        guard !signerPubkey.isEmpty,
+              let nsec = SharedKeychain.loadNsec(for: signerPubkey) else {
+            logger.error("[App] No nsec for resolved signer (\(signerPubkey.prefix(8), privacy: .public))")
             return
         }
 
@@ -130,11 +134,17 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             return
         }
 
-        let signerPubkey: String
+        // Defense-in-depth: verify Keychain entry's nsec derives back to
+        // the pubkey we routed by.
+        let derivedPubkey: String
         do {
-            signerPubkey = try LightEvent.pubkeyHex(from: privateKey)
+            derivedPubkey = try LightEvent.pubkeyHex(from: privateKey)
         } catch {
             logger.error("[App] Failed to derive pubkey")
+            return
+        }
+        guard derivedPubkey == signerPubkey else {
+            logger.error("[App] Pubkey mismatch: resolved=\(signerPubkey.prefix(8), privacy: .public) derived=\(derivedPubkey.prefix(8), privacy: .public)")
             return
         }
 

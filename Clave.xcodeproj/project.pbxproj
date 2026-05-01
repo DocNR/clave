@@ -35,7 +35,6 @@
 		EF3D7A6C2F8BD107005A6545 /* LightEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF3D7A5A2F8BD020005A6545 /* LightEvent.swift */; };
 		EF3D7A6D2F8BD139005A6545 /* LightRelay.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF3D7A5B2F8BD020005A6545 /* LightRelay.swift */; };
 		EF3D7A6E2F8BD146005A6545 /* LightSigner.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF3D7A5C2F8BD020005A6545 /* LightSigner.swift */; };
-		EF3D7A702F8BD189005A6545 /* SignerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF3D7A5F2F8BD020005A6545 /* SignerService.swift */; };
 		EF3D7A722F8BD1C4005A6545 /* SharedKeychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF3D7A5E2F8BD020005A6545 /* SharedKeychain.swift */; };
 		EF56291E7860E39D54142281 /* SharedModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFCA55B463A619311A35AF3C /* SharedModels.swift */; };
 		EF6058BFB67AD8970BBE8953 /* LightEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF3D7A5A2F8BD020005A6545 /* LightEvent.swift */; };
@@ -105,7 +104,6 @@
 		EF3D7A5C2F8BD020005A6545 /* LightSigner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LightSigner.swift; sourceTree = "<group>"; };
 		EF3D7A5D2F8BD020005A6545 /* SharedConstants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedConstants.swift; sourceTree = "<group>"; };
 		EF3D7A5E2F8BD020005A6545 /* SharedKeychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedKeychain.swift; sourceTree = "<group>"; };
-		EF3D7A5F2F8BD020005A6545 /* SignerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignerService.swift; sourceTree = "<group>"; };
 		EFCA55B463A619311A35AF3C /* SharedModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedModels.swift; sourceTree = "<group>"; };
 		EFEE4316AC522CDDA35AFAC1 /* SharedStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedStorage.swift; sourceTree = "<group>"; };
 		F60FCE002F8BCAE3000FAC0A /* ForegroundRelaySubscription.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForegroundRelaySubscription.swift; sourceTree = "<group>"; };
@@ -236,7 +234,6 @@
 				AE01F2A3B4C5D6E700000007 /* SharedKeychain+Enumeration.swift */,
 				EFCA55B463A619311A35AF3C /* SharedModels.swift */,
 				EFEE4316AC522CDDA35AFAC1 /* SharedStorage.swift */,
-				EF3D7A5F2F8BD020005A6545 /* SignerService.swift */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -429,7 +426,6 @@
 			files = (
 				EF3D7A722F8BD1C4005A6545 /* SharedKeychain.swift in Sources */,
 				EF3D7A612F8BD020005A6545 /* SharedConstants.swift in Sources */,
-				EF3D7A702F8BD189005A6545 /* SignerService.swift in Sources */,
 				EFC7FD75109694C0A7F86D26 /* SharedModels.swift in Sources */,
 				EFE12D1EC4CE48622767D427 /* SharedStorage.swift in Sources */,
 				EFBF443D3DA775A267700410 /* Bech32.swift in Sources */,

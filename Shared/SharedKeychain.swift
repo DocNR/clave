@@ -131,6 +131,26 @@ enum SharedKeychain {
         ]
         SecItemDelete(query as CFDictionary)
     }
+
+    // MARK: - Pubkey routing (Task 6, multi-account)
+
+    /// Resolve which signer's nsec a push wake (or foreground signing
+    /// dispatch) should operate on. Primary source: APNs payload's
+    /// `signer_pubkey` field (added by the proxy in Stage A). Fallback:
+    /// `currentSignerPubkeyHexKey` UserDefaults — handles the transient
+    /// case where the proxy hasn't shipped Stage A yet but the iOS app
+    /// is on Stage B.
+    ///
+    /// Lives in `Shared/` so both NSE (NotificationService) and the main
+    /// app (ClaveApp.handleForegroundSigningRequest) call the same
+    /// implementation. Returns empty string if neither source has a
+    /// value — caller treats that as silent-drop.
+    static func resolveSignerPubkey(userInfo: [AnyHashable: Any]) -> String {
+        if let fromPayload = userInfo["signer_pubkey"] as? String, !fromPayload.isEmpty {
+            return fromPayload
+        }
+        return SharedConstants.sharedDefaults.string(forKey: SharedConstants.currentSignerPubkeyHexKey) ?? ""
+    }
 }
 
 enum KeychainError: LocalizedError {

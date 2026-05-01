@@ -89,7 +89,11 @@ final class ForegroundRelaySubscription {
             return
         }
 
-        let userPubkey = SharedConstants.sharedDefaults.string(forKey: SharedConstants.signerPubkeyHexKey) ?? ""
+        // Task 6: read currentSignerPubkeyHexKey (multi-account source of
+        // truth). The legacy `signerPubkeyHexKey` is still write-through-
+        // synchronized by AppState.persistCurrentAccountPubkey for one
+        // release, but the new key is the primary read.
+        let userPubkey = SharedConstants.sharedDefaults.string(forKey: SharedConstants.currentSignerPubkeyHexKey) ?? ""
         if userPubkey.isEmpty {
             lastError = "No signer key configured"
             logger.notice("[fg-sub] start: silent return — no signer key configured")
@@ -351,7 +355,13 @@ final class ForegroundRelaySubscription {
         _ eventDict: [String: Any],
         relayURL: String
     ) async {
-        guard let nsec = SharedKeychain.loadNsec(),
+        // Task 6: load by current signer pubkey, not the legacy fixed
+        // Keychain entry. L1 in v1 is single-account-effective — it
+        // operates on whichever account is currently selected in the
+        // UI. Future polish (multi-active L1) tracked in BACKLOG.
+        let userPubkey = SharedConstants.sharedDefaults.string(forKey: SharedConstants.currentSignerPubkeyHexKey) ?? ""
+        guard !userPubkey.isEmpty,
+              let nsec = SharedKeychain.loadNsec(for: userPubkey),
               let privateKey = try? Bech32.decodeNsec(nsec) else {
             await MainActor.run {
                 self.lastError = "Failed to load signer key"
