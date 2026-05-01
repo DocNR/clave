@@ -118,7 +118,7 @@ final class AppState {
         let relay = SharedConstants.relayURL
             .addingPercentEncoding(withAllowedCharacters: allowed) ?? SharedConstants.relayURL
         // Always read the latest secret from SharedStorage (NSE may have rotated it)
-        let currentSecret = SharedStorage.getBunkerSecret()
+        let currentSecret = SharedStorage.getBunkerSecret(for: signerPubkeyHex)
         return "bunker://\(signerPubkeyHex)?relay=\(relay)&secret=\(currentSecret)"
     }
 
@@ -140,7 +140,7 @@ final class AppState {
             }
         }
         deviceToken = SharedConstants.sharedDefaults.string(forKey: SharedConstants.deviceTokenKey) ?? ""
-        bunkerSecret = SharedStorage.getBunkerSecret()
+        bunkerSecret = SharedStorage.getBunkerSecret(for: signerPubkeyHex)
         loadCachedProfile()
 
         // Re-register with the proxy on every launch when both a key and a
@@ -277,7 +277,7 @@ final class AppState {
     }
 
     func rotateBunkerSecret() {
-        bunkerSecret = SharedStorage.rotateBunkerSecret()
+        bunkerSecret = SharedStorage.rotateBunkerSecret(for: signerPubkeyHex)
     }
 
     func importKey(nsec: String) throws {
@@ -307,6 +307,14 @@ final class AppState {
         // Unregister BEFORE wiping the keychain — needs the nsec to sign the NIP-98 header.
         // Also bulk-unpair every known client first (best-effort) so the proxy releases its
         // secondary relay refs. Any failures become 90-day-GC'd orphans on the proxy.
+        //
+        // NOTE (Task 4): in the multi-account world this is the
+        // single-account `deleteKey` path; Task 5 will rewrite it as
+        // `deleteAccount(pubkey:)` with scoped per-signer cleanup that
+        // does NOT clobber other accounts' rows. For now, scoped to the
+        // current `signerPubkeyHex` keeps Phase-1 behavior identical
+        // while using the new scoped variants.
+        let currentSigner = signerPubkeyHex
         let clientsToUnpair = SharedStorage.getConnectedClients()
         for client in clientsToUnpair {
             unpairClientWithProxy(clientPubkey: client.pubkey)
@@ -318,12 +326,14 @@ final class AppState {
         SharedConstants.sharedDefaults.removeObject(forKey: SharedConstants.cachedProfileKey)
         SharedStorage.clearActivityLog()
         SharedStorage.clearPendingRequests()
-        SharedStorage.unpairAllClients()
+        SharedStorage.unpairAllClients(for: currentSigner)
         SharedConstants.sharedDefaults.removeObject(forKey: SharedConstants.clientPermissionsKey)
         // Clear connected clients
         SharedConstants.sharedDefaults.removeObject(forKey: SharedConstants.connectedClientsKey)
         // Rotate bunker secret for the new key
-        _ = SharedStorage.rotateBunkerSecret()
+        if !currentSigner.isEmpty {
+            _ = SharedStorage.rotateBunkerSecret(for: currentSigner)
+        }
         // Clear cached profile image
         let container = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: SharedConstants.appGroup)
         if let imageURL = container?.appendingPathComponent("profile_image.jpg") {
@@ -342,7 +352,7 @@ final class AppState {
 
     /// Reload the bunker secret from SharedDefaults (picks up NSE-rotated secrets)
     func refreshBunkerSecret() {
-        bunkerSecret = SharedStorage.getBunkerSecret()
+        bunkerSecret = SharedStorage.getBunkerSecret(for: signerPubkeyHex)
     }
 
     /// Approve a pending request: sign and publish the response from the app.

@@ -107,7 +107,15 @@ struct HomeView: View {
                     if let client = clientToUnpair {
                         withAnimation {
                             appState.unpairClientWithProxy(clientPubkey: client.pubkey)
-                            SharedStorage.removeClientPermissions(for: client.pubkey)
+                            // Task 4: scoped variant — removes only this
+                            // (signer, client) pair, never another account's
+                            // row for the same client. Phase 1 = single
+                            // account in field, so currentAccount.pubkeyHex
+                            // is unambiguous.
+                            SharedStorage.removeClientPermissions(
+                                signer: appState.signerPubkeyHex,
+                                client: client.pubkey
+                            )
                             refreshData()
                         }
                     }

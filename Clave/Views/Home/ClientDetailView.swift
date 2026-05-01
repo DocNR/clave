@@ -398,7 +398,11 @@ struct ClientDetailView: View {
 
     private func performUnpair() {
         appState.unpairClientWithProxy(clientPubkey: pubkey)
-        SharedStorage.removeClientPermissions(for: pubkey)
+        // Task 4: scoped variant. See HomeView for rationale.
+        SharedStorage.removeClientPermissions(
+            signer: appState.signerPubkeyHex,
+            client: pubkey
+        )
         dismiss()
     }
 

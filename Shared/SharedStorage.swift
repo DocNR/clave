@@ -163,49 +163,103 @@ enum SharedStorage {
         defaults.set(Array(kinds), forKey: SharedConstants.blockedKindsKey)
     }
 
-    // MARK: - Bunker Secret & Paired Clients
+    // MARK: - Multi-account filtered readers
+    //
+    // Added 2026-05-01 (feat/multi-account, Task 4). Pure filters over the
+    // existing flat-array storage — matches noauth's "filter by foreign key"
+    // pattern. Unfiltered readers (above) are intentionally kept; the merged
+    // PendingApprovalsView (Phase 2) uses the unfiltered `getPendingRequests()`
+    // and groups by signer at render time. Other unfiltered surfaces should
+    // migrate to the `(for:)` variants in Task 7.
 
-    static func getBunkerSecret() -> String {
-        if let existing = defaults.string(forKey: SharedConstants.bunkerSecretKey), !existing.isEmpty {
+    static func getActivityLog(for signerPubkeyHex: String) -> [ActivityEntry] {
+        getActivityLog().filter { $0.signerPubkeyHex == signerPubkeyHex }
+    }
+
+    static func getPendingRequests(for signerPubkeyHex: String) -> [PendingRequest] {
+        getPendingRequests().filter { $0.signerPubkeyHex == signerPubkeyHex }
+    }
+
+    static func getConnectedClients(for signerPubkeyHex: String) -> [ConnectedClient] {
+        getConnectedClients().filter { $0.signerPubkeyHex == signerPubkeyHex }
+    }
+
+    /// Note: argument label `forSigner:` (not `for:`) to disambiguate from
+    /// the legacy single-arg `getClientPermissions(for: pubkey)` (which
+    /// matches by client pubkey). Both `String` → Swift can't pick the
+    /// right overload from the label `for:` alone. Kept this way until
+    /// the legacy variant is deleted in a future task.
+    static func getClientPermissions(forSigner signerPubkeyHex: String) -> [ClientPermissions] {
+        getClientPermissions().filter { $0.signerPubkeyHex == signerPubkeyHex }
+    }
+
+    static func getClientPermissions(signer signerPubkeyHex: String, client clientPubkey: String) -> ClientPermissions? {
+        getClientPermissions().first {
+            $0.signerPubkeyHex == signerPubkeyHex && $0.pubkey == clientPubkey
+        }
+    }
+
+    static func getPendingPairOps(for signerPubkeyHex: String) -> [PairOp] {
+        getPendingPairOps().filter { $0.signerPubkeyHex == signerPubkeyHex }
+    }
+
+    // MARK: - Bunker Secrets (per-signer)
+    //
+    // Each account has its own bunker secret rotated independently. Stored
+    // as `[signerPubkeyHex: secretHex]` under `bunkerSecretsKey`. Replaces
+    // the legacy global `bunkerSecretKey` (still readable for one-shot
+    // migration via the legacy-seed branch in `getBunkerSecret(for:)`).
+
+    /// Returns the bunker secret for the signer, generating one on first
+    /// read. Defense-in-depth migration: if the per-signer dict is empty
+    /// AND a legacy global secret exists, the first signer to ask inherits
+    /// that secret. Task 8 migration also explicitly migrates the legacy
+    /// secret; this branch is the fallback if migration hasn't run yet.
+    static func getBunkerSecret(for signerPubkeyHex: String) -> String {
+        var dict = bunkerSecretsDict()
+        if let existing = dict[signerPubkeyHex], !existing.isEmpty {
             return existing
         }
+        if dict.isEmpty,
+           let legacy = defaults.string(forKey: SharedConstants.bunkerSecretKey),
+           !legacy.isEmpty {
+            dict[signerPubkeyHex] = legacy
+            saveBunkerSecretsDict(dict)
+            return legacy
+        }
         let secret = generateRandomHex(16)
-        defaults.set(secret, forKey: SharedConstants.bunkerSecretKey)
+        dict[signerPubkeyHex] = secret
+        saveBunkerSecretsDict(dict)
         return secret
     }
 
-    static func rotateBunkerSecret() -> String {
+    @discardableResult
+    static func rotateBunkerSecret(for signerPubkeyHex: String) -> String {
+        var dict = bunkerSecretsDict()
         let secret = generateRandomHex(16)
-        defaults.set(secret, forKey: SharedConstants.bunkerSecretKey)
+        dict[signerPubkeyHex] = secret
+        saveBunkerSecretsDict(dict)
         return secret
     }
 
-    static func isClientPaired(_ pubkey: String) -> Bool {
-        getPairedClients().contains(pubkey)
+    private static func bunkerSecretsDict() -> [String: String] {
+        load(forKey: SharedConstants.bunkerSecretsKey) ?? [:]
     }
 
-    static func pairClient(_ pubkey: String) {
-        var paired = getPairedClients()
-        paired.insert(pubkey)
-        defaults.set(Array(paired), forKey: SharedConstants.pairedClientsKey)
-        logger.notice("[Storage] pairClient: \(pubkey.prefix(8), privacy: .public) total=\(paired.count)")
+    private static func saveBunkerSecretsDict(_ dict: [String: String]) {
+        save(dict, forKey: SharedConstants.bunkerSecretsKey)
     }
 
-    static func getPairedClients() -> Set<String> {
+    // MARK: - Paired Clients (legacy migration only)
+    //
+    // The `pairedClientsKey` UserDefaults set was the pre-V2 way to track
+    // paired clients. Superseded by ClientPermissions (V2). The only
+    // remaining caller is `migrateIfNeeded()` below, which reads the
+    // legacy set on first launch after the V2 update and converts each
+    // entry to a ClientPermissions row. Privatized in Task 4 — no
+    // external surface.
+    private static func getPairedClients() -> Set<String> {
         Set(defaults.stringArray(forKey: SharedConstants.pairedClientsKey) ?? [])
-    }
-
-    static func unpairClient(_ pubkey: String) {
-        var paired = getPairedClients()
-        paired.remove(pubkey)
-        defaults.set(Array(paired), forKey: SharedConstants.pairedClientsKey)
-        var clients = getConnectedClients()
-        clients.removeAll { $0.pubkey == pubkey }
-        save(clients, forKey: SharedConstants.connectedClientsKey)
-    }
-
-    static func unpairAllClients() {
-        defaults.removeObject(forKey: SharedConstants.pairedClientsKey)
     }
 
     private static func generateRandomHex(_ byteCount: Int) -> String {
@@ -220,27 +274,78 @@ enum SharedStorage {
         load(forKey: SharedConstants.clientPermissionsKey) ?? []
     }
 
+    /// Returns the FIRST ClientPermissions row matching the client pubkey,
+    /// regardless of which signer it's paired with. Multi-account caveat:
+    /// in true multi-account scenarios, the same client pubkey may have
+    /// rows under multiple signers, and this returns whichever appears
+    /// first in storage — which is non-deterministic. Use
+    /// `getClientPermissions(signer:client:)` (Task 4) when the signer
+    /// scope is known.
+    ///
+    /// Phase 1 callers (NSE, banner, view rows) still use this variant
+    /// because the migrated single-account user has only one row per
+    /// client pubkey, so the result is unambiguous. Task 7 + follow-up
+    /// passes update these callers to the scoped variant.
     static func getClientPermissions(for pubkey: String) -> ClientPermissions? {
         getClientPermissions().first { $0.pubkey == pubkey }
     }
 
+    /// Save a permissions row, matching for replacement on the composite
+    /// `(signerPubkeyHex, pubkey)` key. Legacy rows with empty
+    /// `signerPubkeyHex` are matched the same way (composite still works
+    /// — empty signer matches empty signer). Without composite matching,
+    /// the same client paired with two signers would clobber across.
     static func saveClientPermissions(_ permissions: ClientPermissions) {
         var all = getClientPermissions()
-        if let idx = all.firstIndex(where: { $0.pubkey == permissions.pubkey }) {
+        if let idx = all.firstIndex(where: {
+            $0.signerPubkeyHex == permissions.signerPubkeyHex && $0.pubkey == permissions.pubkey
+        }) {
             all[idx] = permissions
         } else {
             all.append(permissions)
         }
         save(all, forKey: SharedConstants.clientPermissionsKey)
-        logger.notice("[Storage] saveClientPermissions: \(permissions.pubkey.prefix(8), privacy: .public) trust=\(permissions.trustLevel.rawValue, privacy: .public)")
+        logger.notice("[Storage] saveClientPermissions: signer=\(permissions.signerPubkeyHex.prefix(8), privacy: .public) client=\(permissions.pubkey.prefix(8), privacy: .public) trust=\(permissions.trustLevel.rawValue, privacy: .public)")
     }
 
-    static func removeClientPermissions(for pubkey: String) {
+    /// Scoped variant — removes ONE specific (signer, client) pair without
+    /// touching other signers' rows for the same client. Replaces the
+    /// pre-Task-4 single-arg `removeClientPermissions(for: pubkey)` which
+    /// would clobber across signers.
+    static func removeClientPermissions(signer signerPubkeyHex: String, client clientPubkey: String) {
         var all = getClientPermissions()
-        all.removeAll { $0.pubkey == pubkey }
+        all.removeAll {
+            $0.signerPubkeyHex == signerPubkeyHex && $0.pubkey == clientPubkey
+        }
         save(all, forKey: SharedConstants.clientPermissionsKey)
-        // Also remove from legacy stores
-        unpairClient(pubkey)
+        // Also remove the corresponding ConnectedClient row (legacy parity
+        // with pre-Task-4 `unpairClient(_:)`, scoped here to the matching
+        // signer).
+        var clients = getConnectedClients()
+        clients.removeAll {
+            $0.signerPubkeyHex == signerPubkeyHex && $0.pubkey == clientPubkey
+        }
+        save(clients, forKey: SharedConstants.connectedClientsKey)
+        logger.notice("[Storage] removeClientPermissions: signer=\(signerPubkeyHex.prefix(8), privacy: .public) client=\(clientPubkey.prefix(8), privacy: .public)")
+    }
+
+    /// Clear all of a single signer's ClientPermissions and ConnectedClient
+    /// rows. Replaces the pre-Task-4 global `unpairAllClients()` which
+    /// nuked the legacy `pairedClientsKey` set across all signers — the
+    /// multi-account `deleteAccount` (Task 5) MUST NOT call the global
+    /// variant; it calls this scoped form instead.
+    static func unpairAllClients(for signerPubkeyHex: String) {
+        var perms = getClientPermissions()
+        let beforeP = perms.count
+        perms.removeAll { $0.signerPubkeyHex == signerPubkeyHex }
+        save(perms, forKey: SharedConstants.clientPermissionsKey)
+
+        var clients = getConnectedClients()
+        let beforeC = clients.count
+        clients.removeAll { $0.signerPubkeyHex == signerPubkeyHex }
+        save(clients, forKey: SharedConstants.connectedClientsKey)
+
+        logger.notice("[Storage] unpairAllClients(for: \(signerPubkeyHex.prefix(8), privacy: .public)) perms=\(beforeP)→\(perms.count) clients=\(beforeC)→\(clients.count)")
     }
 
     /// Migrate legacy paired clients to ClientPermissions (one-time, on first launch after update)
@@ -276,34 +381,96 @@ enum SharedStorage {
         logger.notice("[Storage] Migrated \(migrated.count) paired clients to ClientPermissions")
     }
 
-    /// Update lastSeen and requestCount for a client after a successful request
-    static func touchClient(pubkey: String) {
-        guard var perms = getClientPermissions(for: pubkey) else { return }
+    /// Scoped variant — update lastSeen and requestCount for the
+    /// (signer, client) pair after a successful request. Replaces the
+    /// pre-Task-4 `touchClient(pubkey:)` which matched by client only and
+    /// could touch the wrong signer's row in multi-account scenarios.
+    /// Caller (LightSigner.swift:564) derives the signer from
+    /// `LightEvent.pubkeyHex(from: privateKey)` once per request.
+    static func touchClient(pubkey: String, signer signerPubkeyHex: String) {
+        guard var perms = getClientPermissions(signer: signerPubkeyHex, client: pubkey) else { return }
         perms.lastSeen = Date().timeIntervalSince1970
         perms.requestCount += 1
         saveClientPermissions(perms)
     }
 
-    // MARK: - Last contact-list snapshot (kind:3 diff)
+    // MARK: - Last contact-list snapshot (kind:3 diff, per-signer)
+    //
+    // CRITICAL CORRECTNESS FIX from PR #19 in multi-account context: a
+    // single global key would corrupt across accounts (account A's
+    // snapshot diff'd against account B's new kind:3 → wildly wrong
+    // follow summaries). Stored as
+    // `[signerPubkeyHex: sortedPubkeys]` under `lastContactSetsKey`.
 
-    /// The most-recently-signed kind:3 contact-list pubkey set, or nil if no
-    /// kind:3 has been signed yet on this install. Used by `ActivitySummary`
-    /// to compute add/remove diffs.
-    static func getLastContactSet() -> Set<String>? {
-        guard let arr: [String] = load(forKey: SharedConstants.lastContactSetKey) else {
-            return nil
-        }
+    /// The most-recently-signed kind:3 contact-list pubkey set for this
+    /// signer, or nil if no kind:3 has been signed yet for this account.
+    /// Used by `ActivitySummary` to compute add/remove diffs.
+    static func getLastContactSet(for signerPubkeyHex: String) -> Set<String>? {
+        let dict = lastContactSetsDict()
+        guard let arr = dict[signerPubkeyHex] else { return nil }
         return Set(arr)
     }
 
-    /// Replace the snapshot with the given pubkey set. Stored as a sorted
-    /// array for stable serialization. Pass `nil` to clear.
-    static func saveLastContactSet(_ set: Set<String>?) {
-        guard let set else {
-            defaults.removeObject(forKey: SharedConstants.lastContactSetKey)
-            return
+    /// Replace this signer's snapshot with the given pubkey set. Stored
+    /// as a sorted array per-signer for stable serialization. Pass `nil`
+    /// to clear that signer's entry (other signers' entries unaffected).
+    static func saveLastContactSet(_ set: Set<String>?, for signerPubkeyHex: String) {
+        var dict = lastContactSetsDict()
+        if let set {
+            dict[signerPubkeyHex] = Array(set).sorted()
+        } else {
+            dict.removeValue(forKey: signerPubkeyHex)
         }
-        save(Array(set).sorted(), forKey: SharedConstants.lastContactSetKey)
+        saveLastContactSetsDict(dict)
+    }
+
+    private static func lastContactSetsDict() -> [String: [String]] {
+        load(forKey: SharedConstants.lastContactSetsKey) ?? [:]
+    }
+
+    private static func saveLastContactSetsDict(_ dict: [String: [String]]) {
+        save(dict, forKey: SharedConstants.lastContactSetsKey)
+    }
+
+    // MARK: - Per-signer register timestamps
+    //
+    // Each account registers with the proxy independently. Throttle +
+    // cooldown for `AppState.ensureRegisteredFresh` are tracked
+    // per-signer here. Stored as
+    // `[signerPubkeyHex: ["succeeded": ts, "failed": ts]]` under
+    // `lastRegisterTimesKey`. Replaces the legacy global
+    // `lastRegisterSucceededAtKey` / `lastRegisterFailedAtKey`.
+
+    static func getLastRegisterSucceededAt(for signerPubkeyHex: String) -> Double? {
+        registerTimesDict()[signerPubkeyHex]?["succeeded"]
+    }
+
+    static func setLastRegisterSucceededAt(_ ts: Double, for signerPubkeyHex: String) {
+        var dict = registerTimesDict()
+        var inner = dict[signerPubkeyHex] ?? [:]
+        inner["succeeded"] = ts
+        dict[signerPubkeyHex] = inner
+        saveRegisterTimesDict(dict)
+    }
+
+    static func getLastRegisterFailedAt(for signerPubkeyHex: String) -> Double? {
+        registerTimesDict()[signerPubkeyHex]?["failed"]
+    }
+
+    static func setLastRegisterFailedAt(_ ts: Double, for signerPubkeyHex: String) {
+        var dict = registerTimesDict()
+        var inner = dict[signerPubkeyHex] ?? [:]
+        inner["failed"] = ts
+        dict[signerPubkeyHex] = inner
+        saveRegisterTimesDict(dict)
+    }
+
+    private static func registerTimesDict() -> [String: [String: Double]] {
+        load(forKey: SharedConstants.lastRegisterTimesKey) ?? [:]
+    }
+
+    private static func saveRegisterTimesDict(_ dict: [String: [String: Double]]) {
+        save(dict, forKey: SharedConstants.lastRegisterTimesKey)
     }
 
     // MARK: - Per-event-id dedupe (cross-process via app-group UserDefaults)
