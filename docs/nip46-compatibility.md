@@ -153,6 +153,17 @@ Cross-cutting patterns observed during compatibility testing. Useful for predict
 
 ---
 
+## Reference test clients
+
+When triaging an interop issue, it helps to compare the broken client against a known-spec-compliant reference. Two we've found useful:
+
+- **[Nip46Lab](https://github.com/greenart7c3/Nip46Lab)** — single-page HTML NIP-46 testbench by greenart7c3 (also the author of Amber). Supports both `bunker://` and `nostrconnect://` pairing, surfaces wire-level RPC traffic per kind:24133 event, and runs in a browser tab — no install. Useful for verifying that Clave's signer responds correctly to a neutral client. We've exercised the `bunker://` flow end-to-end against Clave build 31 — `connect`, `get_public_key`, `ping`, `sign_event`, and `switch_relays` all return spec-shaped responses, including the secret-echo on `connect` (the JS equivalent of the rust-nostr `to_ack()?` parser trip-wire is not present).
+- **[Amber](https://github.com/greenart7c3/Amber)** (Android) — for the inverse direction. When a client fails against Clave, testing the same client against Amber tells you whether the bug is signer-specific or shared. Requires an Android device.
+
+Together these cover both attribution directions: "is the bug in this client?" (use Nip46Lab against Clave) and "is the bug in Clave?" (use the broken client against Amber).
+
+---
+
 ## Triage guide: signer-side, client-side, library-shared, or spec-ambiguity?
 
 When a Nostr client doesn't work with Clave, the natural first question is "whose bug is it?" The honest answer is that this is harder to determine than it sounds. Below is the workflow we use.
@@ -162,7 +173,7 @@ When a Nostr client doesn't work with Clave, the natural first question is "whos
 Test the same client against Clave AND a second NIP-46 signer (Amber, nsec.app, nsecBunker). The result narrows the search:
 
 - **Both signers work** → the client has no bug. If you saw a problem earlier, it was probably transient (relay flake, network).
-- **Only Clave fails** → likely signer-side (Clave). File an issue using the [NIP-46 interop issue template](https://github.com/DocNR/clave/issues/new?template=nip46-interop-issue.md).
+- **Only Clave fails** → likely signer-side (Clave). File an issue using the [NIP-46 interop issue template](https://github.com/DocNR/clave/issues/new?template=nip46-interop-issue.md). Optional but useful: also reproduce against Clave using [Nip46Lab](https://github.com/greenart7c3/Nip46Lab) (the neutral reference client described above). If Nip46Lab also fails the same way, that strongly confirms the bug is on Clave's side rather than in the original client's NIP-46 layer.
 - **Both signers fail** → does NOT immediately mean the client is buggy. Continue to Step 2.
 
 ### Step 2 — Check whether the signers share a library on the receive side

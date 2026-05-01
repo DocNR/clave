@@ -57,7 +57,11 @@ after the report is filed. See the triage guide in docs/nip46-compatibility.md.
 
 ## Already triaged?
 
-<!-- If you've already done some narrowing yourself (e.g. "tried with two signers, both fail") please mention it here. See the triage guide in docs/nip46-compatibility.md. -->
+<!-- If you've already done some narrowing yourself, please mention it here. Examples:
+- "Tried with two signers (Clave + Amber), both fail" → suggests client/library bug
+- "Reproduced against Clave using Nip46Lab (https://github.com/greenart7c3/Nip46Lab)
+  as a neutral reference client" → suggests Clave-side bug
+See the triage guide in docs/nip46-compatibility.md. -->
 
 ---
 
