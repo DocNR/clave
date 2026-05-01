@@ -31,6 +31,7 @@ const { createRelayPool } = require("./relayPool");
 const { createApnsClient, shouldPruneToken, parseReason } = require("./apnsClient");
 
 const PUBLIC_PRIMARY_URL = process.env.PUBLIC_RELAY_URL || "wss://relay.powr.build";
+const PUBLIC_PROXY_URL = process.env.PUBLIC_PROXY_URL || "https://proxy.clave.casa";
 
 const storage = createStorage(TOKEN_FILE);
 const CLIENTS_FILE = "./clients.json";
@@ -171,7 +172,7 @@ const server = http.createServer((req, res) => {
           return res.end(JSON.stringify({ error: e.message }));
         }
 
-        const expectedUrl = `https://proxy.clave.casa/register`;
+        const expectedUrl = `${PUBLIC_PROXY_URL}/register`;
         const bodyHash = sha256Hex(Buffer.from(body));
         const result = await verifyNip98(authEvent, expectedUrl, "POST", bodyHash);
         if (!result.valid) {
@@ -229,7 +230,7 @@ const server = http.createServer((req, res) => {
           return res.end(JSON.stringify({ error: e.message }));
         }
 
-        const expectedUrl = `https://proxy.clave.casa/unregister`;
+        const expectedUrl = `${PUBLIC_PROXY_URL}/unregister`;
         const bodyHash = sha256Hex(Buffer.from(body));
         const result = await verifyNip98(authEvent, expectedUrl, "POST", bodyHash);
         if (!result.valid) {
@@ -292,7 +293,7 @@ const server = http.createServer((req, res) => {
           return res.end(JSON.stringify({ error: e.message }));
         }
 
-        const expectedUrl = `https://proxy.clave.casa/pair-client`;
+        const expectedUrl = `${PUBLIC_PROXY_URL}/pair-client`;
         const bodyHash = sha256Hex(Buffer.from(body));
         const result = await verifyNip98(authEvent, expectedUrl, "POST", bodyHash);
         if (!result.valid) {
@@ -400,7 +401,7 @@ const server = http.createServer((req, res) => {
           return res.end(JSON.stringify({ error: e.message }));
         }
 
-        const expectedUrl = `https://proxy.clave.casa/unpair-client`;
+        const expectedUrl = `${PUBLIC_PROXY_URL}/unpair-client`;
         const bodyHash = sha256Hex(Buffer.from(body));
         const result = await verifyNip98(authEvent, expectedUrl, "POST", bodyHash);
         if (!result.valid) {
