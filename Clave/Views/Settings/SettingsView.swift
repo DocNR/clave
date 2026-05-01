@@ -223,6 +223,12 @@ struct SettingsView: View {
                 Label("L1 Diagnostics", systemImage: "waveform.circle")
             }
 
+            NavigationLink {
+                MultiAccountDiagnosticsView()
+            } label: {
+                Label("Multi-Account", systemImage: "person.2.circle")
+            }
+
             Button(role: .destructive) {
                 devSettings.developerMenuUnlocked = false
                 versionTapTimes = []
