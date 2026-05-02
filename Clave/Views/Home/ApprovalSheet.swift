@@ -4,6 +4,7 @@ struct ApprovalSheet: View {
     let parsedURI: NostrConnectParser.ParsedURI
     let onApprove: (ClientPermissions) -> Void
     @Environment(\.dismiss) private var dismiss
+    @Environment(AppState.self) private var appState
 
     @State private var selectedTrust: TrustLevel
     @State private var kindOverrides: [Int: Bool] = [:]
@@ -22,6 +23,9 @@ struct ApprovalSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 24) {
+                    SigningAsHeader(signerPubkeyHex: appState.signerPubkeyHex)
+                        .padding(.horizontal)
+                        .padding(.top, 12)
                     clientHeader
                     trustLevelCards
                     permissionsSection
@@ -189,7 +193,7 @@ struct ApprovalSheet: View {
             .buttonStyle(.bordered)
             .frame(maxWidth: .infinity)
 
-            Button("Connect") {
+            Button("Connect as @\(signingAsDisplayLabel)") {
                 buildAndApprove()
             }
             .buttonStyle(.borderedProminent)
@@ -200,6 +204,16 @@ struct ApprovalSheet: View {
     }
 
     // MARK: - Helpers
+
+    private var signingAsDisplayLabel: String {
+        let pk = appState.signerPubkeyHex
+        guard let account = appState.accounts.first(where: { $0.pubkeyHex == pk }) else {
+            return String(pk.prefix(8))
+        }
+        if let p = account.petname, !p.isEmpty { return p }
+        if let d = account.profile?.displayName, !d.isEmpty { return d }
+        return String(account.pubkeyHex.prefix(8))
+    }
 
     private var truncatedPubkey: String {
         let pk = parsedURI.clientPubkey

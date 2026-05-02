@@ -78,11 +78,11 @@ struct ClientDetailView: View {
         } message: {
             Text("Enter a new name for this client.")
         }
-        .alert("Unpair Client?", isPresented: $showUnpairConfirm) {
+        .alert(unpairAlertTitle, isPresented: $showUnpairConfirm) {
             Button("Unpair", role: .destructive) { performUnpair() }
             Button("Cancel", role: .cancel) { }
         } message: {
-            Text("This will remove all permissions for this client. You will need to reconnect if you want to use it again.")
+            Text(unpairAlertMessage)
         }
         .alert("Clear Overrides?", isPresented: $showOverrideAlert) {
             Button("Change & Clear") {
@@ -414,6 +414,25 @@ struct ClientDetailView: View {
     }
 
     // MARK: - Helpers
+
+    private var unpairAlertTitle: String {
+        let clientName = permissions?.name ?? "this connection"
+        let accountLabel = currentAccountDisplayName
+        return "Unpair \(clientName) from @\(accountLabel)?"
+    }
+
+    private var unpairAlertMessage: String {
+        "This connection will no longer be able to sign for this account."
+    }
+
+    private var currentAccountDisplayName: String {
+        guard let account = appState.currentAccount else {
+            return String(appState.signerPubkeyHex.prefix(8))
+        }
+        if let p = account.petname, !p.isEmpty { return p }
+        if let d = account.profile?.displayName, !d.isEmpty { return d }
+        return String(account.pubkeyHex.prefix(8))
+    }
 
     private var truncatedPubkey: String {
         if pubkey.count > 12 {
