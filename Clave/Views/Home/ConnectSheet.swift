@@ -107,7 +107,7 @@ struct ConnectSheet: View {
 
             Text(appState.bunkerURI)
                 .font(.system(.caption2, design: .monospaced))
-                .foregroundStyle(.white)
+                .foregroundStyle(.primary)
                 .lineLimit(3)
                 .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)
