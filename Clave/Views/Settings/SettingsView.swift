@@ -3,8 +3,6 @@ import LocalAuthentication
 
 struct SettingsView: View {
     @Environment(AppState.self) private var appState
-    @State private var showDeleteConfirmation = false
-    @State private var showExportSheet = false
     @State private var showAddSheet = false
     @State private var proxyURL = ""
     @State private var registrationStatus = ""
@@ -27,17 +25,6 @@ struct SettingsView: View {
             .navigationTitle("Settings")
             .onAppear {
                 loadSettings()
-            }
-            .alert("Delete Key", isPresented: $showDeleteConfirmation) {
-                Button("Delete", role: .destructive) {
-                    appState.deleteKey()
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("This will permanently delete your signer key from this device. All paired clients will be disconnected and will need a new bunker URI from the next key you import or generate. Make sure you have a backup of your current nsec.")
-            }
-            .sheet(isPresented: $showExportSheet) {
-                ExportKeySheet()
             }
         }
     }
