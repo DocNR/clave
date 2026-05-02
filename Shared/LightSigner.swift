@@ -142,11 +142,11 @@ enum LightSigner {
                 let isExistingClient = SharedStorage.getClientPermissions(signer: signerPubkey, client: senderPubkey) != nil
                 if !isExistingClient {
                     let currentCount = SharedStorage.getConnectedClients().count
-                    if currentCount >= 5 {
-                        logger.notice("[LightSigner] Bunker connect rejected: pairing cap reached (5)")
+                    if currentCount >= Account.maxClientsPerAccount {
+                        logger.notice("[LightSigner] Bunker connect rejected: pairing cap reached (\(Account.maxClientsPerAccount))")
                         let result = RequestResult(
                             method: method, eventKind: nil, clientPubkey: senderPubkey,
-                            status: "blocked", errorMessage: "Pairing limit reached (5)"
+                            status: "blocked", errorMessage: "Pairing limit reached (\(Account.maxClientsPerAccount))"
                         )
                         logAndTrack(result: result, signerPubkey: signerPubkey, clientName: clientName)
                         try await sendErrorResponse(

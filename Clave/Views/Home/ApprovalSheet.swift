@@ -35,10 +35,10 @@ struct ApprovalSheet: View {
             }
             .navigationTitle("Approve Connection")
             .navigationBarTitleDisplayMode(.inline)
-            .alert("Free tier limit reached", isPresented: $capExceeded) {
+            .alert("Connection limit reached", isPresented: $capExceeded) {
                 Button("OK", role: .cancel) { }
             } message: {
-                Text("You've paired the maximum 5 clients. Unpair one from Settings → Clients to continue.")
+                Text(AccountError.connectionCapReached.errorDescription ?? "")
             }
         }
         .snapshotProtected()
@@ -262,7 +262,7 @@ struct ApprovalSheet: View {
         ) ?? ""
         let connected = SharedStorage.getConnectedClients(for: currentSigner)
         let alreadyPaired = connected.contains { $0.pubkey == parsedURI.clientPubkey }
-        if !alreadyPaired && connected.count >= 5 {
+        if !alreadyPaired && connected.count >= Account.maxClientsPerAccount {
             capExceeded = true
             return
         }

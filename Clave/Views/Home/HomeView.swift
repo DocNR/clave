@@ -8,6 +8,7 @@ struct HomeView: View {
     @State private var clientToUnpair: ClientPermissions?
     @State private var showAddAccountSheet = false
     @State private var showAccountCapAlert = false
+    @State private var showConnectionCapAlert = false
     @State private var navigationPath = NavigationPath()
     @Environment(\.scenePhase) private var scenePhase
 
@@ -134,6 +135,11 @@ struct HomeView: View {
             } message: {
                 Text(AccountError.accountCapReached.errorDescription ?? "")
             }
+            .alert("Connection limit reached", isPresented: $showConnectionCapAlert) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(AccountError.connectionCapReached.errorDescription ?? "")
+            }
             .alert(swipeUnpairAlertTitle, isPresented: Binding(
                 get: { clientToUnpair != nil },
                 set: { if !$0 { clientToUnpair = nil } }
@@ -175,6 +181,19 @@ struct HomeView: View {
             UINotificationFeedbackGenerator().notificationOccurred(.warning)
         } else {
             showAddAccountSheet = true
+        }
+    }
+
+    /// Pre-check connection cap before opening ConnectSheet so the user
+    /// hits the alert at the entry point, not after a NIP-46 connect
+    /// request lands in ApprovalSheet (where ApprovalSheet's own check
+    /// stays as defense-in-depth for cross-device pair attempts).
+    private func handlePairNewConnectionTap() {
+        if clients.count >= Account.maxClientsPerAccount {
+            showConnectionCapAlert = true
+            UINotificationFeedbackGenerator().notificationOccurred(.warning)
+        } else {
+            showConnectSheet = true
         }
     }
 
@@ -240,7 +259,7 @@ struct HomeView: View {
 
     private var pairNewConnectionRow: some View {
         Button {
-            showConnectSheet = true
+            handlePairNewConnectionTap()
         } label: {
             HStack(spacing: 12) {
                 pairNewConnectionIcon
@@ -292,7 +311,7 @@ struct HomeView: View {
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 16)
                 Button {
-                    showConnectSheet = true
+                    handlePairNewConnectionTap()
                 } label: {
                     Label("Connect a Client", systemImage: "plus.circle.fill")
                         .font(.body.bold())

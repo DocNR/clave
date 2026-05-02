@@ -294,20 +294,30 @@ extension Account {
         return String(pubkeyHex.prefix(8))
     }
 
-    /// Hard cap on simultaneous accounts per device. AddAccountSheet pre-checks
-    /// this for the Generate flow; AppState.addAccount enforces as a safety
-    /// net for any caller. Headroom for additional accounts will arrive later.
+    /// Hard cap on simultaneous accounts per device. HomeView strip-add pill
+    /// + SettingsView Add Account row pre-check; AppState.addAccount enforces
+    /// as a safety net. Headroom for additional accounts will arrive later.
     static let maxAccountsPerDevice: Int = 4
+
+    /// Hard cap on paired NIP-46 clients per account. HomeView Pair New
+    /// Connection row pre-checks; ApprovalSheet + LightSigner enforce as
+    /// safety nets when a connection request lands without going through
+    /// the UI tap path. Per-account, not global — each account maintains
+    /// its own pairing roster.
+    static let maxClientsPerAccount: Int = 5
 }
 
 /// Errors specific to multi-account management surfaced to the UI layer.
 enum AccountError: LocalizedError {
     case accountCapReached
+    case connectionCapReached
 
     var errorDescription: String? {
         switch self {
         case .accountCapReached:
             return "You can have up to \(Account.maxAccountsPerDevice) accounts on this device. More accounts will be available in the future."
+        case .connectionCapReached:
+            return "You can pair up to \(Account.maxClientsPerAccount) clients per account. Unpair one in Settings → Clients to continue. More connections will be available in the future."
         }
     }
 }
