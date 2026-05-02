@@ -26,6 +26,19 @@ struct SettingsView: View {
             .onAppear {
                 loadSettings()
             }
+            // Stage C: route AccountNavTarget.detail to AccountDetailView.
+            // Per Apple's NavigationStack docs, .navigationDestination must be
+            // placed on a view inside the NavigationStack but OUTSIDE any
+            // container view (Form/List/Section). When placed on a Section
+            // (as in earlier Task 6 wiring), iOS may fail to resolve the
+            // route — the NavigationLink fires but the destination handler
+            // never matches. Hoisted to the Form level here.
+            .navigationDestination(for: AccountNavTarget.self) { target in
+                switch target {
+                case .detail(let pubkey):
+                    AccountDetailView(pubkeyHex: pubkey)
+                }
+            }
         }
     }
 
@@ -61,12 +74,6 @@ struct SettingsView: View {
         }
         .sheet(isPresented: $showAddSheet) {
             AddAccountSheet()
-        }
-        .navigationDestination(for: AccountNavTarget.self) { target in
-            switch target {
-            case .detail(let pubkey):
-                AccountDetailView(pubkeyHex: pubkey)
-            }
         }
     }
 
