@@ -82,6 +82,7 @@ struct HomeView: View {
                         .foregroundStyle(.primary)
                         .textCase(nil)
                 }
+                .listRowBackground(Color.clear)
             }
             .listStyle(.plain)
             .listSectionSpacing(0)
@@ -218,10 +219,10 @@ struct HomeView: View {
         }
         return LinearGradient(
             stops: [
-                .init(color: theme.start.opacity(0.50), location: 0.0),
-                .init(color: theme.end.opacity(0.34), location: 0.35),
-                .init(color: theme.end.opacity(0.20), location: 0.70),
-                .init(color: theme.start.opacity(0.08), location: 1.0),
+                .init(color: theme.start.opacity(0.42), location: 0.0),
+                .init(color: theme.end.opacity(0.22), location: 0.35),
+                .init(color: theme.end.opacity(0.10), location: 0.70),
+                .init(color: theme.start.opacity(0.04), location: 1.0),
             ],
             startPoint: .top,
             endPoint: .bottom

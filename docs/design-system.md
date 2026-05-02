@@ -251,15 +251,20 @@ For sections in the identity zone (strip + slim banner + stats):
 .listRowSeparator(.hidden)
 ```
 
-For functional-zone sections (Connected Clients):
+For functional-zone sections (Connected Clients) — also clear-backed so the ambient gradient bleeds through (otherwise the rows render as an opaque plate floating on the gradient), but keep the default insets and separators for legibility:
 ```swift
+Section {
+    // rows...
 } header: {
     Text("Connected Clients")
         .font(.headline)
         .foregroundStyle(.primary)
         .textCase(nil)   // override default ALL-CAPS section header
 }
+.listRowBackground(Color.clear)
 ```
+
+**Rule:** any List row sitting under the ambient gradient should have `.listRowBackground(Color.clear)`. The gradient is dim enough by mid-screen (10% / 4% at the bottom two stops) that `.primary` and `.secondary` text contrast remain fine; the visual gain from removing the opaque-plate effect is large.
 
 ### Stats row (the gradient-zone "in-between" surface)
 
@@ -287,16 +292,18 @@ The screen background carries the active account's identity even outside the str
 ```swift
 LinearGradient(
     stops: [
-        .init(color: theme.start.opacity(0.50), location: 0.0),
-        .init(color: theme.end.opacity(0.34),   location: 0.35),
-        .init(color: theme.end.opacity(0.20),   location: 0.70),
-        .init(color: theme.start.opacity(0.08), location: 1.0),
+        .init(color: theme.start.opacity(0.42), location: 0.0),
+        .init(color: theme.end.opacity(0.22),   location: 0.35),
+        .init(color: theme.end.opacity(0.10),   location: 0.70),
+        .init(color: theme.start.opacity(0.04), location: 1.0),
     ],
     startPoint: .top,
     endPoint:   .bottom
 )
 .ignoresSafeArea()
 ```
+
+The fade is intentionally steep through the upper third — most of the identity tint sits behind the strip and slim banner where it reinforces the active-account signal, then drops to near-transparent for the functional zone below so list content stays primary.
 
 Apply on the **List** alongside `.scrollContentBackground(.hidden)` — both modifiers must be on the same view. Applying `.background(...)` on the enclosing NavigationStack appears to work in some Xcode previews but is occluded inside a TabView on iOS 26+ by the NavigationStack's own system-background backing. Pin the gradient to the List itself.
 
