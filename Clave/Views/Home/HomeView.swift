@@ -84,6 +84,7 @@ struct HomeView: View {
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
             .navigationTitle("Clave")
+            .navigationBarTitleDisplayMode(.inline)
             .onAppear {
                 refreshData()
                 appState.fetchProfilesForAllAccountsIfNeeded()
@@ -176,10 +177,10 @@ struct HomeView: View {
         }
         return LinearGradient(
             stops: [
-                .init(color: theme.start.opacity(0.35), location: 0.0),
-                .init(color: theme.end.opacity(0.22), location: 0.35),
-                .init(color: theme.end.opacity(0.14), location: 0.70),
-                .init(color: theme.start.opacity(0.10), location: 1.0),
+                .init(color: theme.start.opacity(0.28), location: 0.0),
+                .init(color: theme.end.opacity(0.18), location: 0.35),
+                .init(color: theme.end.opacity(0.12), location: 0.70),
+                .init(color: theme.start.opacity(0.06), location: 1.0),
             ],
             startPoint: .top,
             endPoint: .bottom

@@ -5,41 +5,33 @@ import SwiftUI
 ///
 /// - Auto-hides when `accounts.count == 1` (single-account user sees same
 ///   Home as build 31; no UI noise).
-/// - Active pill: 3pt gradient ring matching account's AccountTheme.
+/// - Active pill: 5pt gradient ring matching account's AccountTheme.
+/// - Inactive pill: 1pt subtle hairline ring (Color.secondary.opacity(0.25)).
+/// - Sits directly on HomeView's ambient gradient — no frosted card.
 /// - Tap non-active pill → switchToAccount.
 /// - Tap active pill → push AccountDetailView (via NavigationLink in HomeView).
 /// - Long-press any pill → push AccountDetailView WITHOUT switching active.
-/// - Trailing "+" pill → present AddAccountSheet (Task 3).
+/// - Trailing "+" pill → present AddAccountSheet.
 struct AccountStripView: View {
     @Environment(AppState.self) private var appState
     @Binding var showAddSheet: Bool
 
-    /// Hardcoded — ring + pill sizing tuned per spec mockups (v4).
-    private let pillSize: CGFloat = 38
-    private let ringPadding: CGFloat = 3
+    /// Hardcoded — sizing locked in the 2026-05-02 Home redesign brainstorm.
+    private let pillSize: CGFloat = 60
+    private let ringPadding: CGFloat = 5
 
     var body: some View {
         if appState.accounts.count > 1 {
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 14) {
+                HStack(spacing: 18) {
                     ForEach(appState.accounts) { account in
                         accountPill(account)
                     }
                     addPill
                 }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 10)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
             }
-            .background(
-                RoundedRectangle(cornerRadius: 14)
-                    .fill(.ultraThinMaterial)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14)
-                            .stroke(Color.white.opacity(0.4), lineWidth: 1)
-                    )
-            )
-            .padding(.horizontal, 12)
-            .padding(.top, 8)
         }
     }
 
@@ -91,27 +83,24 @@ struct AccountStripView: View {
             showAddSheet = true
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
         } label: {
-            VStack(spacing: 4) {
+            VStack(spacing: 6) {
                 ZStack {
                     Circle()
                         .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [3, 3]))
                         .foregroundStyle(Color.secondary.opacity(0.6))
                         .frame(width: pillSize, height: pillSize)
                     Image(systemName: "plus")
-                        .font(.system(size: 17, weight: .semibold))
+                        .font(.system(size: 22, weight: .semibold))
                         .foregroundStyle(Color.secondary)
                 }
                 Text("Add")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(Color.secondary)
-                    .frame(maxWidth: pillSize + 8)
+                    .frame(maxWidth: pillSize + 14)
             }
         }
         .buttonStyle(.plain)
     }
-
-    // MARK: - Helpers
-
 }
 
 // MARK: - AccountPillView
@@ -142,7 +131,7 @@ private struct AccountPillView: View {
                 .resizable()
                 .scaledToFill()
         } else {
-            AccountAvatarPlaceholder(label: labelText)
+            AccountAvatarPlaceholder(label: labelText, size: pillSize)
         }
     }
 
@@ -158,7 +147,7 @@ private struct AccountPillView: View {
                 onSwitch()
             }
         } label: {
-            VStack(spacing: 4) {
+            VStack(spacing: 6) {
                 ZStack {
                     if isActive {
                         Circle()
@@ -167,17 +156,22 @@ private struct AccountPillView: View {
                                                  endPoint: .bottomTrailing))
                             .frame(width: pillSize + ringPadding * 2,
                                    height: pillSize + ringPadding * 2)
+                    } else {
+                        Circle()
+                            .stroke(Color.secondary.opacity(0.25), lineWidth: 1)
+                            .frame(width: pillSize + ringPadding * 2,
+                                   height: pillSize + ringPadding * 2)
                     }
                     avatarView
                         .frame(width: pillSize, height: pillSize)
                         .clipShape(Circle())
                 }
                 Text(labelText)
-                    .font(.system(size: 9, weight: isActive ? .heavy : .semibold))
+                    .font(.system(size: 11, weight: isActive ? .heavy : .semibold))
                     .foregroundStyle(isActive ? theme.accent : Color.primary.opacity(0.8))
                     .lineLimit(1)
                     .truncationMode(.tail)
-                    .frame(maxWidth: pillSize + 8)
+                    .frame(maxWidth: pillSize + 14)
             }
         }
         .buttonStyle(.plain)
@@ -191,9 +185,12 @@ private struct AccountPillView: View {
 // MARK: - AccountAvatarPlaceholder
 
 /// Letter-on-gradient avatar placeholder. Real PFPs from kind:0 picture
-/// URLs land here in a future iteration; for now we always show the letter.
+/// URLs land here when cached; for accounts without a fetched profile we
+/// always show the letter. Initial-letter font scales with the avatar size
+/// (size * 0.37 keeps the letter visually centered at any pill diameter).
 private struct AccountAvatarPlaceholder: View {
     let label: String
+    let size: CGFloat
 
     var body: some View {
         let initial = String(label.first ?? "?").uppercased()
@@ -203,7 +200,7 @@ private struct AccountAvatarPlaceholder: View {
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing)
             Text(initial)
-                .font(.system(size: 14, weight: .heavy))
+                .font(.system(size: size * 0.37, weight: .heavy))
                 .foregroundStyle(Color.white)
         }
     }

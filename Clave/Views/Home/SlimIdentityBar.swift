@@ -1,42 +1,89 @@
 import SwiftUI
 
-/// Text-only identity row below AccountStripView. Shows current account's
-/// `@petname • npub… [copy]`. No avatar (strip already shows it).
-/// Background carries a 22% gradient wash matching the active account.
+/// Themed mini-banner identity row below AccountStripView. Solid gradient
+/// background (matches AccountDetailView's full-bleed banner in miniature),
+/// mini avatar, @petname, npub, copy button, chevron. Tap anywhere on the row
+/// pushes AccountDetailView for the current account — same path the active-pill
+/// tap uses, via `appState.pendingDetailPubkey`.
+///
+/// 2026-05-02 redesign: replaces the build-38 wash + accent-stroke treatment
+/// with a solid theme gradient for visual continuity with the detail view.
 struct SlimIdentityBar: View {
     @Environment(AppState.self) private var appState
 
     var body: some View {
         if let current = appState.currentAccount {
             let theme = AccountTheme.forAccount(pubkeyHex: current.pubkeyHex)
-            HStack(spacing: 10) {
-                Text("@\(displayLabel(for: current))")
-                    .font(.system(size: 12, weight: .heavy))
-                    .foregroundStyle(.primary)
-                Text(truncatedNpub)
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Spacer(minLength: 4)
-                copyButton
+            Button {
+                appState.pendingDetailPubkey = current.pubkeyHex
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            } label: {
+                HStack(spacing: 12) {
+                    miniAvatar(for: current)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("@\(current.displayLabel)")
+                            .font(.system(size: 14, weight: .heavy))
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                        Text(truncatedNpub)
+                            .font(.system(size: 9.5, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.85))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                    Spacer(minLength: 4)
+                    copyButton
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.85))
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .background(
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(LinearGradient(
+                            colors: [theme.start, theme.end],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing))
+                        .shadow(color: theme.start.opacity(0.25), radius: 8, x: 0, y: 1)
+                )
             }
+            .buttonStyle(.plain)
             .padding(.horizontal, 14)
-            .padding(.vertical, 9)
-            .background(
-                RoundedRectangle(cornerRadius: 11)
-                    .fill(LinearGradient(
-                        colors: [theme.start.opacity(0.22), theme.end.opacity(0.16)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 11)
-                            .stroke(theme.start.opacity(0.35), lineWidth: 1)
-                    )
-            )
-            .padding(.horizontal, 12)
-            .padding(.top, 8)
+            .padding(.bottom, 12)
         }
+    }
+
+    @ViewBuilder
+    private func miniAvatar(for account: Account) -> some View {
+        let initial = String(account.displayLabel.first ?? "?").uppercased()
+        ZStack {
+            if let img = cachedAvatar(for: account) {
+                Image(uiImage: img)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                Color.white.opacity(0.22)
+                Text(initial)
+                    .font(.system(size: 13, weight: .heavy))
+                    .foregroundStyle(.white)
+            }
+        }
+        .frame(width: 28, height: 28)
+        .clipShape(Circle())
+        .overlay(Circle().stroke(Color.white.opacity(0.4), lineWidth: 1.5))
+    }
+
+    /// Per-account cached profile image (same source as AccountStripView).
+    private func cachedAvatar(for account: Account) -> UIImage? {
+        guard let container = FileManager.default.containerURL(
+            forSecurityApplicationGroupIdentifier: SharedConstants.appGroup
+        ) else { return nil }
+        let url = container.appendingPathComponent("cached-profile-\(account.pubkeyHex).dat")
+        guard let data = try? Data(contentsOf: url),
+              let img = UIImage(data: data) else { return nil }
+        return img
     }
 
     private var copyButton: some View {
@@ -46,21 +93,14 @@ struct SlimIdentityBar: View {
         } label: {
             Image(systemName: "doc.on.doc")
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .frame(width: 22, height: 22)
+                .foregroundStyle(.white)
+                .frame(width: 26, height: 26)
                 .background(
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(Color.white.opacity(0.92))
-                        .shadow(color: Color.black.opacity(0.06), radius: 1, y: 1)
+                    RoundedRectangle(cornerRadius: 7)
+                        .fill(Color.white.opacity(0.22))
                 )
         }
         .buttonStyle(.plain)
-    }
-
-    private func displayLabel(for account: Account) -> String {
-        if let p = account.petname, !p.isEmpty { return p }
-        if let d = account.profile?.displayName, !d.isEmpty { return d }
-        return String(account.pubkeyHex.prefix(8))
     }
 
     private var truncatedNpub: String {
