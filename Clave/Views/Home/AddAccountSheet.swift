@@ -22,6 +22,10 @@ struct AddAccountSheet: View {
     @State private var errorMessage: String?
     @State private var isWorking = false
 
+    private var trimmedNsec: String {
+        nsecInput.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -68,7 +72,7 @@ struct AddAccountSheet: View {
                             Spacer()
                         }
                     }
-                    .disabled(isWorking || (mode == .paste && nsecInput.trimmingCharacters(in: .whitespaces).isEmpty))
+                    .disabled(isWorking || (mode == .paste && trimmedNsec.isEmpty))
                 }
             }
             .navigationTitle("Add Account")
@@ -79,9 +83,11 @@ struct AddAccountSheet: View {
                 }
             }
         }
+        .presentationDetents([.medium, .large])
     }
 
     private func performAdd() {
+        guard !isWorking else { return }
         errorMessage = nil
         isWorking = true
         let petname = petnameInput.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -92,13 +98,12 @@ struct AddAccountSheet: View {
             case .generate:
                 _ = try appState.generateAccount(petname: petnameOrNil)
             case .paste:
-                let trimmed = nsecInput.trimmingCharacters(in: .whitespacesAndNewlines)
-                _ = try appState.addAccount(nsec: trimmed, petname: petnameOrNil)
+                _ = try appState.addAccount(nsec: trimmedNsec, petname: petnameOrNil)
             }
             UINotificationFeedbackGenerator().notificationOccurred(.success)
             dismiss()
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = "Could not add account: \(error.localizedDescription)"
             UINotificationFeedbackGenerator().notificationOccurred(.error)
         }
         isWorking = false
