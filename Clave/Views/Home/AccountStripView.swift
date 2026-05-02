@@ -14,7 +14,10 @@ import SwiftUI
 /// - Trailing "+" pill → present AddAccountSheet.
 struct AccountStripView: View {
     @Environment(AppState.self) private var appState
-    @Binding var showAddSheet: Bool
+    /// Called when the user taps the trailing "+" pill. The parent decides
+    /// whether to open AddAccountSheet or show the cap-reached alert (so the
+    /// alert fires BEFORE sheet presentation, not after).
+    let onAddTapped: () -> Void
 
     /// Hardcoded — sizing locked in the 2026-05-02 Home redesign brainstorm.
     private let pillSize: CGFloat = 60
@@ -80,7 +83,7 @@ struct AccountStripView: View {
 
     private var addPill: some View {
         Button {
-            showAddSheet = true
+            onAddTapped()
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
         } label: {
             VStack(spacing: 6) {
@@ -127,9 +130,15 @@ private struct AccountPillView: View {
     @ViewBuilder
     private var avatarView: some View {
         if let cachedImage {
-            Image(uiImage: cachedImage)
-                .resizable()
-                .scaledToFill()
+            // Opaque backing so PFPs with transparent backgrounds (robohash,
+            // some kind:0 avatars) don't reveal the gradient ring through the
+            // image. Uses systemBackground so it adapts light/dark.
+            ZStack {
+                Color(.systemBackground)
+                Image(uiImage: cachedImage)
+                    .resizable()
+                    .scaledToFill()
+            }
         } else {
             AvatarView(pubkeyHex: account.pubkeyHex,
                        name: labelText,

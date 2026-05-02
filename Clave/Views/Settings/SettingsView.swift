@@ -4,6 +4,7 @@ import LocalAuthentication
 struct SettingsView: View {
     @Environment(AppState.self) private var appState
     @State private var showAddSheet = false
+    @State private var showCapAlert = false
     @State private var proxyURL = ""
     @State private var registrationStatus = ""
     @State private var devSettings = DeveloperSettings.shared
@@ -67,13 +68,23 @@ struct SettingsView: View {
                 }
             }
             Button {
-                showAddSheet = true
+                if appState.accounts.count >= Account.maxAccountsPerDevice {
+                    showCapAlert = true
+                    UINotificationFeedbackGenerator().notificationOccurred(.warning)
+                } else {
+                    showAddSheet = true
+                }
             } label: {
                 Label("Add Account", systemImage: "plus.circle")
             }
         }
         .sheet(isPresented: $showAddSheet) {
             AddAccountSheet()
+        }
+        .alert("Account limit reached", isPresented: $showCapAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(AccountError.accountCapReached.errorDescription ?? "")
         }
     }
 

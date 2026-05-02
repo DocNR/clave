@@ -7,6 +7,7 @@ struct HomeView: View {
     @State private var showConnectSheet = false
     @State private var clientToUnpair: ClientPermissions?
     @State private var showAddAccountSheet = false
+    @State private var showAccountCapAlert = false
     @State private var navigationPath = NavigationPath()
     @Environment(\.scenePhase) private var scenePhase
 
@@ -37,7 +38,7 @@ struct HomeView: View {
 
                 // Stage C: strip + slim bar replace the build-37 Menu identity bar.
                 Section {
-                    AccountStripView(showAddSheet: $showAddAccountSheet)
+                    AccountStripView(onAddTapped: handleAddAccountTap)
                     SlimIdentityBar()
                         .padding(.bottom, 8)
                 }
@@ -48,7 +49,6 @@ struct HomeView: View {
                 // Stats
                 Section {
                     statsRow
-                        .padding(.bottom, 8)
                 }
                 .listRowInsets(EdgeInsets())
                 .listRowBackground(Color.clear)
@@ -82,7 +82,7 @@ struct HomeView: View {
                 }
             }
             .listStyle(.plain)
-            .listSectionSpacing(.compact)
+            .listSectionSpacing(0)
             .scrollContentBackground(.hidden)
             .navigationTitle("Clave")
             .navigationBarTitleDisplayMode(.inline)
@@ -129,6 +129,11 @@ struct HomeView: View {
             .sheet(isPresented: $showAddAccountSheet) {
                 AddAccountSheet()
             }
+            .alert("Account limit reached", isPresented: $showAccountCapAlert) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(AccountError.accountCapReached.errorDescription ?? "")
+            }
             .alert(swipeUnpairAlertTitle, isPresented: Binding(
                 get: { clientToUnpair != nil },
                 set: { if !$0 { clientToUnpair = nil } }
@@ -160,6 +165,17 @@ struct HomeView: View {
         }
         .background(homeBackgroundGradient.ignoresSafeArea())
         .animation(.easeInOut(duration: 0.3), value: appState.currentAccount?.pubkeyHex)
+    }
+
+    // MARK: - Add-account routing
+
+    private func handleAddAccountTap() {
+        if appState.accounts.count >= Account.maxAccountsPerDevice {
+            showAccountCapAlert = true
+            UINotificationFeedbackGenerator().notificationOccurred(.warning)
+        } else {
+            showAddAccountSheet = true
+        }
     }
 
     // MARK: - Unpair alert helpers

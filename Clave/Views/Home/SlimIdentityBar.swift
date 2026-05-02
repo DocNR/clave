@@ -60,6 +60,10 @@ struct SlimIdentityBar: View {
         let initial = String(account.displayLabel.first ?? "?").uppercased()
         ZStack {
             if let img = cachedAvatar(for: account) {
+                // Opaque backing so PFPs with transparent backgrounds (robohash,
+                // some kind:0 avatars) don't show the slim banner's theme
+                // gradient through the image.
+                Color(.systemBackground)
                 Image(uiImage: img)
                     .resizable()
                     .scaledToFill()
