@@ -629,10 +629,17 @@ final class AppState {
         let bech32 = try keys.secretKey().toBech32()
         let pubkeyHex = keys.publicKey().toHex()
 
-        // Already in accounts? Just switch + return.
+        // Already in accounts? Just switch + return. (Dedupe wins over cap;
+        // re-pasting an existing nsec is never a NEW account.)
         if let existing = accounts.first(where: { $0.pubkeyHex == pubkeyHex }) {
             switchToAccount(pubkey: pubkeyHex)
             return existing
+        }
+
+        // Cap check for NEW accounts only. UI layer pre-checks for the
+        // Generate flow; this guard catches Paste-nsec and any future caller.
+        guard accounts.count < Account.maxAccountsPerDevice else {
+            throw AccountError.accountCapReached
         }
 
         // Save to Keychain first — if this fails, no UserDefaults rows

@@ -23,7 +23,7 @@ struct AccountStripView: View {
     var body: some View {
         if appState.accounts.count > 1 {
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 18) {
+                HStack(spacing: 14) {
                     ForEach(appState.accounts) { account in
                         accountPill(account)
                     }
@@ -131,7 +131,9 @@ private struct AccountPillView: View {
                 .resizable()
                 .scaledToFill()
         } else {
-            AccountAvatarPlaceholder(label: labelText, size: pillSize)
+            AvatarView(pubkeyHex: account.pubkeyHex,
+                       name: labelText,
+                       size: pillSize)
         }
     }
 
@@ -182,26 +184,3 @@ private struct AccountPillView: View {
     }
 }
 
-// MARK: - AccountAvatarPlaceholder
-
-/// Letter-on-gradient avatar placeholder. Real PFPs from kind:0 picture
-/// URLs land here when cached; for accounts without a fetched profile we
-/// always show the letter. Initial-letter font scales with the avatar size
-/// (size * 0.37 keeps the letter visually centered at any pill diameter).
-private struct AccountAvatarPlaceholder: View {
-    let label: String
-    let size: CGFloat
-
-    var body: some View {
-        let initial = String(label.first ?? "?").uppercased()
-        ZStack {
-            LinearGradient(
-                colors: [Color(white: 0.78), Color(white: 0.62)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing)
-            Text(initial)
-                .font(.system(size: size * 0.37, weight: .heavy))
-                .foregroundStyle(Color.white)
-        }
-    }
-}

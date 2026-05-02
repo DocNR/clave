@@ -21,6 +21,7 @@ struct AddAccountSheet: View {
     @State private var petnameInput: String = ""
     @State private var errorMessage: String?
     @State private var isWorking = false
+    @State private var showCapAlert = false
 
     private var trimmedNsec: String {
         nsecInput.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -84,10 +85,23 @@ struct AddAccountSheet: View {
             }
         }
         .presentationDetents([.medium, .large])
+        .presentationBackground(Color(.systemGroupedBackground))
+        .alert("Account limit reached", isPresented: $showCapAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(AccountError.accountCapReached.errorDescription ?? "")
+        }
     }
 
     private func performAdd() {
         guard !isWorking else { return }
+        // Pre-check for Generate; Paste-nsec defers to AppState's guard so
+        // dedupe of existing accounts wins over the cap.
+        if mode == .generate, appState.accounts.count >= Account.maxAccountsPerDevice {
+            showCapAlert = true
+            UINotificationFeedbackGenerator().notificationOccurred(.warning)
+            return
+        }
         errorMessage = nil
         isWorking = true
         let petname = petnameInput.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -102,6 +116,9 @@ struct AddAccountSheet: View {
             }
             UINotificationFeedbackGenerator().notificationOccurred(.success)
             dismiss()
+        } catch let error as AccountError where error == .accountCapReached {
+            showCapAlert = true
+            UINotificationFeedbackGenerator().notificationOccurred(.warning)
         } catch {
             errorMessage = "Could not add account: \(error.localizedDescription)"
             UINotificationFeedbackGenerator().notificationOccurred(.error)

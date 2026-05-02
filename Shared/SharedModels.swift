@@ -293,6 +293,23 @@ extension Account {
         if let d = profile?.displayName, !d.isEmpty { return d }
         return String(pubkeyHex.prefix(8))
     }
+
+    /// Hard cap on simultaneous accounts per device. AddAccountSheet pre-checks
+    /// this for the Generate flow; AppState.addAccount enforces as a safety
+    /// net for any caller. Headroom for additional accounts will arrive later.
+    static let maxAccountsPerDevice: Int = 4
+}
+
+/// Errors specific to multi-account management surfaced to the UI layer.
+enum AccountError: LocalizedError {
+    case accountCapReached
+
+    var errorDescription: String? {
+        switch self {
+        case .accountCapReached:
+            return "You can have up to \(Account.maxAccountsPerDevice) accounts on this device. More accounts will be available in the future."
+        }
+    }
 }
 
 /// Queued pair/unpair operation awaiting delivery to the proxy.
