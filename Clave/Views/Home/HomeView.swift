@@ -127,9 +127,8 @@ struct HomeView: View {
             }) {
                 ConnectSheet()
             }
-            // AddAccountSheet placeholder — Task 3 replaces this body.
             .sheet(isPresented: $showAddAccountSheet) {
-                Text("AddAccountSheet placeholder — coming in Task 3")
+                AddAccountSheet()
             }
             .alert("Unpair Client?", isPresented: Binding(
                 get: { clientToUnpair != nil },
