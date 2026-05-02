@@ -38,10 +38,11 @@ struct HomeView: View {
                 }
 
                 // Stage C: strip + slim bar replace the build-37 Menu identity bar.
+                // SlimIdentityBar manages its own outer padding (12pt bottom);
+                // no additional spacing added here.
                 Section {
                     AccountStripView(onAddTapped: handleAddAccountTap)
                     SlimIdentityBar()
-                        .padding(.bottom, 8)
                 }
                 .listRowInsets(EdgeInsets())
                 .listRowBackground(Color.clear)
@@ -236,7 +237,6 @@ struct HomeView: View {
             statCard(title: "Pending", value: "\(pendingCount)", icon: "clock.badge.exclamationmark.fill", color: .orange)
         }
         .padding(.horizontal)
-        .padding(.bottom, 8)
     }
 
     private func statCard(title: String, value: String, icon: String, color: Color) -> some View {

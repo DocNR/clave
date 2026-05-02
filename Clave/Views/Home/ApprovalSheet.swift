@@ -9,7 +9,7 @@ struct ApprovalSheet: View {
     @State private var selectedTrust: TrustLevel
     @State private var kindOverrides: [Int: Bool] = [:]
     @State private var showPermissions = false
-    @State private var capExceeded = false
+    @State private var showConnectionCapAlert = false
 
     private let protectedKinds: Set<Int> = SharedStorage.getProtectedKinds()
 
@@ -35,7 +35,7 @@ struct ApprovalSheet: View {
             }
             .navigationTitle("Approve Connection")
             .navigationBarTitleDisplayMode(.inline)
-            .alert("Connection limit reached", isPresented: $capExceeded) {
+            .alert("Connection limit reached", isPresented: $showConnectionCapAlert) {
                 Button("OK", role: .cancel) { }
             } message: {
                 Text(AccountError.connectionCapReached.errorDescription ?? "")
@@ -263,7 +263,7 @@ struct ApprovalSheet: View {
         let connected = SharedStorage.getConnectedClients(for: currentSigner)
         let alreadyPaired = connected.contains { $0.pubkey == parsedURI.clientPubkey }
         if !alreadyPaired && connected.count >= Account.maxClientsPerAccount {
-            capExceeded = true
+            showConnectionCapAlert = true
             return
         }
 

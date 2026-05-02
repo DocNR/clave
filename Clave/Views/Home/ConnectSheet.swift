@@ -84,6 +84,7 @@ struct ConnectSheet: View {
                 Text(connectionError ?? "Unknown error")
             }
         }
+        .presentationBackground(Color(.systemGroupedBackground))
         .snapshotProtected()
     }
 

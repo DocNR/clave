@@ -117,7 +117,7 @@ struct AccountDetailView: View {
                     .resizable()
                     .scaledToFill()
             } else {
-                Color.white.opacity(0.25)
+                Color.white.opacity(0.22)
                 Text(initial)
                     .font(.system(size: 22, weight: .heavy))
                     .foregroundStyle(.white)

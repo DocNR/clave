@@ -1,8 +1,24 @@
 # Clave Design System
 
-_Last updated: 2026-05-02. Derived from the Home tab redesign that shipped on `feat/multi-account` (commits `eb42583` through `1566add`). Covers visual tokens, layout patterns, and code conventions used across the app._
+_Last updated: 2026-05-02. Derived from the Home tab redesign that shipped on `feat/multi-account`. Covers visual tokens, layout patterns, and code conventions._
 
-The Home tab is the reference implementation for everything in this doc. When extending to other surfaces (ConnectSheet, AccountDetailView redesigns, etc.), reach for these tokens and patterns first; deviate only with a written reason.
+The Home tab is the reference implementation. When extending to other surfaces (ConnectSheet, AccountDetailView redesigns, etc.), reach for these tokens and patterns first; deviate only with a written reason.
+
+## Cross-platform applicability
+
+This doc is the source of truth for Clave's design language across the iOS app and the [clave.casa](https://github.com/DocNR/clave-casa) web companion. iOS is the reference implementation. clave.casa already mirrors `Shared/AccountTheme.swift`'s palette + SHA-256 hash mapping byte-for-byte and the `displayLabel` resolution rule.
+
+| Carries directly to clave.casa | iOS-only (needs platform equivalent) |
+|---|---|
+| AccountTheme palette (RGB values) | SwiftUI modifiers (`.listSectionSpacing`, `.scrollContentBackground`, etc.) |
+| displayLabel resolution rule (petname → displayName → prefix(8)) | Haptics map (`UIImpactFeedbackGenerator`) — translate to subtle animation / sound on web |
+| Identity-zone vs functional-zone philosophy | Sheet conventions (`.presentationBackground`, detents) — translate to modal/dialog patterns on web |
+| Avatar treatments (cached PFP with opaque backing, pubkey-hue placeholder, white-on-translucent on saturated bg) | Toolbar conventions (NavigationBar) — translate to web header |
+| Spacing ratios (proportions translate; pt → px or rem on web) | Specific SwiftUI Section/List structure |
+| Copy patterns + cap dialog strings (sourced from `AccountError`) | Pre-check pattern uses Swift closures; web uses event handlers / route guards |
+| Anti-patterns (white-on-grey, transparent PFP without backing, etc.) | iOS-specific bug recovery details |
+
+When in doubt: visual *tokens* (color, type, spacing) are universal; *chrome conventions* (sheets, toolbars, haptics) need translation.
 
 ---
 
@@ -98,7 +114,7 @@ iOS system font; no custom typefaces. Sizes are precise — small variances read
 | Strip pill label (active) | `.system(size: 11)` | `.heavy` |
 | Strip pill label (inactive) | `.system(size: 11)` | `.semibold` |
 | Strip "Add" pill label | `.system(size: 11)` | `.semibold` |
-| Strip pill avatar initial | `.system(size: pillSize * 0.37)` | `.heavy` |
+| Strip pill avatar initial (via `AvatarView`) | `.system(size: size * 0.35)` mono (pubkey fallback) or `.system(size: size * 0.4)` proportional (name initials) | `.bold` |
 | Slim banner petname | `.system(size: 14)` | `.heavy` |
 | Slim banner npub | `.system(size: 9.5, design: .monospaced)` | `.medium` |
 | Slim banner mini-avatar initial | `.system(size: 13)` | `.heavy` |
@@ -139,7 +155,7 @@ ZStack {
 
 Cache file: `<app-group-container>/cached-profile-<pubkeyHex>.dat`. Read synchronously in view body — files are small (~50KB).
 
-### B. Pubkey-hue placeholder (no PFP)
+### B. Pubkey-hue placeholder (no PFP, neutral background)
 
 Use `AvatarView`:
 
@@ -149,37 +165,45 @@ AvatarView(pubkeyHex: account.pubkeyHex,
            size: pillSize)
 ```
 
-Generates unique gradient + initials. Prefer over a flat-color placeholder.
+Generates unique gradient + initials (`size * 0.35` monospaced when falling back to pubkey prefix; `size * 0.4` proportional when using `name` initials, up to two letters: "AL" for "Alice", "JB" for "Joe Bloggs"). Prefer over a flat-color placeholder.
 
-### C. Letter-on-translucent (slim banner mini-avatar)
+### C. Letter-on-translucent (sitting on a saturated theme gradient)
 
-For 24-32pt mini avatars sitting *on* a saturated theme gradient:
+For mini avatars *inside* the slim banner or AccountDetailView's banner, where the surface is already a saturated theme gradient. Treatment B's pubkey-hue gradient would clash; flat white with translucency reads cleanly.
 
 ```swift
 ZStack {
     Color.white.opacity(0.22)
     Text(initial)
-        .font(.system(size: 13, weight: .heavy))
+        .font(.system(size: size * 0.46, weight: .heavy))
         .foregroundStyle(.white)
 }
-.frame(width: 28, height: 28)
+.frame(width: size, height: size)
 .clipShape(Circle())
-.overlay(Circle().stroke(Color.white.opacity(0.4), lineWidth: 1.5))
+.overlay(Circle().stroke(Color.white.opacity(0.4), lineWidth: borderWidth))
 ```
 
-White-on-translucent-white reads cleanly against the saturated theme gradient. Only use when a cached PFP isn't available; with a PFP, fall back to treatment A.
+Single character only (`displayLabel.first`), unlike treatment B's 1-2 letter rule. Border thickness scales with diameter (~5% — 1.5pt at 28pt mini, 2pt at 56pt banner avatar).
+
+### Treatment selection rule
+
+| Context | Treatment |
+|---|---|
+| Cached PFP exists (any surface) | A — Image + opaque backing |
+| Empty PFP, sitting on neutral / system background (strip pills, ConnectedClient rows) | B — AvatarView pubkey-hue |
+| Empty PFP, sitting on saturated theme gradient (slim banner, AccountDetailView banner) | C — letter-on-white-22% |
 
 ### Sizing scale
 
-| Slot | Diameter |
-|---|---|
-| Strip pill avatar | 60pt (active ring +5pt padding on each side) |
-| Slim banner mini-avatar | 28pt |
-| AccountDetailView banner avatar | 56pt |
-| Connected Clients row avatar | 32pt |
-| Settings accounts row avatar | 32pt |
+| Slot | Diameter | Initial font | Border |
+|---|---|---|---|
+| Strip pill avatar | 60pt (active ring + 5pt padding each side) | `size * 0.35` mono / `size * 0.4` proportional (via AvatarView) | none on avatar; ring is the frame |
+| Slim banner mini-avatar | 28pt | 13pt heavy (~`size * 0.46`) | 1.5pt white-40% |
+| AccountDetailView banner avatar | 56pt | 22pt heavy (~`size * 0.39`) | 2pt white-40% |
+| Connected Clients row avatar | 32pt | via AvatarView (size * 0.35 / 0.4) | none |
+| Settings accounts row avatar | 32pt | via AvatarView | none |
 
-Initial-letter font is always `size * 0.37`. The strip's avatar placeholder picks this automatically; static sizes (banner, slim mini) hardcode the matching value.
+Treatment-C avatars (slim banner, AccountDetailView) use slightly looser font ratios than AvatarView's because they render a single character at a fixed visual weight; the ratio "feels right" rather than scaling mathematically. Border thickness scales linearly with diameter at ~5%.
 
 ---
 
@@ -200,15 +224,17 @@ No frosted card, no background — pills sit directly on `HomeView`'s ambient gr
 ### Slim banner (`SlimIdentityBar`)
 
 ```
-.padding(.horizontal, 16)
-.padding(.vertical,   12)
+.padding(.horizontal, 16)        // inner
+.padding(.vertical,   12)        // inner
 RoundedRectangle(cornerRadius: 12)
 .shadow(color: theme.start.opacity(0.25), radius: 8, x: 0, y: 1)
-.padding(.horizontal, 14)   // outer
-.padding(.bottom,     12)   // outer
+.padding(.horizontal, 14)        // outer
+.padding(.bottom,     12)        // outer — single source of truth
 ```
 
-Tap target = entire row (it's wrapped in a Button). Copy button is a nested Button — iOS handles the gesture priority.
+`SlimIdentityBar` owns its own outer bottom padding; consumers (HomeView) must NOT add `.padding(.bottom, ...)` on the invocation site or you get double-counted spacing.
+
+Tap target = entire row (wrapped in a Button). Copy button is a nested Button — iOS handles the gesture priority. Tapping the copy area copies the npub; tapping anywhere else pushes AccountDetailView.
 
 ### List sections
 
@@ -234,6 +260,14 @@ For functional-zone sections (Connected Clients):
         .textCase(nil)   // override default ALL-CAPS section header
 }
 ```
+
+### Stats row (the gradient-zone "in-between" surface)
+
+The 3-card stats row sits in the identity gradient zone but uses `.background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))` for each card. Material is acceptable here because the cards are small inline elements (not a wrapper around the identity strip) — they let the ambient gradient bleed through while remaining legibly grouped.
+
+**Rule:** `.ultraThinMaterial` is OK on small inline cards within the gradient zone (stat cards, status pills, etc.). It is NOT OK as a wrapper around identity elements — that's how we got the build-38 frosted-card-around-the-strip that the redesign deleted.
+
+Stats row internal layout: `HStack(spacing: 12)`, `.padding(.horizontal)` on the row, no internal bottom padding. Section spacing carries the gap to the next section.
 
 ### AccountDetailView banner
 
@@ -270,6 +304,8 @@ Animate transitions on account switch:
 ```swift
 .animation(.easeInOut(duration: 0.3), value: appState.currentAccount?.pubkeyHex)
 ```
+
+**Defensive fallback** when `appState.currentAccount == nil` (first launch, post-import edge cases): use `AccountTheme.palette[0]` so the screen never renders gradient-less. The fallback should never fire in normal use; AppState guards against empty signerPubkeyHex elsewhere.
 
 **Don't** put this gradient on functional-zone surfaces (sheets, settings views). It belongs to the Home identity zone.
 
@@ -365,6 +401,13 @@ enum AccountError: LocalizedError {
 ```
 
 UI alerts source their message from `AccountError.errorDescription` so a copy change happens in one place. Wire-level error responses (e.g. NIP-46 over the wire to a connecting client) use simpler English since the audience is a different app, not the user.
+
+### State variable naming
+
+Cap-alert state vars follow this convention:
+- `showCapAlert` — when the surface only handles ONE kind of cap (AddAccountSheet, SettingsView Add-Account row both only deal with the account cap).
+- `showAccountCapAlert` / `showConnectionCapAlert` — when the surface handles MULTIPLE caps and disambiguation matters (HomeView routes both).
+- ApprovalSheet uses `showConnectionCapAlert` since it only deals with the connection cap; the explicit name aligns with HomeView's convention.
 
 ---
 
@@ -503,6 +546,8 @@ White is appropriate on saturated theme gradients (banner, slim banner, active r
 .presentationDetents([.medium, .large])
 .presentationBackground(Color(.systemGroupedBackground))
 ```
+
+Audit point: if you add a new sheet, set `.presentationBackground` explicitly. ConnectSheet was the last surface to acquire this fix during the polish session; AddAccountSheet was set during round 2.
 
 ### Cap check after the form is filled
 
