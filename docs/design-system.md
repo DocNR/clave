@@ -287,10 +287,10 @@ The screen background carries the active account's identity even outside the str
 ```swift
 LinearGradient(
     stops: [
-        .init(color: theme.start.opacity(0.38), location: 0.0),
-        .init(color: theme.end.opacity(0.26),   location: 0.35),
-        .init(color: theme.end.opacity(0.12),   location: 0.70),
-        .init(color: theme.start.opacity(0.06), location: 1.0),
+        .init(color: theme.start.opacity(0.50), location: 0.0),
+        .init(color: theme.end.opacity(0.34),   location: 0.35),
+        .init(color: theme.end.opacity(0.20),   location: 0.70),
+        .init(color: theme.start.opacity(0.08), location: 1.0),
     ],
     startPoint: .top,
     endPoint:   .bottom
@@ -298,7 +298,9 @@ LinearGradient(
 .ignoresSafeArea()
 ```
 
-Apply on the NavigationStack root (NOT the List), and pair with `.scrollContentBackground(.hidden)` on the List or the gradient won't show.
+Apply on the **List** alongside `.scrollContentBackground(.hidden)` — both modifiers must be on the same view. Applying `.background(...)` on the enclosing NavigationStack appears to work in some Xcode previews but is occluded inside a TabView on iOS 26+ by the NavigationStack's own system-background backing. Pin the gradient to the List itself.
+
+If a future surface needs to put the gradient *above* a non-List container, wrap that container in a `ZStack` with the gradient as the first sibling. Don't trust `.background(...)` on enclosing chrome (NavigationStack, Sheet, TabView) to render reliably.
 
 Animate transitions on account switch:
 ```swift

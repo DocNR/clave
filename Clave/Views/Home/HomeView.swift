@@ -86,6 +86,7 @@ struct HomeView: View {
             .listStyle(.plain)
             .listSectionSpacing(0)
             .scrollContentBackground(.hidden)
+            .background(homeBackgroundGradient.ignoresSafeArea())
             .navigationTitle("Clave")
             .navigationBarTitleDisplayMode(.inline)
             .refreshable {
@@ -170,7 +171,6 @@ struct HomeView: View {
                 Text("This connection will no longer be able to sign for this account.")
             }
         }
-        .background(homeBackgroundGradient.ignoresSafeArea())
         .animation(.easeInOut(duration: 0.3), value: appState.currentAccount?.pubkeyHex)
     }
 
@@ -218,9 +218,9 @@ struct HomeView: View {
         }
         return LinearGradient(
             stops: [
-                .init(color: theme.start.opacity(0.38), location: 0.0),
-                .init(color: theme.end.opacity(0.26), location: 0.35),
-                .init(color: theme.end.opacity(0.16), location: 0.70),
+                .init(color: theme.start.opacity(0.50), location: 0.0),
+                .init(color: theme.end.opacity(0.34), location: 0.35),
+                .init(color: theme.end.opacity(0.20), location: 0.70),
                 .init(color: theme.start.opacity(0.08), location: 1.0),
             ],
             startPoint: .top,
