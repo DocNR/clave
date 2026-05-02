@@ -953,6 +953,21 @@ final class AppState {
         }
     }
 
+    /// Force-refresh all accounts' kind:0 profiles, bypassing the 1-hour
+    /// throttle. Awaits completion of every fan-out fetch so callers (e.g.
+    /// HomeView's `.refreshable` pull-to-refresh) keep their spinner
+    /// visible until the data lands.
+    func refreshAllProfiles() async {
+        await withTaskGroup(of: Void.self) { group in
+            for account in accounts {
+                let pk = account.pubkeyHex
+                group.addTask { [weak self] in
+                    await self?.fetchProfile(for: pk)
+                }
+            }
+        }
+    }
+
     private static func fetchProfile(from relayURL: String, pubkey: String) async -> CachedProfile? {
         do {
             let relay = LightRelay(url: relayURL)

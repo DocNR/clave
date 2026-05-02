@@ -86,6 +86,10 @@ struct HomeView: View {
             .scrollContentBackground(.hidden)
             .navigationTitle("Clave")
             .navigationBarTitleDisplayMode(.inline)
+            .refreshable {
+                refreshData()
+                await appState.refreshAllProfiles()
+            }
             .onAppear {
                 refreshData()
                 appState.fetchProfilesForAllAccountsIfNeeded()
