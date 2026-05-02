@@ -13,7 +13,7 @@ struct SlimIdentityBar: View {
                 Text("@\(displayLabel(for: current))")
                     .font(.system(size: 12, weight: .heavy))
                     .foregroundStyle(.primary)
-                Text(truncatedNpub(for: current))
+                Text(truncatedNpub)
                     .font(.system(size: 10, weight: .medium, design: .monospaced))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -63,7 +63,7 @@ struct SlimIdentityBar: View {
         return String(account.pubkeyHex.prefix(8))
     }
 
-    private func truncatedNpub(for account: Account) -> String {
+    private var truncatedNpub: String {
         let n = appState.npub
         guard n.count > 20 else { return n }
         return String(n.prefix(12)) + "…" + String(n.suffix(6))

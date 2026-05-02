@@ -161,6 +161,7 @@ struct HomeView: View {
             }
         }
         .background(homeBackgroundGradient.ignoresSafeArea())
+        .animation(.easeInOut(duration: 0.3), value: appState.currentAccount?.pubkeyHex)
     }
 
     // MARK: - Background gradient

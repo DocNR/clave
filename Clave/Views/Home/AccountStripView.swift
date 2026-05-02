@@ -49,58 +49,22 @@ struct AccountStripView: View {
     private func accountPill(_ account: Account) -> some View {
         let isActive = account.pubkeyHex == appState.currentAccount?.pubkeyHex
         let theme = AccountTheme.forAccount(pubkeyHex: account.pubkeyHex)
-
-        // NavigationLink wraps the inner content so tap on active pill pushes
-        // AccountDetailView (Task 4). Non-active pill suppresses the link via
-        // a separate Button overlay below.
-        NavigationLink(value: AccountNavTarget.detail(pubkey: account.pubkeyHex)) {
-            VStack(spacing: 4) {
-                ZStack {
-                    if isActive {
-                        Circle()
-                            .fill(LinearGradient(colors: [theme.start, theme.end],
-                                                 startPoint: .topLeading,
-                                                 endPoint: .bottomTrailing))
-                            .frame(width: pillSize + ringPadding * 2,
-                                   height: pillSize + ringPadding * 2)
-                    }
-                    avatarPlaceholder(for: account)
-                        .frame(width: pillSize, height: pillSize)
-                        .clipShape(Circle())
-                }
-                Text(labelText(for: account))
-                    .font(.system(size: 9, weight: isActive ? .heavy : .semibold))
-                    .foregroundStyle(isActive ? theme.accent : Color.primary.opacity(0.8))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .frame(maxWidth: pillSize + 8)
-            }
-        }
-        .buttonStyle(.plain)
-        .simultaneousGesture(
-            // Tap on non-active pill switches account instead of navigating.
-            // For active pill, navigation runs (the NavigationLink wins).
-            TapGesture().onEnded {
-                if !isActive {
-                    appState.switchToAccount(pubkey: account.pubkeyHex)
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                }
+        AccountPillView(
+            account: account,
+            isActive: isActive,
+            pillSize: pillSize,
+            ringPadding: ringPadding,
+            theme: theme,
+            labelText: labelText(for: account),
+            onSwitch: {
+                appState.switchToAccount(pubkey: account.pubkeyHex)
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            },
+            onLongPress: {
+                appState.pendingDetailPubkey = account.pubkeyHex
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
             }
         )
-        .onLongPressGesture(minimumDuration: 0.5) {
-            // Long-press always opens detail without switching, even on
-            // active. Override the simultaneousGesture switch above by
-            // doing nothing here — the NavigationLink fires on tap-up
-            // only if the gesture wasn't a long-press, so explicit
-            // navigation here on long-press requires programmatic push.
-            // SwiftUI's NavigationLink(value:) consumes the tap; the
-            // long-press fires before tap-up resolves. We rely on the
-            // user performing the long-press THEN releasing — which iOS
-            // treats as a long-press, not a tap, and the NavigationLink
-            // doesn't fire. Trigger nav via app router state.
-            appState.pendingDetailPubkey = account.pubkeyHex
-            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-        }
     }
 
     // MARK: - Add pill
@@ -131,23 +95,6 @@ struct AccountStripView: View {
 
     // MARK: - Helpers
 
-    /// Avatar placeholder — letter on neutral gradient. Real PFPs from
-    /// kind:0 picture URLs land here in a future iteration; for now we
-    /// always show the letter.
-    @ViewBuilder
-    private func avatarPlaceholder(for account: Account) -> some View {
-        let initial = String(labelText(for: account).first ?? "?").uppercased()
-        ZStack {
-            LinearGradient(
-                colors: [Color(white: 0.78), Color(white: 0.62)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing)
-            Text(initial)
-                .font(.system(size: 14, weight: .heavy))
-                .foregroundStyle(Color.white)
-        }
-    }
-
     /// Display label preference: petname → kind:0 displayName → truncated pubkey.
     private func labelText(for account: Account) -> String {
         if let p = account.petname, !p.isEmpty { return p }
@@ -163,4 +110,93 @@ struct AccountStripView: View {
 /// origin; SettingsView (Task 6) and the long-press handler also use it.
 enum AccountNavTarget: Hashable {
     case detail(pubkey: String)
+}
+
+// MARK: - AccountPillView
+
+/// Per-account pill extracted into a child struct so it can hold a local
+/// `@State` flag that suppresses the tap-up that follows a long-press.
+///
+/// Without this flag, `.simultaneousGesture(TapGesture)` fires on finger-lift
+/// even after a long-press, which would call `onSwitch` for a non-active pill
+/// that the user only intended to peek at via long-press.
+private struct AccountPillView: View {
+    let account: Account
+    let isActive: Bool
+    let pillSize: CGFloat
+    let ringPadding: CGFloat
+    let theme: AccountTheme
+    let labelText: String
+    let onSwitch: () -> Void
+    let onLongPress: () -> Void
+
+    @State private var didLongPress = false
+
+    var body: some View {
+        NavigationLink(value: AccountNavTarget.detail(pubkey: account.pubkeyHex)) {
+            VStack(spacing: 4) {
+                ZStack {
+                    if isActive {
+                        Circle()
+                            .fill(LinearGradient(colors: [theme.start, theme.end],
+                                                 startPoint: .topLeading,
+                                                 endPoint: .bottomTrailing))
+                            .frame(width: pillSize + ringPadding * 2,
+                                   height: pillSize + ringPadding * 2)
+                    }
+                    AccountAvatarPlaceholder(label: labelText)
+                        .frame(width: pillSize, height: pillSize)
+                        .clipShape(Circle())
+                }
+                Text(labelText)
+                    .font(.system(size: 9, weight: isActive ? .heavy : .semibold))
+                    .foregroundStyle(isActive ? theme.accent : Color.primary.opacity(0.8))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: pillSize + 8)
+            }
+        }
+        .buttonStyle(.plain)
+        .simultaneousGesture(
+            // Tap on non-active pill switches account instead of navigating.
+            // For active pill, navigation runs (the NavigationLink wins).
+            // Suppress the tap-up that follows a long-press — otherwise the
+            // long-press "view detail without switching" semantics get clobbered
+            // by the tap firing onSwitch.
+            TapGesture().onEnded {
+                if didLongPress {
+                    didLongPress = false
+                    return
+                }
+                if !isActive {
+                    onSwitch()
+                }
+            }
+        )
+        .onLongPressGesture(minimumDuration: 0.5) {
+            didLongPress = true
+            onLongPress()
+        }
+    }
+}
+
+// MARK: - AccountAvatarPlaceholder
+
+/// Letter-on-gradient avatar placeholder. Real PFPs from kind:0 picture
+/// URLs land here in a future iteration; for now we always show the letter.
+private struct AccountAvatarPlaceholder: View {
+    let label: String
+
+    var body: some View {
+        let initial = String(label.first ?? "?").uppercased()
+        ZStack {
+            LinearGradient(
+                colors: [Color(white: 0.78), Color(white: 0.62)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing)
+            Text(initial)
+                .font(.system(size: 14, weight: .heavy))
+                .foregroundStyle(Color.white)
+        }
+    }
 }
