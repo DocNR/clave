@@ -118,8 +118,7 @@ struct HomeView: View {
             .navigationDestination(for: AccountNavTarget.self) { target in
                 switch target {
                 case .detail(let pubkey):
-                    // Task 4 placeholder — AccountDetailView ships in Task 4.
-                    Text("AccountDetailView placeholder for \(pubkey.prefix(8))")
+                    AccountDetailView(pubkeyHex: pubkey)
                 }
             }
             .sheet(isPresented: $showConnectSheet, onDismiss: {
