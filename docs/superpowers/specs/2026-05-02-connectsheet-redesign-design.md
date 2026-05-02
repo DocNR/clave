@@ -363,6 +363,7 @@ Total estimated: 4-6 days. Could also ship as one combined commit if the user pr
 - Camera flash toggle on the scan view (YAGNI for v1).
 - Scan-from-photo-library (YAGNI — scan from camera covers most cases; paste covers the rest).
 - Account picker for *manual* paths (current account is implicit by design — same pattern as Stage C).
+- **Bunker pair-time permission UX** — explicitly deferred to a separate sprint. The bunker pathway in `LightSigner.swift` hardcodes `trustLevel: .medium` + `kindOverrides: [:]` because the NSE has no foreground UI affordance; nostrconnect pairs via ApprovalSheet get full granular control. Asymmetry has both UX and security implications (bunker-paired client gets `.medium` allow-list across common kinds without user per-kind review). Foreground-aware promotion or deferred-approval are options. Risk of regressing the working bunker flow is high enough that this redesign sprint preserves current bunker behavior and addresses the asymmetry separately. Tracked in sprint memory `stage-c-sprint.md` polish backlog.
 
 ## References
 
