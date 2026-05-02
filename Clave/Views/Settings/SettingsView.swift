@@ -216,15 +216,6 @@ struct SettingsView: View {
 
     private var developerSection: some View {
         Section("Developer") {
-            Toggle(isOn: $devSettings.nostrconnectEnabled) {
-                VStack(alignment: .leading) {
-                    Text("Enable Nostrconnect")
-                    Text("Experimental — some clients have compatibility issues. Use bunker:// for reliable signing.")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
             Button {
                 Task.detached(priority: .userInitiated) {
                     let entries = LogExporter.fetchRecentLogs(since: Date().addingTimeInterval(-3600))
