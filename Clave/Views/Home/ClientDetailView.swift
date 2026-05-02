@@ -426,12 +426,8 @@ struct ClientDetailView: View {
     }
 
     private var currentAccountDisplayName: String {
-        guard let account = appState.currentAccount else {
-            return String(appState.signerPubkeyHex.prefix(8))
-        }
-        if let p = account.petname, !p.isEmpty { return p }
-        if let d = account.profile?.displayName, !d.isEmpty { return d }
-        return String(account.pubkeyHex.prefix(8))
+        appState.currentAccount?.displayLabel
+            ?? String(appState.signerPubkeyHex.prefix(8))
     }
 
     private var truncatedPubkey: String {

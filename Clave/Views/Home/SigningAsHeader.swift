@@ -56,12 +56,7 @@ struct SigningAsHeader: View {
     }
 
     private func displayLabel() -> String {
-        guard let account = appState.accounts.first(where: { $0.pubkeyHex == signerPubkeyHex }) else {
-            // Defensive — request signer should always be in accounts.
-            return String(signerPubkeyHex.prefix(8))
-        }
-        if let p = account.petname, !p.isEmpty { return p }
-        if let d = account.profile?.displayName, !d.isEmpty { return d }
-        return String(account.pubkeyHex.prefix(8))
+        appState.accounts.first(where: { $0.pubkeyHex == signerPubkeyHex })?.displayLabel
+            ?? String(signerPubkeyHex.prefix(8))
     }
 }

@@ -285,6 +285,16 @@ struct Account: Codable, Identifiable, Equatable {
     }
 }
 
+extension Account {
+    /// Display label preference: petname → kind:0 displayName → 8-char pubkey prefix.
+    /// Centralizes the resolution chain previously duplicated across view files.
+    var displayLabel: String {
+        if let p = petname, !p.isEmpty { return p }
+        if let d = profile?.displayName, !d.isEmpty { return d }
+        return String(pubkeyHex.prefix(8))
+    }
+}
+
 /// Queued pair/unpair operation awaiting delivery to the proxy.
 /// Persisted in SharedStorage.pendingPairOps. FIFO, cap 10, drop-oldest on
 /// overflow. Drained on applicationDidBecomeActive and after /register success.

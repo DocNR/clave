@@ -162,12 +162,8 @@ struct PendingApprovalsView: View {
         let pubkeyHex = request.signerPubkeyHex.isEmpty
             ? appState.signerPubkeyHex
             : request.signerPubkeyHex
-        guard let account = appState.accounts.first(where: { $0.pubkeyHex == pubkeyHex }) else {
-            return String(pubkeyHex.prefix(8))
-        }
-        if let p = account.petname, !p.isEmpty { return p }
-        if let d = account.profile?.displayName, !d.isEmpty { return d }
-        return String(account.pubkeyHex.prefix(8))
+        return appState.accounts.first(where: { $0.pubkeyHex == pubkeyHex })?.displayLabel
+            ?? String(pubkeyHex.prefix(8))
     }
 
     private func kindLabel(_ kind: Int) -> String {

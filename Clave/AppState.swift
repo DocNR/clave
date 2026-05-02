@@ -931,6 +931,21 @@ final class AppState {
         Task { await self.fetchProfile(for: pubkey) }
     }
 
+    /// Fetch kind:0 for every account on launch, throttled per-account.
+    /// Each account's `profile.fetchedAt` is checked against the 1-hour
+    /// window so accounts with fresh caches are skipped. Replaces the
+    /// current-account-only `fetchProfileIfNeeded()` call from HomeView
+    /// onAppear so the strip's larger avatars populate for all accounts.
+    func fetchProfilesForAllAccountsIfNeeded() {
+        let now = Date().timeIntervalSince1970
+        for account in accounts {
+            if let fetched = account.profile?.fetchedAt, now - fetched < 3600 {
+                continue
+            }
+            Task { await self.fetchProfile(for: account.pubkeyHex) }
+        }
+    }
+
     private static func fetchProfile(from relayURL: String, pubkey: String) async -> CachedProfile? {
         do {
             let relay = LightRelay(url: relayURL)

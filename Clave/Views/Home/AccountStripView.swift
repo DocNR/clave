@@ -55,7 +55,7 @@ struct AccountStripView: View {
             pillSize: pillSize,
             ringPadding: ringPadding,
             theme: theme,
-            labelText: labelText(for: account),
+            labelText: account.displayLabel,
             cachedImage: cachedAvatar(for: account),
             onSwitch: {
                 appState.switchToAccount(pubkey: account.pubkeyHex)
@@ -112,21 +112,6 @@ struct AccountStripView: View {
 
     // MARK: - Helpers
 
-    /// Display label preference: petname → kind:0 displayName → truncated pubkey.
-    private func labelText(for account: Account) -> String {
-        if let p = account.petname, !p.isEmpty { return p }
-        if let d = account.profile?.displayName, !d.isEmpty { return d }
-        let h = account.pubkeyHex
-        guard h.count > 8 else { return h }
-        return String(h.prefix(8))
-    }
-}
-
-/// Navigation target enum used by HomeView's NavigationStack to route
-/// to AccountDetailView. Defined here because the strip is the primary
-/// origin; SettingsView (Task 6) and the long-press handler also use it.
-enum AccountNavTarget: Hashable {
-    case detail(pubkey: String)
 }
 
 // MARK: - AccountPillView

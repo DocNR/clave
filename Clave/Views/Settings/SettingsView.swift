@@ -51,7 +51,7 @@ struct SettingsView: View {
                     HStack(spacing: 12) {
                         accountAvatarSmall(for: account)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(displayLabelInSettings(for: account))
+                            Text(account.displayLabel)
                                 .font(.subheadline.bold())
                             Text(truncatedPubkey(account.pubkeyHex))
                                 .font(.caption.monospaced())
@@ -79,7 +79,7 @@ struct SettingsView: View {
 
     @ViewBuilder
     private func accountAvatarSmall(for account: Account) -> some View {
-        let initial = String(displayLabelInSettings(for: account).first ?? "?").uppercased()
+        let initial = String(account.displayLabel.first ?? "?").uppercased()
         let theme = AccountTheme.forAccount(pubkeyHex: account.pubkeyHex)
         ZStack {
             LinearGradient(colors: [theme.start, theme.end],
@@ -90,12 +90,6 @@ struct SettingsView: View {
         }
         .frame(width: 32, height: 32)
         .clipShape(Circle())
-    }
-
-    private func displayLabelInSettings(for account: Account) -> String {
-        if let p = account.petname, !p.isEmpty { return p }
-        if let d = account.profile?.displayName, !d.isEmpty { return d }
-        return String(account.pubkeyHex.prefix(8))
     }
 
     private func truncatedPubkey(_ hex: String) -> String {

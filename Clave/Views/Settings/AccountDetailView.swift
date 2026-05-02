@@ -43,9 +43,9 @@ struct AccountDetailView: View {
             }
 
             if account != nil {
-                profileSection
                 petnameSection
-                actionsSection
+                profileSection
+                securitySection
                 deleteSection
             }
         }
@@ -90,7 +90,7 @@ struct AccountDetailView: View {
             HStack(spacing: 14) {
                 avatarLarge(for: account)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(displayName(for: account))
+                    Text(account.displayLabel)
                         .font(.title3).fontWeight(.bold)
                         .foregroundStyle(.white)
                     Text(truncatedNpub(for: account))
@@ -106,7 +106,7 @@ struct AccountDetailView: View {
     }
 
     private func avatarLarge(for account: Account) -> some View {
-        let initial = String(displayName(for: account).first ?? "?").uppercased()
+        let initial = String(account.displayLabel.first ?? "?").uppercased()
         return ZStack {
             Circle()
                 .fill(Color.white.opacity(0.25))
@@ -153,38 +153,31 @@ struct AccountDetailView: View {
 
     @ViewBuilder
     private var profileSection: some View {
-        if let account, let profile = account.profile {
+        if let account {
             Section("Profile") {
-                if let name = profile.displayName, !name.isEmpty {
+                if let profile = account.profile,
+                   let name = profile.displayName, !name.isEmpty {
                     LabeledContent("Display name", value: name)
+                } else {
+                    Text("No profile published. Tap Refresh to fetch.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
-                if let pic = profile.pictureURL, !pic.isEmpty {
-                    LabeledContent("Picture URL") {
-                        Text(pic).font(.caption).lineLimit(1).truncationMode(.middle)
-                    }
-                }
-            }
-        } else if account != nil {
-            Section("Profile") {
-                Text("No profile published. Use Refresh below to fetch.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-        }
-    }
-
-    // MARK: - Actions
-
-    private var actionsSection: some View {
-        Section("Actions") {
-            if let account {
                 Button {
                     appState.refreshProfile(for: account.pubkeyHex)
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 } label: {
                     Label("Refresh profile", systemImage: "arrow.clockwise")
                 }
+            }
+        }
+    }
 
+    // MARK: - Security
+
+    private var securitySection: some View {
+        Section("Security") {
+            if let account {
                 Button {
                     showRotateBunkerAlert = true
                 } label: {
@@ -227,7 +220,7 @@ struct AccountDetailView: View {
 
     private var deleteAlertNameSnippet: String {
         guard let account else { return "this account" }
-        return "@\(displayName(for: account))"
+        return "@\(account.displayLabel)"
     }
 
     private var deleteAlertMessage: String {
@@ -245,12 +238,6 @@ struct AccountDetailView: View {
     }
 
     // MARK: - Helpers
-
-    private func displayName(for account: Account) -> String {
-        if let p = account.petname, !p.isEmpty { return p }
-        if let d = account.profile?.displayName, !d.isEmpty { return d }
-        return String(account.pubkeyHex.prefix(8))
-    }
 
     private func npubString(for account: Account) -> String {
         guard let pk = try? PublicKey.parse(publicKey: account.pubkeyHex) else {

@@ -86,7 +86,7 @@ struct HomeView: View {
             .navigationTitle("Clave")
             .onAppear {
                 refreshData()
-                appState.fetchProfileIfNeeded()
+                appState.fetchProfilesForAllAccountsIfNeeded()
             }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active { refreshData() }
@@ -158,18 +158,11 @@ struct HomeView: View {
 
     // MARK: - Unpair alert helpers
 
-    private var homeCurrentAccountDisplayName: String {
-        guard let account = appState.currentAccount else {
-            return String(appState.signerPubkeyHex.prefix(8))
-        }
-        if let p = account.petname, !p.isEmpty { return p }
-        if let d = account.profile?.displayName, !d.isEmpty { return d }
-        return String(account.pubkeyHex.prefix(8))
-    }
-
     private var swipeUnpairAlertTitle: String {
         let clientName = clientToUnpair?.name ?? "this connection"
-        return "Unpair \(clientName) from @\(homeCurrentAccountDisplayName)?"
+        let label = appState.currentAccount?.displayLabel
+            ?? String(appState.signerPubkeyHex.prefix(8))
+        return "Unpair \(clientName) from @\(label)?"
     }
 
     // MARK: - Background gradient
@@ -240,10 +233,14 @@ struct HomeView: View {
     }
 
     private var pairNewConnectionIcon: some View {
-        Image(systemName: "link.badge.plus")
-            .font(.title3)
-            .foregroundStyle(Color.accentColor)
-            .frame(width: 32, height: 32)
+        let theme = AccountTheme.forAccount(pubkeyHex: appState.signerPubkeyHex)
+        return ZStack {
+            Circle().fill(theme.accent)
+            Image(systemName: "link.badge.plus")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(.white)
+        }
+        .frame(width: 32, height: 32)
     }
 
     private var pairNewConnectionLabel: some View {

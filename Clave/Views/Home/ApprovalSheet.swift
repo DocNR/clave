@@ -207,12 +207,8 @@ struct ApprovalSheet: View {
 
     private var signingAsDisplayLabel: String {
         let pk = appState.signerPubkeyHex
-        guard let account = appState.accounts.first(where: { $0.pubkeyHex == pk }) else {
-            return String(pk.prefix(8))
-        }
-        if let p = account.petname, !p.isEmpty { return p }
-        if let d = account.profile?.displayName, !d.isEmpty { return d }
-        return String(account.pubkeyHex.prefix(8))
+        return appState.accounts.first(where: { $0.pubkeyHex == pk })?.displayLabel
+            ?? String(pk.prefix(8))
     }
 
     private var truncatedPubkey: String {

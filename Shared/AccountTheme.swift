@@ -6,13 +6,16 @@ import CryptoKit
 /// Pubkey hex → SHA-256 → first 2 bytes → palette index. Same account
 /// always gets the same gradient across launches and devices.
 ///
-/// Used by AccountStripView (active pill ring), SlimIdentityBar (background
-/// wash), HomeView (full-screen ambient gradient), AccountDetailView
-/// (gradient banner header), ApprovalSheet (SigningAsHeader tint).
+/// Used by AccountStripView (active pill ring), HomeView (full-screen ambient
+/// gradient + Pair New Connection icon), AccountDetailView (gradient banner
+/// header), ApprovalSheet (SigningAsHeader tint).
 ///
 /// Palette is curated to avoid clashy hues, low-contrast pairs, and yellows
 /// that look broken on white backgrounds. 12 entries — comfortably more than
 /// the 5-account pairing cap, low collision probability for typical use.
+///
+/// Equatable conformance is synthesized from the stored properties (Color is
+/// Equatable on iOS 17+); relied on by `AccountThemeTests`.
 struct AccountTheme: Equatable {
     let start: Color
     let end: Color
@@ -24,7 +27,7 @@ struct AccountTheme: Equatable {
     /// production since AppState guards against empty signerPubkeyHex).
     static func forAccount(pubkeyHex: String) -> AccountTheme {
         let normalized = pubkeyHex.lowercased()
-        guard !normalized.isEmpty,
+        guard normalized.count == 64,
               normalized.allSatisfy({ $0.isHexDigit }) else {
             return palette[0]
         }
@@ -37,8 +40,9 @@ struct AccountTheme: Equatable {
 
     /// 12 curated gradient pairs. Each entry: `(start, end, accent, index)`.
     /// Accent = darker / more saturated of the pair, used for text + active
-    /// indicators. Indices are stable — never reorder this array (would
-    /// reassign every existing account's color).
+    /// indicators. Indices are stable: never reorder, AND never insert
+    /// mid-array and renumber — both would reassign every existing account's
+    /// color across launches. Append-only at the end is safe.
     static let palette: [AccountTheme] = [
         AccountTheme(start: Color(red: 0.48, green: 0.55, blue: 1.00),
                      end:   Color(red: 0.63, green: 0.29, blue: 1.00),
