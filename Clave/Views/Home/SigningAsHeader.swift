@@ -16,7 +16,7 @@ struct SigningAsHeader: View {
         let label = displayLabel()
 
         HStack(spacing: 10) {
-            avatarMini
+            avatarMini(theme: theme)
             HStack(spacing: 4) {
                 Text("Signing as")
                     .font(.subheadline)
@@ -42,8 +42,7 @@ struct SigningAsHeader: View {
         )
     }
 
-    private var avatarMini: some View {
-        let theme = AccountTheme.forAccount(pubkeyHex: signerPubkeyHex)
+    private func avatarMini(theme: AccountTheme) -> some View {
         let initial = String(displayLabel().first ?? "?").uppercased()
         return ZStack {
             LinearGradient(colors: [theme.start, theme.end],

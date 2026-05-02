@@ -63,6 +63,21 @@ struct PendingApprovalsView: View {
                     .foregroundStyle(.tertiary)
             }
 
+            // Account context — critical on the highest-risk surface (actual
+            // key material commits here). Multi-account users need to know
+            // which account each pending request belongs to before tapping
+            // Approve. Uses a lightweight caption rather than the full
+            // SigningAsHeader bar to avoid visual competition with the
+            // orange-bordered card.
+            HStack(spacing: 6) {
+                Image(systemName: "person.crop.circle.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                (Text("Signing as ").foregroundStyle(.secondary)
+                 + Text("@\(signerLabel(for: request))").bold().foregroundStyle(.primary))
+                    .font(.caption)
+            }
+
             let isProcessing = processing.contains(request.id)
             VStack(spacing: 8) {
                 HStack(spacing: 8) {
@@ -137,6 +152,22 @@ struct PendingApprovalsView: View {
                 UINotificationFeedbackGenerator().notificationOccurred(.error)
             }
         }
+    }
+
+    /// Resolves the display label for the signing account of a pending request.
+    /// Resolution order: petname → displayName → hex prefix (first 8 chars).
+    /// Falls back to current account when the request carries no signer hint
+    /// (legacy rows from before Stage C).
+    private func signerLabel(for request: PendingRequest) -> String {
+        let pubkeyHex = request.signerPubkeyHex.isEmpty
+            ? appState.signerPubkeyHex
+            : request.signerPubkeyHex
+        guard let account = appState.accounts.first(where: { $0.pubkeyHex == pubkeyHex }) else {
+            return String(pubkeyHex.prefix(8))
+        }
+        if let p = account.petname, !p.isEmpty { return p }
+        if let d = account.profile?.displayName, !d.isEmpty { return d }
+        return String(account.pubkeyHex.prefix(8))
     }
 
     private func kindLabel(_ kind: Int) -> String {
