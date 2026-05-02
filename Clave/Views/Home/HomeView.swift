@@ -56,6 +56,8 @@ struct HomeView: View {
 
                 // Connected Clients
                 Section {
+                    pairNewConnectionRow
+
                     if clients.isEmpty {
                         emptyClientsView
                     } else {
@@ -80,16 +82,8 @@ struct HomeView: View {
                 }
             }
             .listStyle(.plain)
+            .scrollContentBackground(.hidden)
             .navigationTitle("Clave")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        showConnectSheet = true
-                    } label: {
-                        Image(systemName: "plus")
-                    }
-                }
-            }
             .onAppear {
                 refreshData()
                 appState.fetchProfileIfNeeded()
@@ -228,6 +222,40 @@ struct HomeView: View {
     }
 
     // MARK: - Connected Clients
+
+    private var pairNewConnectionRow: some View {
+        Button {
+            showConnectSheet = true
+        } label: {
+            HStack(spacing: 12) {
+                pairNewConnectionIcon
+                pairNewConnectionLabel
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var pairNewConnectionIcon: some View {
+        Image(systemName: "link.badge.plus")
+            .font(.title3)
+            .foregroundStyle(Color.accentColor)
+            .frame(width: 32, height: 32)
+    }
+
+    private var pairNewConnectionLabel: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("Pair New Connection")
+                .font(.subheadline.bold())
+                .foregroundStyle(.primary)
+            Text("Add a NIP-46 client to sign with this account")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
 
     private var emptyClientsView: some View {
         HStack {
