@@ -891,6 +891,21 @@ final class AppState {
 
             guard let cached = newest else { return }
 
+            // Write the cached image FIRST, then mutate accounts. The accounts
+            // mutation triggers SwiftUI re-renders in any view that reads the
+            // cached image file from disk (HomeView strip, SlimIdentityBar,
+            // AccountDetailView banner). If we mutate accounts first, those
+            // re-renders read stale bytes — the new image only lands on a
+            // *subsequent* render that may never come (no further state
+            // change to trigger it).
+            //
+            // Bug F-fixed: pass pubkey explicitly so the cache file is bound
+            // to the account that triggered the fetch, not whichever account
+            // happens to be current at write-time.
+            if let pic = cached.pictureURL, !pic.isEmpty {
+                await cacheImage(from: pic, pubkey: pubkey)
+            }
+
             await MainActor.run {
                 if self.currentAccount?.pubkeyHex == pubkey {
                     // Fast path: use existing helper which also updates
@@ -906,13 +921,6 @@ final class AppState {
                     )
                     self.persistAccounts()
                 }
-            }
-
-            if let pic = cached.pictureURL, !pic.isEmpty {
-                // Bug F-fixed: pass pubkey explicitly so the cache file
-                // is bound to the account that triggered the fetch, not
-                // whichever account happens to be current at write-time.
-                await cacheImage(from: pic, pubkey: pubkey)
             }
         }
     }

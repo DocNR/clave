@@ -108,14 +108,33 @@ struct AccountDetailView: View {
     private func avatarLarge(for account: Account) -> some View {
         let initial = String(account.displayLabel.first ?? "?").uppercased()
         return ZStack {
-            Circle()
-                .fill(Color.white.opacity(0.25))
-            Text(initial)
-                .font(.system(size: 22, weight: .heavy))
-                .foregroundStyle(.white)
+            if let img = cachedAvatar(for: account) {
+                Image(uiImage: img)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                Color.white.opacity(0.25)
+                Text(initial)
+                    .font(.system(size: 22, weight: .heavy))
+                    .foregroundStyle(.white)
+            }
         }
         .frame(width: 56, height: 56)
+        .clipShape(Circle())
         .overlay(Circle().stroke(Color.white.opacity(0.4), lineWidth: 2))
+    }
+
+    /// Per-account cached profile image (same source as AccountStripView and
+    /// SlimIdentityBar). Synchronous read on each body evaluation; files are
+    /// small (~50KB) so the cost is negligible.
+    private func cachedAvatar(for account: Account) -> UIImage? {
+        guard let container = FileManager.default.containerURL(
+            forSecurityApplicationGroupIdentifier: SharedConstants.appGroup
+        ) else { return nil }
+        let url = container.appendingPathComponent("cached-profile-\(account.pubkeyHex).dat")
+        guard let data = try? Data(contentsOf: url),
+              let img = UIImage(data: data) else { return nil }
+        return img
     }
 
     private func copyNpubButton(for account: Account) -> some View {
