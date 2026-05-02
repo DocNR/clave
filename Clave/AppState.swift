@@ -57,6 +57,11 @@ final class AppState {
     var pendingRequests: [PendingRequest] = []
     var profileImage: UIImage?
 
+    /// Set by long-press on a strip pill; consumed by HomeView's
+    /// NavigationStack to push AccountDetailView for that account without
+    /// switching active. Cleared after navigation fires.
+    var pendingDetailPubkey: String?
+
     init() {
         // Drain the /pair-client retry queue on every app foreground. The
         // AppDelegate posts .drainPendingPairOps from applicationDidBecomeActive.

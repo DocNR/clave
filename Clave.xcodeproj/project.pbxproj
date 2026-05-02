@@ -14,9 +14,9 @@
 		AE01F2A3B4C5D6E700000005 /* Nip19.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE01F2A3B4C5D6E700000004 /* Nip19.swift */; };
 		AE01F2A3B4C5D6E700000006 /* Nip19.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE01F2A3B4C5D6E700000004 /* Nip19.swift */; };
 		AE01F2A3B4C5D6E700000008 /* SharedKeychain+Enumeration.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE01F2A3B4C5D6E700000007 /* SharedKeychain+Enumeration.swift */; };
-		C1A4F2B3C5D6E700000011 /* AccountTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A4F2B3C5D6E700000010 /* AccountTheme.swift */; };
 		B0EBA01E2F90AB01000A0001 /* PendingApprovalBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0EBA01E2F90AB01000A0002 /* PendingApprovalBanner.swift */; };
 		BD247C1AD3A7497E8DF29530 /* ClientPermissions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 894FE9FF88CD485ABCD31C05 /* ClientPermissions.swift */; };
+		C1A4F2B3C5D6E700000011 /* AccountTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A4F2B3C5D6E700000010 /* AccountTheme.swift */; };
 		DD90DE0C2D8944D08B23C606 /* ClientPermissions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 894FE9FF88CD485ABCD31C05 /* ClientPermissions.swift */; };
 		DE7E10B2DE7E10B2DE7E10B2 /* DeveloperSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE7E10B1DE7E10B1DE7E10B1 /* DeveloperSettings.swift */; };
 		DE7E10B3DE7E10B3DE7E10B3 /* DeveloperSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE7E10B1DE7E10B1DE7E10B1 /* DeveloperSettings.swift */; };
@@ -91,8 +91,8 @@
 		AE01F2A3B4C5D6E700000001 /* ActivitySummary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivitySummary.swift; sourceTree = "<group>"; };
 		AE01F2A3B4C5D6E700000004 /* Nip19.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Nip19.swift; sourceTree = "<group>"; };
 		AE01F2A3B4C5D6E700000007 /* SharedKeychain+Enumeration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SharedKeychain+Enumeration.swift"; sourceTree = "<group>"; };
-		C1A4F2B3C5D6E700000010 /* AccountTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountTheme.swift; sourceTree = "<group>"; };
 		B0EBA01E2F90AB01000A0002 /* PendingApprovalBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendingApprovalBanner.swift; sourceTree = "<group>"; };
+		C1A4F2B3C5D6E700000010 /* AccountTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountTheme.swift; sourceTree = "<group>"; };
 		DE7E10B1DE7E10B1DE7E10B1 /* DeveloperSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeveloperSettings.swift; sourceTree = "<group>"; };
 		DE7E10C1DE7E10C1DE7E10C1 /* LogExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogExporter.swift; sourceTree = "<group>"; };
 		EF3D7A0F2F8BCAE3005A6545 /* Clave.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Clave.app; sourceTree = BUILT_PRODUCTS_DIR; };

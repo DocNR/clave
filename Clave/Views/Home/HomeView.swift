@@ -6,6 +6,8 @@ struct HomeView: View {
     @State private var activityLog: [ActivityEntry] = []
     @State private var showConnectSheet = false
     @State private var clientToUnpair: ClientPermissions?
+    @State private var showAddAccountSheet = false
+    @State private var navigationPath = NavigationPath()
     @Environment(\.scenePhase) private var scenePhase
 
     private var signedTodayCount: Int {
@@ -22,7 +24,7 @@ struct HomeView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $navigationPath) {
             List {
                 // Pending approvals
                 if !appState.pendingRequests.isEmpty {
@@ -33,9 +35,10 @@ struct HomeView: View {
                     .listRowBackground(Color.clear)
                 }
 
-                // Identity
+                // Stage C: strip + slim bar replace the build-37 Menu identity bar.
                 Section {
-                    identityBar
+                    AccountStripView(showAddSheet: $showAddAccountSheet)
+                    SlimIdentityBar()
                         .padding(.bottom, 8)
                 }
                 .listRowInsets(EdgeInsets())
@@ -87,12 +90,15 @@ struct HomeView: View {
                     }
                 }
             }
-            .onAppear { refreshData() }
+            .onAppear {
+                refreshData()
+                appState.fetchProfileIfNeeded()
+            }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active { refreshData() }
             }
             // Bug H fix: refresh clients + activity when the user switches
-            // account via the identity-bar Menu. Without this, the npub label
+            // account via the strip pills. Without this, the npub label
             // (read directly from appState.currentAccount) updates correctly
             // but the @State `clients` and `activityLog` arrays were only
             // reloaded by refreshData() — which fired on appear / scenePhase
@@ -100,13 +106,30 @@ struct HomeView: View {
             .onChange(of: appState.currentAccount?.pubkeyHex) { _, _ in
                 refreshData()
             }
+            .onChange(of: appState.pendingDetailPubkey) { _, newValue in
+                if let pubkey = newValue {
+                    navigationPath.append(AccountNavTarget.detail(pubkey: pubkey))
+                    appState.pendingDetailPubkey = nil
+                }
+            }
             .onReceive(NotificationCenter.default.publisher(for: .signingCompleted)) { _ in
                 refreshData()
+            }
+            .navigationDestination(for: AccountNavTarget.self) { target in
+                switch target {
+                case .detail(let pubkey):
+                    // Task 4 placeholder — AccountDetailView ships in Task 4.
+                    Text("AccountDetailView placeholder for \(pubkey.prefix(8))")
+                }
             }
             .sheet(isPresented: $showConnectSheet, onDismiss: {
                 refreshData()
             }) {
                 ConnectSheet()
+            }
+            // AddAccountSheet placeholder — Task 3 replaces this body.
+            .sheet(isPresented: $showAddAccountSheet) {
+                Text("AddAccountSheet placeholder — coming in Task 3")
             }
             .alert("Unpair Client?", isPresented: Binding(
                 get: { clientToUnpair != nil },
@@ -137,109 +160,28 @@ struct HomeView: View {
                 Text("This client will need a new bunker URI with a fresh secret to reconnect.")
             }
         }
+        .background(homeBackgroundGradient.ignoresSafeArea())
     }
 
-    // MARK: - Identity Bar
+    // MARK: - Background gradient
 
-    private var identityBar: some View {
-        HStack(spacing: 12) {
-            // Tap-to-switch account menu. Wraps the avatar+name+npub block;
-            // the copy-npub button stays separate so tapping it doesn't
-            // open the menu. Stage C will replace this with a richer bottom-
-            // sheet picker (see ~/.claude/plans/doesnt-each-account-have-
-            // dreamy-journal.md), but a Menu is the smallest possible
-            // interim affordance for testers who don't want to dig into
-            // Settings → dev menu every time they switch accounts.
-            Menu {
-                ForEach(appState.accounts) { account in
-                    Button {
-                        appState.switchToAccount(pubkey: account.pubkeyHex)
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    } label: {
-                        if account.pubkeyHex == appState.currentAccount?.pubkeyHex {
-                            Label(accountLabel(account), systemImage: "checkmark")
-                        } else {
-                            Text(accountLabel(account))
-                        }
-                    }
-                }
-            } label: {
-                HStack(spacing: 12) {
-                    profileAvatar
-                    VStack(alignment: .leading, spacing: 4) {
-                        if let name = appState.profile?.displayName, !name.isEmpty {
-                            Text(name)
-                                .font(.subheadline.bold())
-                                .foregroundStyle(.primary)
-                        }
-                        Text(truncatedNpub)
-                            .font(.system(.caption, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                    }
-                    if appState.accounts.count > 1 {
-                        Image(systemName: "chevron.up.chevron.down")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-
-            Button {
-                UIPasteboard.general.string = appState.npub
-                UIImpactFeedbackGenerator(style: .light).impactOccurred()
-            } label: {
-                Image(systemName: "doc.on.doc")
-                    .font(.caption2)
-            }
-
-            Spacer()
-
-            HStack(spacing: 4) {
-                Circle()
-                    .fill(.green)
-                    .frame(width: 8, height: 8)
-                Text("Active")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding()
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
-        .padding(.horizontal)
-        .padding(.top, 8)
-        .onAppear { appState.fetchProfileIfNeeded() }
-    }
-
-    /// Display label for the account picker menu item. Prefers explicit
-    /// petname, falls back to kind:0 displayName, then to a truncated
-    /// pubkey hex.
-    private func accountLabel(_ account: Account) -> String {
-        if let petname = account.petname, !petname.isEmpty { return petname }
-        if let display = account.profile?.displayName, !display.isEmpty { return display }
-        let pk = account.pubkeyHex
-        guard pk.count > 12 else { return pk }
-        return String(pk.prefix(8)) + "…" + String(pk.suffix(4))
-    }
-
-    @ViewBuilder
-    private var profileAvatar: some View {
-        if let image = appState.profileImage {
-            Image(uiImage: image)
-                .resizable()
-                .scaledToFill()
-                .frame(width: 48, height: 48)
-                .clipShape(Circle())
+    private var homeBackgroundGradient: some View {
+        let theme: AccountTheme
+        if let current = appState.currentAccount {
+            theme = AccountTheme.forAccount(pubkeyHex: current.pubkeyHex)
         } else {
-            AvatarView(pubkeyHex: appState.signerPubkeyHex, name: appState.profile?.displayName)
+            theme = AccountTheme.palette[0]
         }
-    }
-
-    private var truncatedNpub: String {
-        let npub = appState.npub
-        guard npub.count > 20 else { return npub }
-        return String(npub.prefix(12)) + "..." + String(npub.suffix(6))
+        return LinearGradient(
+            stops: [
+                .init(color: theme.start.opacity(0.35), location: 0.0),
+                .init(color: theme.end.opacity(0.22), location: 0.35),
+                .init(color: theme.end.opacity(0.14), location: 0.70),
+                .init(color: theme.start.opacity(0.10), location: 1.0),
+            ],
+            startPoint: .top,
+            endPoint: .bottom
+        )
     }
 
     // MARK: - Stats Row
