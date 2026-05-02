@@ -129,7 +129,7 @@ struct HomeView: View {
             .sheet(isPresented: $showAddAccountSheet) {
                 AddAccountSheet()
             }
-            .alert("Unpair Client?", isPresented: Binding(
+            .alert(swipeUnpairAlertTitle, isPresented: Binding(
                 get: { clientToUnpair != nil },
                 set: { if !$0 { clientToUnpair = nil } }
             )) {
@@ -155,11 +155,27 @@ struct HomeView: View {
                     clientToUnpair = nil
                 }
             } message: {
-                Text("This client will need a new bunker URI with a fresh secret to reconnect.")
+                Text("This connection will no longer be able to sign for this account.")
             }
         }
         .background(homeBackgroundGradient.ignoresSafeArea())
         .animation(.easeInOut(duration: 0.3), value: appState.currentAccount?.pubkeyHex)
+    }
+
+    // MARK: - Unpair alert helpers
+
+    private var homeCurrentAccountDisplayName: String {
+        guard let account = appState.currentAccount else {
+            return String(appState.signerPubkeyHex.prefix(8))
+        }
+        if let p = account.petname, !p.isEmpty { return p }
+        if let d = account.profile?.displayName, !d.isEmpty { return d }
+        return String(account.pubkeyHex.prefix(8))
+    }
+
+    private var swipeUnpairAlertTitle: String {
+        let clientName = clientToUnpair?.name ?? "this connection"
+        return "Unpair \(clientName) from @\(homeCurrentAccountDisplayName)?"
     }
 
     // MARK: - Background gradient

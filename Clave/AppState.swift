@@ -871,7 +871,9 @@ final class AppState {
                 }
             }
 
-            // Pick the most-recent profile across all relays (kind:0 is replaceable, latest wins)
+            // Prefer the first relay response with a picture; does not compare
+            // kind:0 created_at timestamps. (TODO: future improvement — compare
+            // event created_at to truly pick the latest replaceable kind:0.)
             var newest: CachedProfile?
             for await result in group {
                 guard let result else { continue }
