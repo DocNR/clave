@@ -307,6 +307,7 @@ Each commit builds + runs in simulator before the next. No commits without a gre
 - ConnectedClient row creation in bunker connect path (currently only nostrconnect creates this row → ActivityDetailView greys connection link for bunker users)
 - Pending-approval badge per strip pill (small dot top-right of avatar when account has unhandled requests)
 - User-customizable account colors (color picker in AccountDetailView; replaces hash-derived default)
+- Robohash-derived default avatars when no kind:0 picture is set — fallback chain becomes `kind:0 picture URL → cached robohash from pubkey hex → letter-on-gradient`. Adds ~30 lines (URL fetch + local cache file `cached-robohash-<pubkey>.png` alongside the existing profile cache). Network dependency on robohash.org with first-load pubkey leak; cache mitigates after first fetch. Worth it for visual distinctness when no PFPs are set, but not required to ship the picker.
 
 ## Branch + ship strategy
 
