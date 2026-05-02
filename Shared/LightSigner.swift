@@ -141,7 +141,14 @@ enum LightSigner {
                 // and per-connection activity lookups returned no entries.
                 let isExistingClient = SharedStorage.getClientPermissions(signer: signerPubkey, client: senderPubkey) != nil
                 if !isExistingClient {
-                    let currentCount = SharedStorage.getConnectedClients().count
+                    // Per-account scoping: count only this signer's clients.
+                    // Was using the unscoped getConnectedClients() which sums
+                    // every account's clients on the device — would falsely
+                    // reject a bunker-connect to a fresh account when other
+                    // accounts already had pairings. ApprovalSheet's cap check
+                    // (nostrconnect URI flow) was already per-signer; this
+                    // brings the bunker URI flow in line.
+                    let currentCount = SharedStorage.getConnectedClients(for: signerPubkey).count
                     if currentCount >= Account.maxClientsPerAccount {
                         logger.notice("[LightSigner] Bunker connect rejected: pairing cap reached (\(Account.maxClientsPerAccount))")
                         let result = RequestResult(
