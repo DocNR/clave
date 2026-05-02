@@ -5,6 +5,7 @@ struct SettingsView: View {
     @Environment(AppState.self) private var appState
     @State private var showDeleteConfirmation = false
     @State private var showExportSheet = false
+    @State private var showAddSheet = false
     @State private var proxyURL = ""
     @State private var registrationStatus = ""
     @State private var devSettings = DeveloperSettings.shared
@@ -14,7 +15,7 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
-                signerKeySection
+                accountsSection
                 permissionsSection
                 pushProxySection
                 relaySection
@@ -41,45 +42,71 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: - Signer Key
+    // MARK: - Accounts (Stage C: replaces single-account "Signer Key" section)
 
-    private var signerKeySection: some View {
-        Section("Signer Key") {
-            HStack {
-                Text("npub")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Text(truncatedNpub)
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                Button {
-                    UIPasteboard.general.string = appState.npub
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                } label: {
-                    Image(systemName: "doc.on.doc")
-                        .font(.caption2)
+    private var accountsSection: some View {
+        Section("Accounts") {
+            ForEach(appState.accounts) { account in
+                NavigationLink(value: AccountNavTarget.detail(pubkey: account.pubkeyHex)) {
+                    HStack(spacing: 12) {
+                        accountAvatarSmall(for: account)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(displayLabelInSettings(for: account))
+                                .font(.subheadline.bold())
+                            Text(truncatedPubkey(account.pubkeyHex))
+                                .font(.caption.monospaced())
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        if account.pubkeyHex == appState.currentAccount?.pubkeyHex {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                                .font(.caption)
+                        }
+                    }
                 }
             }
-
             Button {
-                showExportSheet = true
+                showAddSheet = true
             } label: {
-                Label("Export Secret Key", systemImage: "key.horizontal")
+                Label("Add Account", systemImage: "plus.circle")
             }
-
-            Button(role: .destructive) {
-                showDeleteConfirmation = true
-            } label: {
-                Label("Delete Key", systemImage: "trash")
+        }
+        .sheet(isPresented: $showAddSheet) {
+            AddAccountSheet()
+        }
+        .navigationDestination(for: AccountNavTarget.self) { target in
+            switch target {
+            case .detail(let pubkey):
+                AccountDetailView(pubkeyHex: pubkey)
             }
         }
     }
 
-    private var truncatedNpub: String {
-        let npub = appState.npub
-        guard npub.count > 20 else { return npub }
-        return String(npub.prefix(12)) + "..." + String(npub.suffix(6))
+    @ViewBuilder
+    private func accountAvatarSmall(for account: Account) -> some View {
+        let initial = String(displayLabelInSettings(for: account).first ?? "?").uppercased()
+        let theme = AccountTheme.forAccount(pubkeyHex: account.pubkeyHex)
+        ZStack {
+            LinearGradient(colors: [theme.start, theme.end],
+                           startPoint: .topLeading, endPoint: .bottomTrailing)
+            Text(initial)
+                .font(.caption.bold())
+                .foregroundStyle(.white)
+        }
+        .frame(width: 32, height: 32)
+        .clipShape(Circle())
+    }
+
+    private func displayLabelInSettings(for account: Account) -> String {
+        if let p = account.petname, !p.isEmpty { return p }
+        if let d = account.profile?.displayName, !d.isEmpty { return d }
+        return String(account.pubkeyHex.prefix(8))
+    }
+
+    private func truncatedPubkey(_ hex: String) -> String {
+        guard hex.count > 16 else { return hex }
+        return String(hex.prefix(8)) + "…" + String(hex.suffix(4))
     }
 
     // MARK: - Permissions
