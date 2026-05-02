@@ -17,6 +17,8 @@ struct AccountDetailView: View {
 
     @State private var petnameInput: String = ""
     @State private var showDeleteAlert = false
+    @State private var showRotateBunkerAlert = false
+    @State private var showExportSheet = false
 
     /// The Account this view is for. Reads from appState.accounts each time
     /// (auto-updates on rename / delete). nil if account was deleted while
@@ -41,7 +43,9 @@ struct AccountDetailView: View {
             }
 
             if account != nil {
+                profileSection
                 petnameSection
+                actionsSection
                 deleteSection
             }
         }
@@ -59,6 +63,16 @@ struct AccountDetailView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text(deleteAlertMessage)
+        }
+        .alert("Rotate bunker secret for \(deleteAlertNameSnippet)?",
+               isPresented: $showRotateBunkerAlert) {
+            Button("Rotate") { performRotateBunker() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Generates a new bunker URI for this account. Existing pairings continue working.")
+        }
+        .sheet(isPresented: $showExportSheet) {
+            ExportKeySheet()
         }
     }
 
@@ -133,6 +147,67 @@ struct AccountDetailView: View {
                 }
             }
         }
+    }
+
+    // MARK: - Profile
+
+    @ViewBuilder
+    private var profileSection: some View {
+        if let account, let profile = account.profile {
+            Section("Profile") {
+                if let name = profile.displayName, !name.isEmpty {
+                    LabeledContent("Display name", value: name)
+                }
+                if let pic = profile.pictureURL, !pic.isEmpty {
+                    LabeledContent("Picture URL") {
+                        Text(pic).font(.caption).lineLimit(1).truncationMode(.middle)
+                    }
+                }
+            }
+        } else if account != nil {
+            Section("Profile") {
+                Text("No profile published. Use Refresh below to fetch.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    // MARK: - Actions
+
+    private var actionsSection: some View {
+        Section("Actions") {
+            if let account {
+                Button {
+                    appState.refreshProfile(for: account.pubkeyHex)
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                } label: {
+                    Label("Refresh profile", systemImage: "arrow.clockwise")
+                }
+
+                Button {
+                    showRotateBunkerAlert = true
+                } label: {
+                    Label("Rotate bunker secret", systemImage: "arrow.triangle.2.circlepath")
+                }
+
+                // Export only available for the CURRENT account (existing
+                // ExportKeySheet uses the current keychain entry).
+                if account.pubkeyHex == appState.currentAccount?.pubkeyHex {
+                    Button {
+                        showExportSheet = true
+                    } label: {
+                        Label("Export private key", systemImage: "key.viewfinder")
+                    }
+                }
+            }
+        }
+    }
+
+    private func performRotateBunker() {
+        guard let account else { return }
+        _ = SharedStorage.rotateBunkerSecret(for: account.pubkeyHex)
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
     }
 
     // MARK: - Delete

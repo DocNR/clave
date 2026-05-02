@@ -852,6 +852,62 @@ final class AppState {
         }
     }
 
+    /// Fetch kind:0 profile for a SPECIFIC account pubkey. Used by both
+    /// fetchProfileIfNeeded() (current account, throttled) and
+    /// refreshProfile(for:) (any account, on-demand from AccountDetailView).
+    private func fetchProfile(for pubkey: String) async {
+        let relays = [
+            "wss://relay.powr.build",
+            "wss://relay.damus.io",
+            "wss://nos.lol",
+            "wss://relay.primal.net",
+            "wss://purplepag.es"
+        ]
+
+        await withTaskGroup(of: CachedProfile?.self) { group in
+            for url in relays {
+                group.addTask {
+                    await Self.fetchProfile(from: url, pubkey: pubkey)
+                }
+            }
+
+            // Pick the most-recent profile across all relays (kind:0 is replaceable, latest wins)
+            var newest: CachedProfile?
+            for await result in group {
+                guard let result else { continue }
+                if newest == nil { newest = result; continue }
+                // Prefer the one with a picture if the other doesn't have one
+                if newest?.pictureURL == nil && result.pictureURL != nil { newest = result }
+            }
+
+            guard let cached = newest else { return }
+
+            await MainActor.run {
+                if self.currentAccount?.pubkeyHex == pubkey {
+                    // Fast path: use existing helper which also updates
+                    // the @Observable currentAccount property.
+                    self.updateCurrentProfile(cached)
+                } else if let idx = self.accounts.firstIndex(where: { $0.pubkeyHex == pubkey }) {
+                    // Non-current account: update the accounts array in-place.
+                    self.accounts[idx] = Account(
+                        pubkeyHex: self.accounts[idx].pubkeyHex,
+                        petname: self.accounts[idx].petname,
+                        addedAt: self.accounts[idx].addedAt,
+                        profile: cached
+                    )
+                    self.persistAccounts()
+                }
+            }
+
+            if let pic = cached.pictureURL, !pic.isEmpty {
+                // Bug F-fixed: pass pubkey explicitly so the cache file
+                // is bound to the account that triggered the fetch, not
+                // whichever account happens to be current at write-time.
+                await cacheImage(from: pic, pubkey: pubkey)
+            }
+        }
+    }
+
     /// Fetch kind 0 profile from multiple relays in parallel. First valid result wins.
     /// Writes through to `currentAccount.profile` and persists the
     /// accounts list (Task 5: replaces the previous global
@@ -863,47 +919,14 @@ final class AppState {
         // Only refetch if cache is older than 1 hour
         if let existing = profile, Date().timeIntervalSince1970 - existing.fetchedAt < 3600 { return }
 
-        let relays = [
-            "wss://relay.powr.build",
-            "wss://relay.damus.io",
-            "wss://nos.lol",
-            "wss://relay.primal.net",
-            "wss://purplepag.es"
-        ]
+        Task { await self.fetchProfile(for: pubkey) }
+    }
 
-        Task {
-            await withTaskGroup(of: CachedProfile?.self) { group in
-                for url in relays {
-                    group.addTask {
-                        await Self.fetchProfile(from: url, pubkey: pubkey)
-                    }
-                }
-
-                // Pick the most-recent profile across all relays (kind:0 is replaceable, latest wins)
-                var newest: CachedProfile?
-                for await result in group {
-                    guard let result else { continue }
-                    if newest == nil { newest = result; continue }
-                    // Prefer the one with a picture if the other doesn't have one
-                    if newest?.pictureURL == nil && result.pictureURL != nil { newest = result }
-                }
-
-                guard let cached = newest else { return }
-
-                await MainActor.run {
-                    // Only update if the user hasn't switched accounts mid-fetch
-                    guard self.currentAccount?.pubkeyHex == pubkey else { return }
-                    self.updateCurrentProfile(cached)
-                }
-
-                if let pic = cached.pictureURL, !pic.isEmpty {
-                    // Pass `pubkey` (captured at fetchProfileIfNeeded entry)
-                    // so the cache file is bound to the account that triggered
-                    // this fetch, not whichever happens to be current now.
-                    await cacheImage(from: pic, pubkey: pubkey)
-                }
-            }
-        }
+    /// Force a profile refresh for any account, bypassing the 1-hour cache.
+    /// Called from AccountDetailView's "Refresh profile" action.
+    func refreshProfile(for pubkey: String) {
+        guard !pubkey.isEmpty else { return }
+        Task { await self.fetchProfile(for: pubkey) }
     }
 
     private static func fetchProfile(from relayURL: String, pubkey: String) async -> CachedProfile? {
