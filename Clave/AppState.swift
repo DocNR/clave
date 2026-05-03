@@ -1010,6 +1010,7 @@ final class AppState {
     /// the fetch actually finishes.
     @MainActor
     func refreshProfileAsync(for pubkey: String) async {
+        guard !pubkey.isEmpty else { return }
         await fetchProfile(for: pubkey)
     }
 

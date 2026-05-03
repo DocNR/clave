@@ -302,6 +302,9 @@ struct AccountDetailView: View {
         guard let account else { return }
         appState.deleteAccount(pubkey: account.pubkeyHex)
         UINotificationFeedbackGenerator().notificationOccurred(.warning)
+        // Dismissal happens via .onChange(of: account == nil) in body — once
+        // appState.accounts no longer contains this pubkey, the computed
+        // `account` returns nil and the onChange modifier triggers dismiss().
     }
 
     // MARK: - Helpers
