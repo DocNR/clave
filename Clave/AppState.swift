@@ -1052,7 +1052,12 @@ final class AppState {
             let nip05 = json["nip05"] as? String
             let lud16 = json["lud16"] as? String
 
-            // Skip empty profiles (no name AND no picture)
+            // Skip empty profiles (no name AND no picture).
+            // NOTE: about/nip05/lud16 are intentionally NOT included in this gate
+            // for v0.2.0 — preserves pre-existing behavior. Edge case: a kind:0
+            // with only bio/NIP-05/lightning data (no displayName, no pictureURL)
+            // returns nil and AccountDetailView's Profile section shows the empty
+            // state. Revisit if Tasks 5-7 surface false positives in the wild.
             if (displayName?.isEmpty ?? true) && (pictureURL?.isEmpty ?? true) {
                 return nil
             }
