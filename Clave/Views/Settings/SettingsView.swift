@@ -1,10 +1,12 @@
 import SwiftUI
 import LocalAuthentication
+import NostrSDK
 
 struct SettingsView: View {
     @Environment(AppState.self) private var appState
     @State private var showAddSheet = false
     @State private var showCapAlert = false
+    @State private var accountToDelete: Account?
     @State private var proxyURL = ""
     @State private var registrationStatus = ""
     @State private var devSettings = DeveloperSettings.shared
@@ -54,7 +56,7 @@ struct SettingsView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(account.displayLabel)
                                 .font(.subheadline.bold())
-                            Text(truncatedPubkey(account.pubkeyHex))
+                            Text(truncatedNpub(for: account))
                                 .font(.caption.monospaced())
                                 .foregroundStyle(.secondary)
                         }
@@ -64,6 +66,13 @@ struct SettingsView: View {
                                 .foregroundStyle(.green)
                                 .font(.caption)
                         }
+                    }
+                }
+                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                    Button(role: .destructive) {
+                        accountToDelete = account
+                    } label: {
+                        Label("Delete", systemImage: "trash")
                     }
                 }
             }
@@ -86,26 +95,83 @@ struct SettingsView: View {
         } message: {
             Text(AccountError.accountCapReached.errorDescription ?? "")
         }
+        .alert(deleteAlertTitle, isPresented: Binding(
+            get: { accountToDelete != nil },
+            set: { if !$0 { accountToDelete = nil } }
+        )) {
+            Button("Delete", role: .destructive) {
+                if let account = accountToDelete {
+                    withAnimation {
+                        appState.deleteAccount(pubkey: account.pubkeyHex)
+                        UINotificationFeedbackGenerator().notificationOccurred(.warning)
+                    }
+                }
+                accountToDelete = nil
+            }
+            Button("Cancel", role: .cancel) {
+                accountToDelete = nil
+            }
+        } message: {
+            Text(deleteAlertMessage)
+        }
     }
 
+    /// Avatar treatment matches the Home strip / slim banner: cached PFP with
+    /// opaque backing if available, AvatarView pubkey-hue fallback otherwise.
+    /// Per design-system.md treatment A → B selection rule.
     @ViewBuilder
     private func accountAvatarSmall(for account: Account) -> some View {
-        let initial = String(account.displayLabel.first ?? "?").uppercased()
-        let theme = AccountTheme.forAccount(pubkeyHex: account.pubkeyHex)
         ZStack {
-            LinearGradient(colors: [theme.start, theme.end],
-                           startPoint: .topLeading, endPoint: .bottomTrailing)
-            Text(initial)
-                .font(.caption.bold())
-                .foregroundStyle(.white)
+            if let img = cachedAvatar(for: account) {
+                Color(.systemBackground)
+                Image(uiImage: img)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                AvatarView(pubkeyHex: account.pubkeyHex,
+                           name: account.displayLabel,
+                           size: 32)
+            }
         }
         .frame(width: 32, height: 32)
         .clipShape(Circle())
     }
 
-    private func truncatedPubkey(_ hex: String) -> String {
-        guard hex.count > 16 else { return hex }
-        return String(hex.prefix(8)) + "…" + String(hex.suffix(4))
+    /// Per-account cached profile image (same source as AccountStripView /
+    /// SlimIdentityBar / AccountDetailView).
+    private func cachedAvatar(for account: Account) -> UIImage? {
+        guard let container = FileManager.default.containerURL(
+            forSecurityApplicationGroupIdentifier: SharedConstants.appGroup
+        ) else { return nil }
+        let url = container.appendingPathComponent("cached-profile-\(account.pubkeyHex).dat")
+        guard let data = try? Data(contentsOf: url),
+              let img = UIImage(data: data) else { return nil }
+        return img
+    }
+
+    private func truncatedNpub(for account: Account) -> String {
+        let n = npubString(for: account)
+        guard n.count > 20 else { return n }
+        return String(n.prefix(12)) + "…" + String(n.suffix(6))
+    }
+
+    private func npubString(for account: Account) -> String {
+        guard let pk = try? PublicKey.parse(publicKey: account.pubkeyHex) else {
+            return account.pubkeyHex
+        }
+        return (try? pk.toBech32()) ?? account.pubkeyHex
+    }
+
+    private var deleteAlertTitle: String {
+        let name = accountToDelete?.displayLabel ?? "this account"
+        return "Delete @\(name)?"
+    }
+
+    private var deleteAlertMessage: String {
+        guard let account = accountToDelete else { return "" }
+        let pairs = SharedStorage.getConnectedClients(for: account.pubkeyHex).count
+        let pairsClause = pairs == 0 ? "" : " and unpairs \(pairs) connection\(pairs == 1 ? "" : "s")"
+        return "Permanently removes the key\(pairsClause). This cannot be undone."
     }
 
     // MARK: - Permissions
