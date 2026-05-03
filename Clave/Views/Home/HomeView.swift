@@ -319,41 +319,30 @@ struct HomeView: View {
     // MARK: - Connected Clients
 
     private var pairNewConnectionRow: some View {
-        Button {
+        let theme = AccountTheme.forAccount(
+            pubkeyHex: appState.currentAccount?.pubkeyHex ?? ""
+        )
+        return Button {
             handlePairNewConnectionTap()
         } label: {
             HStack(spacing: 12) {
-                pairNewConnectionIcon
-                pairNewConnectionLabel
+                ZStack {
+                    Circle()
+                        .fill(theme.accent.opacity(0.18))
+                    Image(systemName: "plus")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(theme.accent)
+                }
+                .frame(width: 22, height: 22)
+                Text("Pair New Connection")
+                    .foregroundStyle(theme.accent)
+                    .font(.body)
+                    .fontWeight(.medium)
                 Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
         }
         .buttonStyle(.plain)
-    }
-
-    private var pairNewConnectionIcon: some View {
-        let theme = AccountTheme.forAccount(pubkeyHex: appState.signerPubkeyHex)
-        return ZStack {
-            Circle().fill(theme.accent)
-            Image(systemName: "link.badge.plus")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(.white)
-        }
-        .frame(width: 32, height: 32)
-    }
-
-    private var pairNewConnectionLabel: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text("Pair New Connection")
-                .font(.subheadline.bold())
-                .foregroundStyle(.primary)
-            Text("Add a NIP-46 client to sign with this account")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
+        .listRowBackground(Color.clear)
     }
 
     private var emptyClientsView: some View {
