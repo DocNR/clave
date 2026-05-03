@@ -12,5 +12,24 @@
 	<string>Clave uses the camera to scan Nostrconnect QR codes from web clients so you can sign events without typing long URLs.</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.docnr.clave.nostrconnect</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>nostrconnect</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.docnr.clave.clave</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>clave</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>
