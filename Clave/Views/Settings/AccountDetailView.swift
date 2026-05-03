@@ -17,7 +17,6 @@ struct AccountDetailView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
 
-    @State private var petnameInput: String = ""
     @State private var showDeleteAlert = false
     @State private var showRotateBunkerAlert = false
     @State private var showExportSheet = false
@@ -56,7 +55,6 @@ struct AccountDetailView: View {
             .listRowBackground(Color.clear)
 
             if account != nil {
-                petnameSection
                 profileSection
                 securitySection
                 deleteSection
@@ -70,9 +68,6 @@ struct AccountDetailView: View {
         .refreshable {
             guard let pubkey = account?.pubkeyHex else { return }
             await appState.refreshProfileAsync(for: pubkey)
-        }
-        .onAppear {
-            petnameInput = account?.petname ?? ""
         }
         .onChange(of: account == nil) { _, isNil in
             if isNil { dismiss() }
@@ -193,30 +188,6 @@ struct AccountDetailView: View {
         .buttonStyle(.plain)
     }
 
-    // MARK: - Petname
-
-    private var petnameSection: some View {
-        Section {
-            TextField("Display label", text: $petnameInput)
-                .autocorrectionDisabled()
-                .listRowBackground(Color.clear)
-            if let account, petnameInput.trimmingCharacters(in: .whitespacesAndNewlines) != (account.petname ?? "") {
-                Button("Save Petname") {
-                    let trimmed = petnameInput.trimmingCharacters(in: .whitespacesAndNewlines)
-                    appState.renamePetname(for: account.pubkeyHex,
-                                            to: trimmed.isEmpty ? nil : trimmed)
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                }
-                .listRowBackground(Color.clear)
-            }
-        } header: {
-            Text("Petname")
-                .font(.headline)
-                .foregroundStyle(.primary)
-                .textCase(nil)
-        }
-    }
-
     // MARK: - Profile (extended in Tasks 5-7)
 
     @ViewBuilder
@@ -226,6 +197,12 @@ struct AccountDetailView: View {
                 // Display name (kv-row, conditional on data)
                 if let displayName = account.profile?.displayName, !displayName.isEmpty {
                     LabeledContent("Display name", value: displayName)
+                        .listRowBackground(Color.clear)
+                }
+
+                // Username (kv-row, conditional on data) — kind:0 short handle.
+                if let name = account.profile?.name, !name.isEmpty {
+                    LabeledContent("Username", value: "@\(name)")
                         .listRowBackground(Color.clear)
                 }
 
@@ -336,6 +313,7 @@ struct AccountDetailView: View {
     private var profileIsEmpty: Bool {
         guard let profile = account?.profile else { return true }
         return (profile.displayName?.isEmpty ?? true)
+            && (profile.name?.isEmpty ?? true)
             && (profile.about?.isEmpty ?? true)
             && (profile.nip05?.isEmpty ?? true)
             && (profile.lud16?.isEmpty ?? true)

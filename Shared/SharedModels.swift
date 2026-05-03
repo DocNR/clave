@@ -267,7 +267,7 @@ struct CachedProfile: Codable, Equatable {
 /// key for every per-account record (Keychain entry, ClientPermissions,
 /// activity log, pending requests, bunker secret, etc.).
 ///
-/// Display name resolves: `petname ?? profile?.displayName ??
+/// Display name resolves: `profile?.displayName ?? profile?.name ??
 /// truncatedNpub`. Avatar resolves: cached profile picture → AvatarView's
 /// initials+gradient generated from `pubkeyHex` + display name.
 struct Account: Codable, Identifiable, Equatable {
@@ -308,11 +308,14 @@ struct Account: Codable, Identifiable, Equatable {
 }
 
 extension Account {
-    /// Display label preference: petname → kind:0 displayName → 8-char pubkey prefix.
-    /// Centralizes the resolution chain previously duplicated across view files.
+    /// Resolution order: kind:0 displayName → kind:0 name → 8-char npub prefix.
+    /// Petname (legacy editable nickname) is intentionally NOT consulted —
+    /// kind:0 is now the source of truth for account identity. The
+    /// `petname` field on Account remains for on-disk backward compat
+    /// but UI ignores it as of build 46.
     var displayLabel: String {
-        if let p = petname, !p.isEmpty { return p }
         if let d = profile?.displayName, !d.isEmpty { return d }
+        if let n = profile?.name, !n.isEmpty { return n }
         return String(pubkeyHex.prefix(8))
     }
 

@@ -199,6 +199,70 @@ final class AccountModelTests: XCTestCase {
         XCTAssertNil(decoded.name)
     }
 
+    // MARK: - Account.displayLabel (build 46 chain: displayName → name → prefix)
+
+    func testAccount_displayLabel_prefersDisplayNameOverPetname() throws {
+        // Build 46: petname is intentionally ignored even when set.
+        // displayName from kind:0 takes precedence.
+        let acc = Account(
+            pubkeyHex: "abc123def456abc123def456abc123def456abc123def456abc123def456abcd",
+            petname: "Legacy Petname",
+            addedAt: 1714500000.0,
+            profile: CachedProfile(displayName: "Display Name", fetchedAt: 1714500000.0)
+        )
+        XCTAssertEqual(acc.displayLabel, "Display Name")
+    }
+
+    func testAccount_displayLabel_fallsBackToNameWhenNoDisplayName() throws {
+        // displayName missing → falls back to kind:0 short name (handle).
+        let acc = Account(
+            pubkeyHex: "abc123def456abc123def456abc123def456abc123def456abc123def456abcd",
+            petname: nil,
+            addedAt: 1714500000.0,
+            profile: CachedProfile(name: "shorthandle", fetchedAt: 1714500000.0)
+        )
+        XCTAssertEqual(acc.displayLabel, "shorthandle")
+    }
+
+    func testAccount_displayLabel_ignoresPetname_usesPubkeyPrefixWhenNoProfile() throws {
+        // No profile cached at all — falls through to npub prefix.
+        // Petname is set but should be ignored.
+        let acc = Account(
+            pubkeyHex: "abc123def456abc123def456abc123def456abc123def456abc123def456abcd",
+            petname: "ShouldBeIgnored",
+            addedAt: 1714500000.0,
+            profile: nil
+        )
+        XCTAssertEqual(acc.displayLabel, "abc123de")
+    }
+
+    func testAccount_displayLabel_prefersDisplayNameOverName() throws {
+        // When both displayName and name are set, displayName wins.
+        let acc = Account(
+            pubkeyHex: "abc123def456abc123def456abc123def456abc123def456abc123def456abcd",
+            petname: nil,
+            addedAt: 1714500000.0,
+            profile: CachedProfile(
+                displayName: "Alice Smith",
+                name: "alice",
+                fetchedAt: 1714500000.0
+            )
+        )
+        XCTAssertEqual(acc.displayLabel, "Alice Smith")
+    }
+
+    func testAccount_displayLabel_usesPubkeyPrefixWhenProfileEmpty() throws {
+        // Profile exists but all identity fields are empty/nil — fall through
+        // to 8-char pubkey prefix.
+        let acc = Account(
+            pubkeyHex: "abc123def456abc123def456abc123def456abc123def456abc123def456abcd",
+            petname: nil,
+            addedAt: 1714500000.0,
+            profile: CachedProfile(fetchedAt: 1714500000.0)
+        )
+        XCTAssertEqual(acc.displayLabel, "abc123de")
+    }
+
     // MARK: - SharedConstants keys
 
     func testSharedConstants_newMultiAccountKeys_existAndAreUnique() {

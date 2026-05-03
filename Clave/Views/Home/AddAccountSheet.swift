@@ -1,12 +1,13 @@
 import SwiftUI
 
 /// Modal sheet for adding a new account. Two modes via segmented control:
-///   • Generate — random keypair, optional petname.
-///   • Paste    — user-supplied nsec, optional petname.
+///   • Generate — random keypair.
+///   • Paste    — user-supplied nsec.
 ///
 /// Reuses existing AppState methods (generateAccount, addAccount). On
 /// success, the new account becomes current automatically and the sheet
 /// dismisses with a toast confirmation (toast wired in HomeView).
+/// Profile identity (display name, username, etc.) is managed via clave.casa.
 struct AddAccountSheet: View {
     @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
@@ -18,7 +19,6 @@ struct AddAccountSheet: View {
 
     @State private var mode: Mode = .generate
     @State private var nsecInput: String = ""
-    @State private var petnameInput: String = ""
     @State private var errorMessage: String?
     @State private var isWorking = false
     @State private var showCapAlert = false
@@ -45,11 +45,6 @@ struct AddAccountSheet: View {
                             .autocorrectionDisabled()
                             .textInputAutocapitalization(.never)
                     }
-                }
-
-                Section("Petname (optional)") {
-                    TextField("e.g. Personal", text: $petnameInput)
-                        .autocorrectionDisabled()
                 }
 
                 if let errorMessage {
@@ -104,15 +99,13 @@ struct AddAccountSheet: View {
         }
         errorMessage = nil
         isWorking = true
-        let petname = petnameInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        let petnameOrNil = petname.isEmpty ? nil : petname
 
         do {
             switch mode {
             case .generate:
-                _ = try appState.generateAccount(petname: petnameOrNil)
+                _ = try appState.generateAccount(petname: nil)
             case .paste:
-                _ = try appState.addAccount(nsec: trimmedNsec, petname: petnameOrNil)
+                _ = try appState.addAccount(nsec: trimmedNsec, petname: nil)
             }
             UINotificationFeedbackGenerator().notificationOccurred(.success)
             dismiss()
