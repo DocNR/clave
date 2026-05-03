@@ -283,6 +283,21 @@ struct AccountDetailView: View {
                 }
                 .listRowBackground(Color.clear)
 
+                // Edit on clave.casa (always visible, outbound)
+                Button {
+                    openClaveCasaEditor()
+                } label: {
+                    HStack {
+                        Label("Edit on clave.casa", systemImage: "person.text.rectangle")
+                            .foregroundStyle(theme.accent)
+                        Spacer()
+                        Image(systemName: "arrow.up.right.square")
+                            .foregroundStyle(theme.accent.opacity(0.7))
+                            .font(.caption)
+                    }
+                }
+                .listRowBackground(Color.clear)
+
                 // Empty-state hint when no profile is cached at all
                 if profileIsEmpty {
                     Text("No profile published. Pull down to refresh.")
@@ -397,6 +412,26 @@ struct AccountDetailView: View {
         // Dismissal happens via .onChange(of: account == nil) in body — once
         // appState.accounts no longer contains this pubkey, the computed
         // `account` returns nil and the onChange modifier triggers dismiss().
+    }
+
+    /// Opens clave.casa's kind:0 editor with this account's bunker URI
+    /// pre-bound via URL fragment (never reaches a server).
+    /// clave.casa parses the fragment client-side and either re-uses an existing
+    /// pairing for this signer pubkey (skip handshake) or pairs fresh.
+    private func openClaveCasaEditor() {
+        guard let account else { return }
+        guard let bunkerURI = appState.bunkerURI(for: account.pubkeyHex) else {
+            return
+        }
+        guard let encoded = bunkerURI.addingPercentEncoding(
+            withAllowedCharacters: .urlQueryAllowed
+        ) else {
+            return
+        }
+        let urlString = "\(SharedConstants.claveCasaEditBaseURL)#bunker=\(encoded)"
+        guard let url = URL(string: urlString) else { return }
+        UIApplication.shared.open(url)
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
     }
 
     // MARK: - Helpers
