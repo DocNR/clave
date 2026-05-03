@@ -52,12 +52,15 @@ final class DeeplinkRouterTests: XCTestCase {
         }
     }
 
-    // Other scheme → routes to .ignore
-    func testOtherScheme_routesToIgnore() throws {
+    /// HTTPS URL on a non-clave.casa host → routes to .ignore.
+    /// (Phase B added the `https` scheme branch; the host guard rejects
+    /// any host other than `clave.casa` so external HTTPS URLs can't
+    /// inadvertently trigger Clave routing.)
+    func testHTTPS_nonClaveCasaHost_routesToIgnore() throws {
         let url = URL(string: "https://example.com/foo")!
         let result = DeeplinkRouter.route(url: url, accountCount: 1)
         guard case .ignore = result else {
-            return XCTFail("Expected .ignore for non-nostrconnect/clave scheme, got \(result)")
+            return XCTFail("Expected .ignore for non-clave.casa host, got \(result)")
         }
     }
 
@@ -98,6 +101,17 @@ final class DeeplinkRouterTests: XCTestCase {
     /// Universal Link without `uri` query param → routes to .ignore.
     func testUniversalLink_missingURIParam_routesToIgnore() throws {
         let url = URL(string: "https://clave.casa/connect/")!
+        let result = DeeplinkRouter.route(url: url, accountCount: 1)
+        guard case .ignore = result else {
+            return XCTFail("Expected .ignore, got \(result)")
+        }
+    }
+
+    /// Universal Link with present-but-empty `uri` value → routes to .ignore.
+    /// Distinct code path from missing param: queryItems returns "" not nil.
+    /// The router's `!uriParam.isEmpty` guard catches this.
+    func testUniversalLink_emptyURIValue_routesToIgnore() throws {
+        let url = URL(string: "https://clave.casa/connect/?uri=")!
         let result = DeeplinkRouter.route(url: url, accountCount: 1)
         guard case .ignore = result else {
             return XCTFail("Expected .ignore, got \(result)")
