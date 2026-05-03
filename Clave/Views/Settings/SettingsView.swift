@@ -95,23 +95,35 @@ struct SettingsView: View {
         } message: {
             Text(AccountError.accountCapReached.errorDescription ?? "")
         }
-        .alert(deleteAlertTitle, isPresented: Binding(
-            get: { accountToDelete != nil },
-            set: { if !$0 { accountToDelete = nil } }
-        )) {
+        // Use the .alert(_:isPresented:presenting:actions:message:) overload —
+        // the `presenting:` parameter captures the optional's value at
+        // present-time and passes the unwrapped Account into the closures
+        // by-value. Earlier code re-read `accountToDelete` inside the Delete
+        // button action via `if let account = accountToDelete`, which silently
+        // failed when SwiftUI's Binding-backed alert dismissal setter fired
+        // mid-flight (triggered by Section re-renders from any appState.accounts
+        // mutation: profile fetch landing, L1 wake, pull-to-refresh, etc.).
+        // The captured `account` here survives even if accountToDelete is
+        // nil'd by the setter — race eliminated.
+        .alert(
+            deleteAlertTitle,
+            isPresented: Binding(
+                get: { accountToDelete != nil },
+                set: { if !$0 { accountToDelete = nil } }
+            ),
+            presenting: accountToDelete
+        ) { account in
             Button("Delete", role: .destructive) {
-                if let account = accountToDelete {
-                    withAnimation {
-                        appState.deleteAccount(pubkey: account.pubkeyHex)
-                        UINotificationFeedbackGenerator().notificationOccurred(.warning)
-                    }
+                withAnimation {
+                    appState.deleteAccount(pubkey: account.pubkeyHex)
+                    UINotificationFeedbackGenerator().notificationOccurred(.warning)
                 }
                 accountToDelete = nil
             }
             Button("Cancel", role: .cancel) {
                 accountToDelete = nil
             }
-        } message: {
+        } message: { _ in
             Text(deleteAlertMessage)
         }
     }
