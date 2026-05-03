@@ -1005,6 +1005,14 @@ final class AppState {
         Task { await self.fetchProfile(for: pubkey) }
     }
 
+    /// Async variant of refreshProfile(for:) for SwiftUI .refreshable callers.
+    /// Awaits completion so the pull-to-refresh spinner stays visible until
+    /// the fetch actually finishes.
+    @MainActor
+    func refreshProfileAsync(for pubkey: String) async {
+        await fetchProfile(for: pubkey)
+    }
+
     /// Fetch kind:0 for every account on launch, throttled per-account.
     /// Each account's `profile.fetchedAt` is checked against the 1-hour
     /// window so accounts with fresh caches are skipped. Replaces the

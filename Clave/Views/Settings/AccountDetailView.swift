@@ -2,13 +2,15 @@ import SwiftUI
 import NostrSDK
 
 /// Per-account detail screen. Reachable from:
-///   • AccountStripView active-pill tap (Task 2)
-///   • AccountStripView long-press on any pill (Task 2, via pendingDetailPubkey)
-///   • SettingsView Accounts section row tap (Task 6)
+///   • AccountStripView active-pill tap
+///   • AccountStripView long-press on any pill (via pendingDetailPubkey)
+///   • SettingsView Accounts section row tap
 ///
-/// Skeleton in this task: gradient banner header + petname rename + delete.
-/// Profile section + rotate-bunker + export-key + refresh-profile come in
-/// Task 5.
+/// Visual direction (per docs/superpowers/specs/2026-05-03-account-detail-view-redesign-design.md):
+/// identity-zone banner extends Home's per-account theme; body Form sits on
+/// Home's ambient gradient with .scrollContentBackground(.hidden). Section
+/// headers use sentence-case .headline + .textCase(nil) to match Home's
+/// "Connected Clients" treatment.
 struct AccountDetailView: View {
     let pubkeyHex: String
 
@@ -21,17 +23,26 @@ struct AccountDetailView: View {
     @State private var showExportSheet = false
 
     /// The Account this view is for. Reads from appState.accounts each time
-    /// (auto-updates on rename / delete). nil if account was deleted while
-    /// viewing — view dismisses on appearance of nil.
+    /// so rename / delete from elsewhere update the view live. nil if account
+    /// was deleted while viewing — view dismisses on appearance of nil.
     private var account: Account? {
         appState.accounts.first { $0.pubkeyHex == pubkeyHex }
+    }
+
+    /// Per-account theme. Defensive fallback to palette[0] if account is nil
+    /// mid-render so the gradient never disappears.
+    private var theme: AccountTheme {
+        if let account {
+            return AccountTheme.forAccount(pubkeyHex: account.pubkeyHex)
+        }
+        return AccountTheme.palette[0]
     }
 
     var body: some View {
         Form {
             // Banner appears as the first section's "header" so it gets
-            // full-bleed treatment in Form / List. SwiftUI Form drops list
-            // padding for clear sections we render manually.
+            // full-bleed treatment in Form. SwiftUI Form drops list padding
+            // for clear sections we render manually.
             Section {
                 EmptyView()
             } header: {
@@ -41,6 +52,7 @@ struct AccountDetailView: View {
                         .textCase(nil)
                 }
             }
+            .listRowBackground(Color.clear)
 
             if account != nil {
                 petnameSection
@@ -49,8 +61,15 @@ struct AccountDetailView: View {
                 deleteSection
             }
         }
+        .scrollContentBackground(.hidden)
+        .background(ambientGradient.ignoresSafeArea())
+        .animation(.easeInOut(duration: 0.3), value: appState.currentAccount?.pubkeyHex)
         .navigationTitle("Account")
         .navigationBarTitleDisplayMode(.inline)
+        .refreshable {
+            guard let pubkey = account?.pubkeyHex else { return }
+            await appState.refreshProfileAsync(for: pubkey)
+        }
         .onAppear {
             petnameInput = account?.petname ?? ""
         }
@@ -76,11 +95,25 @@ struct AccountDetailView: View {
         }
     }
 
+    // MARK: - Ambient gradient
+
+    private var ambientGradient: LinearGradient {
+        LinearGradient(
+            stops: [
+                .init(color: theme.start.opacity(0.42), location: 0.0),
+                .init(color: theme.end.opacity(0.22),   location: 0.30),
+                .init(color: theme.end.opacity(0.10),   location: 0.60),
+                .init(color: theme.start.opacity(0.04), location: 1.0),
+            ],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+    }
+
     // MARK: - Banner
 
     @ViewBuilder
     private func bannerHeader(for account: Account) -> some View {
-        let theme = AccountTheme.forAccount(pubkeyHex: account.pubkeyHex)
         ZStack(alignment: .leading) {
             LinearGradient(
                 colors: [theme.start, theme.end],
@@ -128,9 +161,6 @@ struct AccountDetailView: View {
         .overlay(Circle().stroke(Color.white.opacity(0.4), lineWidth: 2))
     }
 
-    /// Per-account cached profile image (same source as AccountStripView and
-    /// SlimIdentityBar). Synchronous read on each body evaluation; files are
-    /// small (~50KB) so the cost is negligible.
     private func cachedAvatar(for account: Account) -> UIImage? {
         guard let container = FileManager.default.containerURL(
             forSecurityApplicationGroupIdentifier: SharedConstants.appGroup
@@ -158,9 +188,10 @@ struct AccountDetailView: View {
     // MARK: - Petname
 
     private var petnameSection: some View {
-        Section("Petname") {
+        Section {
             TextField("Display label", text: $petnameInput)
                 .autocorrectionDisabled()
+                .listRowBackground(Color.clear)
             if let account, petnameInput.trimmingCharacters(in: .whitespacesAndNewlines) != (account.petname ?? "") {
                 Button("Save Petname") {
                     let trimmed = petnameInput.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -168,30 +199,37 @@ struct AccountDetailView: View {
                                             to: trimmed.isEmpty ? nil : trimmed)
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 }
+                .listRowBackground(Color.clear)
             }
+        } header: {
+            Text("Petname")
+                .font(.headline)
+                .foregroundStyle(.primary)
+                .textCase(nil)
         }
     }
 
-    // MARK: - Profile
+    // MARK: - Profile (placeholder — extended in Tasks 5-7)
 
     @ViewBuilder
     private var profileSection: some View {
         if let account {
-            Section("Profile") {
+            Section {
                 if let profile = account.profile,
                    let name = profile.displayName, !name.isEmpty {
                     LabeledContent("Display name", value: name)
+                        .listRowBackground(Color.clear)
                 } else {
-                    Text("No profile published. Tap Refresh to fetch.")
+                    Text("No profile published. Pull down to refresh.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+                        .listRowBackground(Color.clear)
                 }
-                Button {
-                    appState.refreshProfile(for: account.pubkeyHex)
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                } label: {
-                    Label("Refresh profile", systemImage: "arrow.clockwise")
-                }
+            } header: {
+                Text("Profile")
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                    .textCase(nil)
             }
         }
     }
@@ -199,24 +237,29 @@ struct AccountDetailView: View {
     // MARK: - Security
 
     private var securitySection: some View {
-        Section("Security") {
+        Section {
             if let account {
                 Button {
                     showRotateBunkerAlert = true
                 } label: {
                     Label("Rotate bunker secret", systemImage: "arrow.triangle.2.circlepath")
                 }
+                .listRowBackground(Color.clear)
 
-                // Export only available for the CURRENT account (existing
-                // ExportKeySheet uses the current keychain entry).
                 if account.pubkeyHex == appState.currentAccount?.pubkeyHex {
                     Button {
                         showExportSheet = true
                     } label: {
                         Label("Export private key", systemImage: "key.viewfinder")
                     }
+                    .listRowBackground(Color.clear)
                 }
             }
+        } header: {
+            Text("Security")
+                .font(.headline)
+                .foregroundStyle(.primary)
+                .textCase(nil)
         }
     }
 
@@ -235,9 +278,11 @@ struct AccountDetailView: View {
             } label: {
                 Label("Delete Account", systemImage: "trash")
             }
+            .listRowBackground(Color.clear)
         } footer: {
             Text("Deletes the private key from this device and unpairs all clients on this account. This cannot be undone — back up your nsec first if you may need it later.")
                 .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -257,7 +302,6 @@ struct AccountDetailView: View {
         guard let account else { return }
         appState.deleteAccount(pubkey: account.pubkeyHex)
         UINotificationFeedbackGenerator().notificationOccurred(.warning)
-        // dismissal happens via .onChange(of: account == nil) above
     }
 
     // MARK: - Helpers
