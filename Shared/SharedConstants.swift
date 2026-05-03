@@ -5,6 +5,12 @@ enum SharedConstants {
     static let keychainService = "dev.nostr.clave.shared"
     static let keychainAccount = "signer-nsec"
     static let relayURL = "wss://relay.powr.build"
+    /// Base URL for the clave.casa kind:0 profile editor.
+    /// Tap target for the "Edit on clave.casa" row in AccountDetailView.
+    /// Construct full link as `\(claveCasaEditBaseURL)#bunker=<URL-encoded-bunker-uri>`.
+    /// Fragment (#) ensures the bunker URI never reaches Cloudflare logs;
+    /// clave.casa parses client-side and `history.replaceState`-scrubs after parse.
+    static let claveCasaEditBaseURL: String = "https://clave.casa/edit"
     // TEMP for feat/multi-account internal-TestFlight builds: points at the
     // parallel test proxy on Dell (port 3047), which has Stage A's
     // `signer_pubkey` payload field deployed. Production proxy (the

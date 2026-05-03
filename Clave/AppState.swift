@@ -176,14 +176,24 @@ final class AppState {
     // the cache adds no value.
 
     var bunkerURI: String {
-        guard !signerPubkeyHex.isEmpty else { return "" }
+        bunkerURI(for: signerPubkeyHex) ?? ""
+    }
+
+    /// Per-account variant of `bunkerURI`. Returns the bunker URI for the
+    /// given signer pubkey, or nil if either the pubkey is empty or no bunker
+    /// secret has been initialized for that account.
+    ///
+    /// Same construction as the single-account `bunkerURI` computed property,
+    /// which now delegates to this method.
+    func bunkerURI(for pubkey: String) -> String? {
+        guard !pubkey.isEmpty else { return nil }
+        let secret = SharedStorage.getBunkerSecret(for: pubkey)
+        guard !secret.isEmpty else { return nil }
         var allowed = CharacterSet.urlQueryAllowed
         allowed.remove(charactersIn: ":/")
         let relay = SharedConstants.relayURL
             .addingPercentEncoding(withAllowedCharacters: allowed) ?? SharedConstants.relayURL
-        // Always read the latest secret from SharedStorage (NSE may have rotated it)
-        let currentSecret = SharedStorage.getBunkerSecret(for: signerPubkeyHex)
-        return "bunker://\(signerPubkeyHex)?relay=\(relay)&secret=\(currentSecret)"
+        return "bunker://\(pubkey)?relay=\(relay)&secret=\(secret)"
     }
 
     func loadState() {
