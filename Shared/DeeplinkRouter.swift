@@ -27,17 +27,34 @@ enum DeeplinkRouter {
     static func route(url: URL, accountCount: Int) -> Outcome {
         switch url.scheme {
         case "nostrconnect":
-            guard let parsed = try? NostrConnectParser.parse(url.absoluteString) else {
+            return routeNostrconnect(parsed: try? NostrConnectParser.parse(url.absoluteString),
+                                     accountCount: accountCount)
+        case "https":
+            // Universal Links — clave.casa/connect/?uri=<encoded-nostrconnect>
+            // Note: URL.path strips trailing slashes, so /connect/ → /connect.
+            guard url.host == "clave.casa",
+                  url.path == "/connect",
+                  let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+                  let uriParam = components.queryItems?.first(where: { $0.name == "uri" })?.value,
+                  !uriParam.isEmpty else {
                 return .ignore
             }
-            if accountCount <= 0 { return .ignore }
-            if accountCount == 1 { return .approve(parsed) }
-            return .pickAccount(parsed)
+            // queryItems already URL-decodes the value — parse it directly
+            return routeNostrconnect(parsed: try? NostrConnectParser.parse(uriParam),
+                                     accountCount: accountCount)
         case "clave":
             // Reserved namespace — no handlers yet.
             return .ignore
         default:
             return .ignore
         }
+    }
+
+    private static func routeNostrconnect(parsed: NostrConnectParser.ParsedURI?,
+                                           accountCount: Int) -> Outcome {
+        guard let parsed else { return .ignore }
+        if accountCount <= 0 { return .ignore }
+        if accountCount == 1 { return .approve(parsed) }
+        return .pickAccount(parsed)
     }
 }

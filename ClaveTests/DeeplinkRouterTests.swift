@@ -60,4 +60,66 @@ final class DeeplinkRouterTests: XCTestCase {
             return XCTFail("Expected .ignore for non-nostrconnect/clave scheme, got \(result)")
         }
     }
+
+    // MARK: - Universal Links (https://clave.casa/connect/?uri=...)
+
+    /// Valid Universal Link with single account → routes to .approve(parsedURI).
+    /// Encoded nostrconnect URI must be in the `uri` query parameter.
+    func testUniversalLink_singleAccount_routesToApprove() throws {
+        let nostrconnect = "nostrconnect://abc123def456abc123def456abc123def456abc123def456abc123def456abcd?relay=wss%3A%2F%2Frelay.example.com&secret=topsecret"
+        // Must exclude ?&=# from allowed set so they get percent-encoded and
+        // don't fragment the outer URL's query string.
+        var allowed = CharacterSet.urlQueryAllowed
+        allowed.remove(charactersIn: "?&=#")
+        let encoded = nostrconnect.addingPercentEncoding(withAllowedCharacters: allowed)!
+        let url = URL(string: "https://clave.casa/connect/?uri=\(encoded)")!
+        let result = DeeplinkRouter.route(url: url, accountCount: 1)
+        guard case .approve(let parsed) = result else {
+            return XCTFail("Expected .approve, got \(result)")
+        }
+        XCTAssertEqual(parsed.clientPubkey, "abc123def456abc123def456abc123def456abc123def456abc123def456abcd")
+    }
+
+    /// Universal Link with multi-account → routes to .pickAccount.
+    func testUniversalLink_multiAccount_routesToPickAccount() throws {
+        let nostrconnect = "nostrconnect://abc123def456abc123def456abc123def456abc123def456abc123def456abcd?relay=wss%3A%2F%2Frelay.example.com&secret=topsecret"
+        // Must exclude ?&=# from allowed set so they get percent-encoded and
+        // don't fragment the outer URL's query string.
+        var allowed = CharacterSet.urlQueryAllowed
+        allowed.remove(charactersIn: "?&=#")
+        let encoded = nostrconnect.addingPercentEncoding(withAllowedCharacters: allowed)!
+        let url = URL(string: "https://clave.casa/connect/?uri=\(encoded)")!
+        let result = DeeplinkRouter.route(url: url, accountCount: 3)
+        guard case .pickAccount = result else {
+            return XCTFail("Expected .pickAccount, got \(result)")
+        }
+    }
+
+    /// Universal Link without `uri` query param → routes to .ignore.
+    func testUniversalLink_missingURIParam_routesToIgnore() throws {
+        let url = URL(string: "https://clave.casa/connect/")!
+        let result = DeeplinkRouter.route(url: url, accountCount: 1)
+        guard case .ignore = result else {
+            return XCTFail("Expected .ignore, got \(result)")
+        }
+    }
+
+    /// Universal Link with malformed `uri` value → routes to .ignore.
+    func testUniversalLink_malformedURI_routesToIgnore() throws {
+        let url = URL(string: "https://clave.casa/connect/?uri=garbage-not-a-nostrconnect-uri")!
+        let result = DeeplinkRouter.route(url: url, accountCount: 1)
+        guard case .ignore = result else {
+            return XCTFail("Expected .ignore, got \(result)")
+        }
+    }
+
+    /// HTTPS URL on clave.casa but NOT /connect/ path → routes to .ignore.
+    /// AASA scopes Universal Links to /connect/ ONLY; /edit and / must
+    /// always go to Safari/clave.casa, never to Clave iOS.
+    func testUniversalLink_wrongPath_routesToIgnore() throws {
+        let editURL = URL(string: "https://clave.casa/edit#bunker=anything")!
+        let landingURL = URL(string: "https://clave.casa/")!
+        XCTAssertEqual(DeeplinkRouter.route(url: editURL, accountCount: 1), .ignore)
+        XCTAssertEqual(DeeplinkRouter.route(url: landingURL, accountCount: 1), .ignore)
+    }
 }
