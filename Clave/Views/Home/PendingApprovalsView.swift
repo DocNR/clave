@@ -3,6 +3,7 @@ import SwiftUI
 struct PendingApprovalsView: View {
     @Environment(AppState.self) private var appState
     @State private var processing: Set<String> = []
+    @State private var approveErrorMessage: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -33,6 +34,14 @@ struct PendingApprovalsView: View {
         // cards (identityBar, statsRow) can self-pad. This mirrors that
         // pattern so the orange border doesn't touch screen edges.
         .padding(.horizontal)
+        .alert("Couldn't approve request", isPresented: .init(
+            get: { approveErrorMessage != nil },
+            set: { if !$0 { approveErrorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) { approveErrorMessage = nil }
+        } message: {
+            Text(approveErrorMessage ?? "Unknown error")
+        }
     }
 
     private func requestRow(_ request: PendingRequest) -> some View {
@@ -144,12 +153,17 @@ struct PendingApprovalsView: View {
     private func approve(_ request: PendingRequest) {
         processing.insert(request.id)
         Task {
-            let success = await appState.approvePendingRequest(request)
+            let outcome = await appState.approvePendingRequest(request)
             processing.remove(request.id)
-            if success {
+            switch outcome {
+            case .signed:
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
-            } else {
+            case .failedKeepingPending(let reason):
                 UINotificationFeedbackGenerator().notificationOccurred(.error)
+                approveErrorMessage = reason
+            case .failedAndRemoved(let reason):
+                UINotificationFeedbackGenerator().notificationOccurred(.error)
+                approveErrorMessage = reason
             }
         }
     }

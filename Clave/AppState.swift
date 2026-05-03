@@ -1097,26 +1097,45 @@ final class AppState {
         // No-op: bunkerURI reads SharedStorage on every access now.
     }
 
+    /// Outcome of an approve-pending-request attempt. Used by
+    /// PendingApprovalsView to decide between success haptic, error alert, or
+    /// keeping the pending row available for retry.
+    enum ApproveOutcome: Equatable {
+        case signed
+        case failedKeepingPending(reason: String)
+        case failedAndRemoved(reason: String)
+    }
+
     /// Approve a pending request: sign and publish the response from the app.
     /// Task 5: load by the request's signer pubkey (PendingRequest.signerPubkeyHex,
     /// added in Task 3). Falls back to current account for legacy rows or when
     /// the request was queued without a signer (pre-Task-3 NSE writes).
-    func approvePendingRequest(_ request: PendingRequest) async -> Bool {
+    ///
+    /// Failure handling: if the relay rejects the response wrapper (transient
+    /// drop, rate-limit, auth) we keep the pending row so the user can retry.
+    /// Hard failures (no nsec, malformed event JSON, decoder error) clear the
+    /// row because retry can't succeed.
+    func approvePendingRequest(_ request: PendingRequest) async -> ApproveOutcome {
         let signer = request.signerPubkeyHex.isEmpty ? signerPubkeyHex : request.signerPubkeyHex
         guard !signer.isEmpty,
-              let nsec = SharedKeychain.loadNsec(for: signer) else { return false }
+              let nsec = SharedKeychain.loadNsec(for: signer) else {
+            removePending(request)
+            return .failedAndRemoved(reason: "Signing key unavailable.")
+        }
 
         let privateKey: Data
         do {
             privateKey = try Bech32.decodeNsec(nsec)
         } catch {
-            return false
+            removePending(request)
+            return .failedAndRemoved(reason: "Could not decode signing key.")
         }
 
         // Reconstruct the request event dict from stored JSON
         guard let data = request.requestEventJSON.data(using: .utf8),
               let requestEvent = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return false
+            removePending(request)
+            return .failedAndRemoved(reason: "Pending request data corrupted.")
         }
 
         do {
@@ -1127,13 +1146,26 @@ final class AppState {
                 skipDedupe: true,
                 responseRelayUrl: request.responseRelayUrl
             )
-            SharedStorage.removePendingRequest(id: request.id)
-            PendingApprovalBanner.clear(requestId: request.id)
-            refreshPendingRequests()
-            return result.status == "signed"
+            if result.status == "signed" {
+                removePending(request)
+                return .signed
+            }
+            // Soft failure (most commonly: relay returned OK:false on the
+            // signed response wrapper). Keep the pending row so the user can
+            // retry without re-initiating from the client.
+            let reason = result.errorMessage ?? "Relay did not accept the signed response. Try Approve again."
+            return .failedKeepingPending(reason: reason)
         } catch {
-            return false
+            // Decryption/sign error — not recoverable by retry on the same row.
+            removePending(request)
+            return .failedAndRemoved(reason: error.localizedDescription)
         }
+    }
+
+    private func removePending(_ request: PendingRequest) {
+        SharedStorage.removePendingRequest(id: request.id)
+        PendingApprovalBanner.clear(requestId: request.id)
+        refreshPendingRequests()
     }
 
     func denyPendingRequest(_ request: PendingRequest) {
