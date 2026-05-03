@@ -1048,6 +1048,9 @@ final class AppState {
 
             let displayName = (json["display_name"] as? String) ?? (json["name"] as? String)
             let pictureURL = json["picture"] as? String
+            let about = json["about"] as? String
+            let nip05 = json["nip05"] as? String
+            let lud16 = json["lud16"] as? String
 
             // Skip empty profiles (no name AND no picture)
             if (displayName?.isEmpty ?? true) && (pictureURL?.isEmpty ?? true) {
@@ -1057,6 +1060,9 @@ final class AppState {
             return CachedProfile(
                 displayName: displayName,
                 pictureURL: pictureURL,
+                about: about,
+                nip05: nip05,
+                lud16: lud16,
                 fetchedAt: Date().timeIntervalSince1970
             )
         } catch {
