@@ -1,4 +1,5 @@
 import SwiftUI
+import CoreImage.CIFilterBuiltins
 
 /// Focused view for the "Show my QR" connection method. User shows the
 /// bunker URI to a client (display + QR + copy). Single-use secret rotates
@@ -7,6 +8,20 @@ struct ConnectShowQRView: View {
     @Environment(AppState.self) private var appState
     @State private var showQR = false
     @State private var copiedBunker = false
+
+    /// QR generator — same CIFilter shape QRCodeView uses for the full-screen
+    /// sheet. Inlined here so the bunker QR is visible without an extra tap.
+    private func qrImage(for content: String) -> Image {
+        let context = CIContext()
+        let filter = CIFilter.qrCodeGenerator()
+        filter.message = Data(content.utf8)
+        filter.correctionLevel = "M"
+        guard let outputImage = filter.outputImage,
+              let cgImage = context.createCGImage(outputImage, from: outputImage.extent) else {
+            return Image(systemName: "xmark.circle")
+        }
+        return Image(uiImage: UIImage(cgImage: cgImage))
+    }
 
     var body: some View {
         ScrollView {
@@ -29,20 +44,19 @@ struct ConnectShowQRView: View {
             Button {
                 showQR = true
             } label: {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(Color(.secondarySystemGroupedBackground))
-                    VStack(spacing: 8) {
-                        Image(systemName: "qrcode")
-                            .font(.system(size: 64))
-                            .foregroundStyle(Color.accentColor)
-                        Text("Tap for full screen")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(32)
+                VStack(spacing: 6) {
+                    qrImage(for: appState.bunkerURI)
+                        .interpolation(.none)
+                        .resizable()
+                        .scaledToFit()
+                        .padding(12)
+                        .background(Color.white)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .frame(maxWidth: 240)
+                    Text("Tap for full screen")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                 }
-                .aspectRatio(1, contentMode: .fit)
             }
             .buttonStyle(.plain)
 
