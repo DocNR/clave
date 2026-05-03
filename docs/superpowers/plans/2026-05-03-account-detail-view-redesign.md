@@ -22,7 +22,7 @@
 | `ClaveTests/AccountModelTests.swift` | Round-trip + legacy-decode tests for the new fields | 1 |
 | `Clave/AppState.swift` | `fetchProfile(from:pubkey:)` JSON parse extracts the new fields | 2 |
 | `Shared/SharedConstants.swift` | `claveCasaEditBaseURL` constant for the outbound link | 3 |
-| `Shared/SharedStorage.swift` | `bunkerURIString(for:)` helper (lifts existing construction logic) | 3 |
+| `Clave/AppState.swift` | `bunkerURI(for:)` per-account helper (parallel to existing single-account computed property; existing property delegates to new method) | 3 |
 | `Clave/Views/Settings/AccountDetailView.swift` | Full visual rewrite then incremental Profile additions | 4–7 |
 | `Clave/Views/Home/HomeView.swift` | `pairNewConnectionRow` private var → HIG inline action | 8 |
 
