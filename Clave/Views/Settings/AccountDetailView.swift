@@ -423,8 +423,16 @@ struct AccountDetailView: View {
         guard let bunkerURI = appState.bunkerURI(for: account.pubkeyHex) else {
             return
         }
+        // Encode the bunker URI as opaque data so it's safe inside a URL
+        // fragment. Apple's `.urlQueryAllowed` and `.urlFragmentAllowed` both
+        // permit `&`, `=`, `?` per RFC 3986's sub-delims, which would break
+        // `URLSearchParams`-style parsing on clave.casa (the bunker URI itself
+        // contains `?relay=...&secret=...`). This matches JavaScript's
+        // `encodeURIComponent` charset (unreserved per RFC 3986).
+        var unreserved = CharacterSet.alphanumerics
+        unreserved.insert(charactersIn: "-._~")
         guard let encoded = bunkerURI.addingPercentEncoding(
-            withAllowedCharacters: .urlQueryAllowed
+            withAllowedCharacters: unreserved
         ) else {
             return
         }
