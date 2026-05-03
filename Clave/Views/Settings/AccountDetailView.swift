@@ -39,7 +39,7 @@ struct AccountDetailView: View {
     }
 
     var body: some View {
-        Form {
+        List {
             if let account {
                 Section {
                     bannerHeader(for: account)
@@ -54,6 +54,7 @@ struct AccountDetailView: View {
                 deleteSection
             }
         }
+        .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .background(ambientGradient.ignoresSafeArea())
         .animation(.easeInOut(duration: 0.3), value: appState.currentAccount?.pubkeyHex)
