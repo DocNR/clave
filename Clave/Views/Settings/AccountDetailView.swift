@@ -77,6 +77,13 @@ struct AccountDetailView: View {
         .onChange(of: account == nil) { _, isNil in
             if isNil { dismiss() }
         }
+        .onChange(of: account?.profile?.about) { _, _ in
+            // Reset expansion when the bio changes (account switch, pull-to-
+            // refresh updating the cached profile). Prevents stale-state cases
+            // where a long bio was expanded, then the next bio is short and
+            // the toggle pill disappears but lineLimit(nil) is still applied.
+            isAboutExpanded = false
+        }
         .alert("Delete \(deleteAlertNameSnippet)?",
                isPresented: $showDeleteAlert) {
             Button("Delete", role: .destructive) { performDelete() }
