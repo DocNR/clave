@@ -174,6 +174,31 @@ final class AccountModelTests: XCTestCase {
         XCTAssertEqual(base, base)
     }
 
+    func testCachedProfile_codable_preservesNameField() throws {
+        // The `name` field (kind:0 short handle) is distinct from displayName
+        // (the long human-readable name).
+        let original = CachedProfile(
+            displayName: "Frank Smith",
+            name: "frank",
+            pictureURL: nil,
+            fetchedAt: 1700000000.0
+        )
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(CachedProfile.self, from: data)
+        XCTAssertEqual(decoded.displayName, "Frank Smith")
+        XCTAssertEqual(decoded.name, "frank")
+    }
+
+    func testCachedProfile_decodesLegacyFormat_missingNameField() throws {
+        // Pre-build-46 on-disk blob — has displayName but no `name` key.
+        // Codable's optional defaulting must keep `name` as nil; no migration.
+        let json = #"{"displayName":"Grace","pictureURL":"https://example.com/g.png","fetchedAt":1700000000.0}"#
+        let data = json.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(CachedProfile.self, from: data)
+        XCTAssertEqual(decoded.displayName, "Grace")
+        XCTAssertNil(decoded.name)
+    }
+
     // MARK: - SharedConstants keys
 
     func testSharedConstants_newMultiAccountKeys_existAndAreUnique() {

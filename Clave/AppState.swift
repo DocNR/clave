@@ -1065,7 +1065,8 @@ final class AppState {
                 return nil
             }
 
-            let displayName = (json["display_name"] as? String) ?? (json["name"] as? String)
+            let displayName = json["display_name"] as? String
+            let name = json["name"] as? String
             let pictureURL = json["picture"] as? String
             let about = json["about"] as? String
             let nip05 = json["nip05"] as? String
@@ -1074,15 +1075,18 @@ final class AppState {
             // Skip empty profiles (no name AND no picture).
             // NOTE: about/nip05/lud16 are intentionally NOT included in this gate
             // for v0.2.0 — preserves pre-existing behavior. Edge case: a kind:0
-            // with only bio/NIP-05/lightning data (no displayName, no pictureURL)
-            // returns nil and AccountDetailView's Profile section shows the empty
-            // state. Revisit if Tasks 5-7 surface false positives in the wild.
-            if (displayName?.isEmpty ?? true) && (pictureURL?.isEmpty ?? true) {
+            // with only bio/NIP-05/lightning data (no displayName, no name, no
+            // pictureURL) returns nil and AccountDetailView's Profile section
+            // shows the empty state.
+            let hasIdentity = !(displayName?.isEmpty ?? true) || !(name?.isEmpty ?? true)
+            let hasPicture = !(pictureURL?.isEmpty ?? true)
+            if !hasIdentity && !hasPicture {
                 return nil
             }
 
             return CachedProfile(
                 displayName: displayName,
+                name: name,
                 pictureURL: pictureURL,
                 about: about,
                 nip05: nip05,

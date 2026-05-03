@@ -236,6 +236,7 @@ struct ConnectedClient: Codable, Identifiable {
 /// for the relay list); cached for ~1h before refresh.
 struct CachedProfile: Codable, Equatable {
     var displayName: String?
+    var name: String?         // kind:0 short handle, distinct from displayName (long form)
     var pictureURL: String?
     var about: String?
     var nip05: String?
@@ -244,6 +245,7 @@ struct CachedProfile: Codable, Equatable {
 
     init(
         displayName: String? = nil,
+        name: String? = nil,
         pictureURL: String? = nil,
         about: String? = nil,
         nip05: String? = nil,
@@ -251,6 +253,7 @@ struct CachedProfile: Codable, Equatable {
         fetchedAt: Double
     ) {
         self.displayName = displayName
+        self.name = name
         self.pictureURL = pictureURL
         self.about = about
         self.nip05 = nip05
