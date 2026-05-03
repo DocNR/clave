@@ -12,7 +12,16 @@ struct ClaveApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .onOpenURL { url in
+                    handleDeeplink(url: url)
+                }
         }
+    }
+
+    @MainActor
+    private func handleDeeplink(url: URL) {
+        logger.notice("[Deeplink] received: \(url.absoluteString, privacy: .public)")
+        NotificationCenter.default.post(name: .deeplinkReceived, object: url)
     }
 }
 
@@ -275,4 +284,8 @@ extension Notification.Name {
     /// AppState observes and re-registers with the proxy if a signer key
     /// exists. Object is the hex-encoded token string.
     static let apnsDeviceTokenAvailable = Notification.Name("apnsDeviceTokenAvailable")
+    /// Posted by ClaveApp.onOpenURL when iOS opens the app via a registered
+    /// URL scheme (nostrconnect:// or clave://). AppState observes and routes
+    /// via DeeplinkRouter to the appropriate pending state.
+    static let deeplinkReceived = Notification.Name("deeplinkReceived")
 }

@@ -131,6 +131,22 @@ final class AppState {
                 self.registerAllAccountsWithProxy()
             }
         }
+
+        // Route incoming deeplink URLs (nostrconnect://, clave://) to the
+        // appropriate pending state. ClaveApp.onOpenURL posts this notification;
+        // handleDeeplink (Task 3.3) uses DeeplinkRouter to set either
+        // pendingNostrconnectURI (single-account path) or
+        // pendingDeeplinkAccountChoice (multi-account picker path).
+        NotificationCenter.default.addObserver(
+            forName: .deeplinkReceived,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            guard let url = note.object as? URL else { return }
+            Task { @MainActor in
+                self?.handleDeeplink(url: url)
+            }
+        }
     }
 
     // MARK: - Foreground subscription bridge

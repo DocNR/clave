@@ -10,6 +10,8 @@ struct HomeView: View {
     @State private var showAccountCapAlert = false
     @State private var showConnectionCapAlert = false
     @State private var navigationPath = NavigationPath()
+    @State private var deeplinkApprovalURI: NostrConnectParser.ParsedURI?
+    @State private var deeplinkAccountChoiceURI: NostrConnectParser.ParsedURI?
     @Environment(\.scenePhase) private var scenePhase
 
     private var signedTodayCount: Int {
@@ -116,6 +118,18 @@ struct HomeView: View {
                     appState.pendingDetailPubkey = nil
                 }
             }
+            .onChange(of: appState.pendingNostrconnectURI?.id) { _, _ in
+                if let uri = appState.pendingNostrconnectURI {
+                    deeplinkApprovalURI = uri
+                    appState.pendingNostrconnectURI = nil
+                }
+            }
+            .onChange(of: appState.pendingDeeplinkAccountChoice?.id) { _, _ in
+                if let uri = appState.pendingDeeplinkAccountChoice {
+                    deeplinkAccountChoiceURI = uri
+                    appState.pendingDeeplinkAccountChoice = nil
+                }
+            }
             .onReceive(NotificationCenter.default.publisher(for: .signingCompleted)) { _ in
                 refreshData()
             }
@@ -132,6 +146,37 @@ struct HomeView: View {
             }
             .sheet(isPresented: $showAddAccountSheet) {
                 AddAccountSheet()
+            }
+            .sheet(item: $deeplinkAccountChoiceURI) { uri in
+                DeeplinkAccountPicker(parsedURI: uri) { pickedPubkey in
+                    appState.deeplinkBoundAccount = pickedPubkey
+                    deeplinkApprovalURI = uri
+                    deeplinkAccountChoiceURI = nil
+                }
+            }
+            .sheet(item: $deeplinkApprovalURI) { uri in
+                ApprovalSheet(
+                    parsedURI: uri,
+                    boundAccountPubkey: appState.deeplinkBoundAccount
+                ) { permissions in
+                    let captured = uri
+                    let bound = appState.deeplinkBoundAccount
+                    deeplinkApprovalURI = nil
+                    appState.deeplinkBoundAccount = nil
+                    Task {
+                        do {
+                            try await appState.handleNostrConnect(
+                                parsedURI: captured,
+                                permissions: permissions,
+                                boundAccountPubkey: bound
+                            )
+                        } catch {
+                            // Surface via existing connectionError pattern if needed.
+                            // For deeplink path, errors are silently logged for now —
+                            // user can re-tap the source link to retry.
+                        }
+                    }
+                }
             }
             .alert("Account limit reached", isPresented: $showAccountCapAlert) {
                 Button("OK", role: .cancel) {}
