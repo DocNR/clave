@@ -87,7 +87,7 @@ struct ConnectShowQRView: View {
             }
         }
         .padding()
-        .background(RoundedRectangle(cornerRadius: 16).fill(Color(.systemBackground)))
+        .background(RoundedRectangle(cornerRadius: 16).fill(Color(.secondarySystemGroupedBackground)))
         .padding(.horizontal)
     }
 

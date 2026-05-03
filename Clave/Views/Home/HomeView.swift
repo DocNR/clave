@@ -12,6 +12,7 @@ struct HomeView: View {
     @State private var navigationPath = NavigationPath()
     @State private var deeplinkApprovalURI: NostrConnectParser.ParsedURI?
     @State private var deeplinkAccountChoiceURI: NostrConnectParser.ParsedURI?
+    @State private var deeplinkError: String?
     @Environment(\.scenePhase) private var scenePhase
 
     private var signedTodayCount: Int {
@@ -150,8 +151,14 @@ struct HomeView: View {
             .sheet(item: $deeplinkAccountChoiceURI) { uri in
                 DeeplinkAccountPicker(parsedURI: uri) { pickedPubkey in
                     appState.deeplinkBoundAccount = pickedPubkey
-                    deeplinkApprovalURI = uri
-                    deeplinkAccountChoiceURI = nil
+                    let captured = uri
+                    deeplinkAccountChoiceURI = nil  // dismiss picker first
+                    DispatchQueue.main.async {
+                        // Defer approval sheet present to the next run loop so the
+                        // picker dismiss animation completes before the new sheet
+                        // tries to present (SwiftUI sheet-chain race fix).
+                        deeplinkApprovalURI = captured
+                    }
                 }
             }
             .sheet(item: $deeplinkApprovalURI) { uri in
@@ -171,12 +178,20 @@ struct HomeView: View {
                                 boundAccountPubkey: bound
                             )
                         } catch {
-                            // Surface via existing connectionError pattern if needed.
-                            // For deeplink path, errors are silently logged for now —
-                            // user can re-tap the source link to retry.
+                            await MainActor.run {
+                                deeplinkError = error.localizedDescription
+                            }
                         }
                     }
                 }
+            }
+            .alert("Connection Failed", isPresented: .init(
+                get: { deeplinkError != nil },
+                set: { if !$0 { deeplinkError = nil } }
+            )) {
+                Button("OK") { deeplinkError = nil }
+            } message: {
+                Text(deeplinkError ?? "Unknown error")
             }
             .alert("Account limit reached", isPresented: $showAccountCapAlert) {
                 Button("OK", role: .cancel) {}

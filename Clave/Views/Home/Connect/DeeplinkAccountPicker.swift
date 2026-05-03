@@ -39,6 +39,7 @@ struct DeeplinkAccountPicker: View {
         }
         .presentationDetents([.medium])
         .presentationBackground(Color(.systemGroupedBackground))
+        .snapshotProtected()
     }
 
     private var headerBlock: some View {

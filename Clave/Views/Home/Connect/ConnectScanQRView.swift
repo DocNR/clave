@@ -19,6 +19,7 @@ struct ConnectScanQRView: View {
             VStack(spacing: 0) {
                 ConnectAccountContextBar()
                     .background(Color.black.opacity(0.001)) // hit target
+                    .environment(\.colorScheme, .dark)
                 if permissionDenied {
                     permissionDeniedView
                 } else {
@@ -29,6 +30,12 @@ struct ConnectScanQRView: View {
         .navigationTitle("Scan QR")
         .navigationBarTitleDisplayMode(.inline)
         .toolbarColorScheme(.dark, for: .navigationBar)
+        .onAppear {
+            // Restart scanning when view reappears (e.g. after the user denies
+            // ApprovalSheet and lands back on the dead viewfinder).
+            isScanning = true
+            scanError = nil
+        }
     }
 
     private var scannerView: some View {
