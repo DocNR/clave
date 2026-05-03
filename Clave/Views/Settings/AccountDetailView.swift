@@ -247,10 +247,7 @@ struct AccountDetailView: View {
                 .listRowBackground(Color.clear)
 
                 // Empty-state hint when no profile is cached at all
-                if account.profile == nil ||
-                   (account.profile?.displayName?.isEmpty ?? true)
-                    && (account.profile?.nip05?.isEmpty ?? true)
-                    && (account.profile?.lud16?.isEmpty ?? true) {
+                if profileIsEmpty {
                     Text("No profile published. Pull down to refresh.")
                         .font(.footnote)
                         .foregroundStyle(.tertiary)
@@ -268,6 +265,18 @@ struct AccountDetailView: View {
     private var connectionCount: Int {
         guard let account else { return 0 }
         return SharedStorage.getConnectedClients(for: account.pubkeyHex).count
+    }
+
+    /// True when the profile cache has no user-meaningful content. Used to
+    /// gate the "No profile published. Pull down to refresh." hint so it
+    /// only shows when there is genuinely nothing to display. Task 6 will
+    /// add `about` to this condition; future content fields should slot in
+    /// here rather than expand the inline condition at the use site.
+    private var profileIsEmpty: Bool {
+        guard let profile = account?.profile else { return true }
+        return (profile.displayName?.isEmpty ?? true)
+            && (profile.nip05?.isEmpty ?? true)
+            && (profile.lud16?.isEmpty ?? true)
     }
 
     // MARK: - Security
@@ -328,9 +337,9 @@ struct AccountDetailView: View {
     }
 
     private var deleteAlertMessage: String {
-        guard let account else { return "" }
-        let pairs = SharedStorage.getConnectedClients(for: account.pubkeyHex).count
-        let pairsClause = pairs == 0 ? "" : " and unpairs \(pairs) connection\(pairs == 1 ? "" : "s")"
+        let pairsClause = connectionCount == 0
+            ? ""
+            : " and unpairs \(connectionCount) connection\(connectionCount == 1 ? "" : "s")"
         return "Permanently removes the key\(pairsClause). This cannot be undone."
     }
 

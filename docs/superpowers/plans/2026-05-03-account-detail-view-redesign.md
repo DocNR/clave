@@ -1040,21 +1040,31 @@ if let about = account.profile?.about, !about.isEmpty {
 }
 ```
 
-Update the empty-state-hint condition to also account for the new field:
+Add `about` to the existing `profileIsEmpty` computed property (NOT to the inline condition — Task 5's review fixes extracted that). Locate `profileIsEmpty` (just below `connectionCount`):
 
 ```swift
-// Empty-state hint when no profile is cached at all
-if account.profile == nil ||
-   (account.profile?.displayName?.isEmpty ?? true)
-    && (account.profile?.about?.isEmpty ?? true)
-    && (account.profile?.nip05?.isEmpty ?? true)
-    && (account.profile?.lud16?.isEmpty ?? true) {
-    Text("No profile published. Pull down to refresh.")
-        .font(.footnote)
-        .foregroundStyle(.tertiary)
-        .listRowBackground(Color.clear)
+// Existing post-Task-5:
+private var profileIsEmpty: Bool {
+    guard let profile = account?.profile else { return true }
+    return (profile.displayName?.isEmpty ?? true)
+        && (profile.nip05?.isEmpty ?? true)
+        && (profile.lud16?.isEmpty ?? true)
 }
 ```
+
+Update to:
+
+```swift
+private var profileIsEmpty: Bool {
+    guard let profile = account?.profile else { return true }
+    return (profile.displayName?.isEmpty ?? true)
+        && (profile.about?.isEmpty ?? true)
+        && (profile.nip05?.isEmpty ?? true)
+        && (profile.lud16?.isEmpty ?? true)
+}
+```
+
+The empty-state hint at the use site (`if profileIsEmpty { ... }`) automatically picks up the new clause; no inline-condition changes needed.
 
 - [ ] **Step 3: Build**
 
