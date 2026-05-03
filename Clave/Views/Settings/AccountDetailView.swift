@@ -209,20 +209,51 @@ struct AccountDetailView: View {
         }
     }
 
-    // MARK: - Profile (placeholder — extended in Tasks 5-7)
+    // MARK: - Profile (extended in Tasks 5-7)
 
     @ViewBuilder
     private var profileSection: some View {
         if let account {
             Section {
-                if let profile = account.profile,
-                   let name = profile.displayName, !name.isEmpty {
-                    LabeledContent("Display name", value: name)
+                // Display name (kv-row, conditional on data)
+                if let displayName = account.profile?.displayName, !displayName.isEmpty {
+                    LabeledContent("Display name", value: displayName)
                         .listRowBackground(Color.clear)
-                } else {
+                }
+
+                // NIP-05 (kv-row, conditional on data)
+                if let nip05 = account.profile?.nip05, !nip05.isEmpty {
+                    LabeledContent("NIP-05", value: nip05)
+                        .listRowBackground(Color.clear)
+                }
+
+                // Lightning (lud16, kv-row monospaced, conditional on data)
+                if let lud16 = account.profile?.lud16, !lud16.isEmpty {
+                    LabeledContent("Lightning") {
+                        Text(lud16)
+                            .font(.system(.body, design: .monospaced))
+                            .foregroundStyle(.primary)
+                    }
+                    .listRowBackground(Color.clear)
+                }
+
+                // Paired-clients stat (always shown)
+                HStack {
+                    Text("\(connectionCount) paired client\(connectionCount == 1 ? "" : "s")")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .listRowBackground(Color.clear)
+
+                // Empty-state hint when no profile is cached at all
+                if account.profile == nil ||
+                   (account.profile?.displayName?.isEmpty ?? true)
+                    && (account.profile?.nip05?.isEmpty ?? true)
+                    && (account.profile?.lud16?.isEmpty ?? true) {
                     Text("No profile published. Pull down to refresh.")
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.tertiary)
                         .listRowBackground(Color.clear)
                 }
             } header: {
@@ -232,6 +263,11 @@ struct AccountDetailView: View {
                     .textCase(nil)
             }
         }
+    }
+
+    private var connectionCount: Int {
+        guard let account else { return 0 }
+        return SharedStorage.getConnectedClients(for: account.pubkeyHex).count
     }
 
     // MARK: - Security
