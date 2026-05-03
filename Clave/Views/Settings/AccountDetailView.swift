@@ -21,6 +21,7 @@ struct AccountDetailView: View {
     @State private var showDeleteAlert = false
     @State private var showRotateBunkerAlert = false
     @State private var showExportSheet = false
+    @State private var isAboutExpanded: Bool = false
 
     /// The Account this view is for. Reads from appState.accounts each time
     /// so rename / delete from elsewhere update the view live. nil if account
@@ -221,6 +222,35 @@ struct AccountDetailView: View {
                         .listRowBackground(Color.clear)
                 }
 
+                // About (stacked block, .lineLimit(2) default with tap-to-expand)
+                if let about = account.profile?.about, !about.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("About")
+                            .foregroundStyle(.secondary)
+                            .font(.subheadline)
+                        Text(about)
+                            .foregroundStyle(.primary)
+                            .font(.body)
+                            .lineLimit(isAboutExpanded ? nil : 2)
+                        if aboutOverflowsCap {
+                            Text(isAboutExpanded ? "Show less" : "Show more")
+                                .foregroundStyle(theme.accent)
+                                .font(.caption)
+                                .fontWeight(.medium)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        guard aboutOverflowsCap else { return }
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            isAboutExpanded.toggle()
+                        }
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    }
+                    .listRowBackground(Color.clear)
+                }
+
                 // NIP-05 (kv-row, conditional on data)
                 if let nip05 = account.profile?.nip05, !nip05.isEmpty {
                     LabeledContent("NIP-05", value: nip05)
@@ -267,14 +297,24 @@ struct AccountDetailView: View {
         return SharedStorage.getConnectedClients(for: account.pubkeyHex).count
     }
 
+    /// Heuristic for "About text likely overflows two lines on iPhone".
+    /// True text-measurement via PreferenceKey is overkill for v0.2.0 —
+    /// this approximate threshold avoids the extra view-tree work.
+    /// Future: swap to GeometryReader-based measurement if false positives/
+    /// negatives become a real problem on device (BACKLOG item).
+    private var aboutOverflowsCap: Bool {
+        (account?.profile?.about?.count ?? 0) > 80
+    }
+
     /// True when the profile cache has no user-meaningful content. Used to
     /// gate the "No profile published. Pull down to refresh." hint so it
-    /// only shows when there is genuinely nothing to display. Task 6 will
-    /// add `about` to this condition; future content fields should slot in
-    /// here rather than expand the inline condition at the use site.
+    /// only shows when there is genuinely nothing to display. Future content
+    /// fields should slot in here rather than expand the inline condition at
+    /// the use site.
     private var profileIsEmpty: Bool {
         guard let profile = account?.profile else { return true }
         return (profile.displayName?.isEmpty ?? true)
+            && (profile.about?.isEmpty ?? true)
             && (profile.nip05?.isEmpty ?? true)
             && (profile.lud16?.isEmpty ?? true)
     }
