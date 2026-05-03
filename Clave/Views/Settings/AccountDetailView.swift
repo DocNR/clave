@@ -40,19 +40,13 @@ struct AccountDetailView: View {
 
     var body: some View {
         Form {
-            // Banner appears as the first section's "header" so it gets
-            // full-bleed treatment in Form. SwiftUI Form drops list padding
-            // for clear sections we render manually.
-            Section {
-                EmptyView()
-            } header: {
-                if let account {
+            if let account {
+                Section {
                     bannerHeader(for: account)
-                        .listRowInsets(EdgeInsets())
-                        .textCase(nil)
+                        .listRowInsets(EdgeInsets(top: 12, leading: 14, bottom: 8, trailing: 14))
+                        .listRowBackground(Color.clear)
                 }
             }
-            .listRowBackground(Color.clear)
 
             if account != nil {
                 profileSection
@@ -117,28 +111,30 @@ struct AccountDetailView: View {
 
     @ViewBuilder
     private func bannerHeader(for account: Account) -> some View {
-        ZStack(alignment: .leading) {
+        HStack(spacing: 14) {
+            avatarLarge(for: account)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(account.displayLabel)
+                    .font(.title3).fontWeight(.bold)
+                    .foregroundStyle(.white)
+                Text(truncatedNpub(for: account))
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.85))
+            }
+            Spacer()
+            copyNpubButton(for: account)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 22)
+        .background(
             LinearGradient(
                 colors: [theme.start, theme.end],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
-            HStack(spacing: 14) {
-                avatarLarge(for: account)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(account.displayLabel)
-                        .font(.title3).fontWeight(.bold)
-                        .foregroundStyle(.white)
-                    Text(truncatedNpub(for: account))
-                        .font(.system(.caption, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.85))
-                }
-                Spacer()
-                copyNpubButton(for: account)
-            }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 22)
-        }
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .shadow(color: theme.start.opacity(0.25), radius: 8, x: 0, y: 1)
     }
 
     private func avatarLarge(for account: Account) -> some View {
