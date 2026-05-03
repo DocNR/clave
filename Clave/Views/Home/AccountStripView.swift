@@ -3,8 +3,13 @@ import SwiftUI
 /// Horizontal scrolling avatar strip — Stage C account picker.
 /// Replaces the build-37 interim Menu (`aa194a9`) on HomeView.
 ///
-/// - Auto-hides when `accounts.count == 1` (single-account user sees same
-///   Home as build 31; no UI noise).
+/// - Always visible (post build-46 device-test feedback) — even at single-
+///   account, so the trailing "+" pill stays accessible for adding new
+///   accounts from Home. Previously auto-hidden at `accounts.count == 1`
+///   for "no UI noise"; reverted because the "+" affordance value
+///   outweighs the noise concern. At zero accounts ContentView routes to
+///   OnboardingView before this view renders, so the empty-strip case
+///   never occurs in practice.
 /// - Active pill: 5pt gradient ring matching account's AccountTheme.
 /// - Inactive pill: 1pt subtle hairline ring (Color.secondary.opacity(0.25)).
 /// - Sits directly on HomeView's ambient gradient — no frosted card.
@@ -24,17 +29,15 @@ struct AccountStripView: View {
     private let ringPadding: CGFloat = 5
 
     var body: some View {
-        if appState.accounts.count > 1 {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 14) {
-                    ForEach(appState.accounts) { account in
-                        accountPill(account)
-                    }
-                    addPill
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 14) {
+                ForEach(appState.accounts) { account in
+                    accountPill(account)
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
+                addPill
             }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
         }
     }
 
