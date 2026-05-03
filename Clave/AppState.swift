@@ -1133,12 +1133,16 @@ final class AppState {
     /// don't fail if some relays reject or are unreachable, we just need at least one.
     func handleNostrConnect(
         parsedURI: NostrConnectParser.ParsedURI,
-        permissions: ClientPermissions
+        permissions: ClientPermissions,
+        boundAccountPubkey: String? = nil
     ) async throws {
-        // Task 5: handleNostrConnect uses the current account (the user
-        // is in the UI explicitly accepting the pairing).
-        guard !signerPubkeyHex.isEmpty,
-              let nsec = SharedKeychain.loadNsec(for: signerPubkeyHex) else {
+        // boundAccountPubkey: when non-nil (deeplink path, user picked an account
+        // from the picker), use that account instead of currentAccount. Default nil
+        // falls back to currentAccount → signerPubkeyHex, preserving existing behavior
+        // for the ConnectSheet approval path where the user is acting on the active account.
+        let resolvedSignerPubkey = boundAccountPubkey ?? currentAccount?.pubkeyHex ?? signerPubkeyHex
+        guard !resolvedSignerPubkey.isEmpty,
+              let nsec = SharedKeychain.loadNsec(for: resolvedSignerPubkey) else {
             throw ClaveError.noSignerKey
         }
         let privateKey = try Bech32.decodeNsec(nsec)
@@ -1237,7 +1241,8 @@ final class AppState {
                     if success {
                         pairClientWithProxy(
                             clientPubkey: parsedURI.clientPubkey,
-                            relayUrls: parsedURI.relays
+                            relayUrls: parsedURI.relays,
+                            signer: signerPubkey
                         )
                     }
                 }
@@ -1486,21 +1491,23 @@ final class AppState {
     /// Notify the proxy of a nostrconnect pair so it can open secondary relay
     /// subscriptions. Fire-and-forget from the caller's perspective; failures
     /// are queued in SharedStorage.pendingPairOps for later retry.
-    func pairClientWithProxy(clientPubkey: String, relayUrls: [String]) {
+    func pairClientWithProxy(clientPubkey: String, relayUrls: [String], signer: String? = nil) {
         // Persist the client's URI relay set locally first (used by Layer 1's
         // foreground subscription). Idempotent.
-        SharedStorage.setClientRelayUrls(pubkey: clientPubkey, relayUrls: relayUrls, signer: signerPubkeyHex)
+        // Use the explicitly-provided signer (e.g. boundAccountPubkey from deeplink)
+        // or fall back to the current account — matching unpairClientWithProxy's pattern.
+        let resolvedSigner = signer ?? signerPubkeyHex
+        SharedStorage.setClientRelayUrls(pubkey: clientPubkey, relayUrls: relayUrls, signer: resolvedSigner)
 
         // Layer 1: relay-set may have changed; refresh the foreground sub.
         Task { @MainActor in
             ForegroundRelaySubscription.shared.refreshRelaySet()
         }
 
-        // Task 5: pair on behalf of the current account. Capture the
-        // signer at this moment so the URLSession failure closure (which
-        // may run after a user-driven account switch) enqueues the
-        // PairOp under the correct account.
-        let capturedSigner = signerPubkeyHex
+        // Capture signer at call-time so the URLSession failure closure (which
+        // may run after a user-driven account switch) enqueues the PairOp under
+        // the correct account. Matches unpairClientWithProxy's capture pattern.
+        let capturedSigner = resolvedSigner
         guard !capturedSigner.isEmpty,
               let nsec = SharedKeychain.loadNsec(for: capturedSigner) else { return }
         let privateKey: Data
