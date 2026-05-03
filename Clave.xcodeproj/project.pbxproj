@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		4963A6373F0641F1B1A1455A330BCB5B /* DeeplinkRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7835E9DD22C448C3893D6D945AFFEA16 /* DeeplinkRouter.swift */; };
+		B2551C1A4D99451B8AABCA1763DF333C /* DeeplinkRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7835E9DD22C448C3893D6D945AFFEA16 /* DeeplinkRouter.swift */; };
 		006B17A84C114EDF9B129CAE /* NostrConnectParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34B139A8E147475F9B40B3D5 /* NostrConnectParser.swift */; };
 		6D2C503B9EF64C8EA5101CDB /* NostrConnectParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34B139A8E147475F9B40B3D5 /* NostrConnectParser.swift */; };
 		AE01F2A3B4C5D6E700000002 /* ActivitySummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE01F2A3B4C5D6E700000001 /* ActivitySummary.swift */; };
@@ -87,6 +89,7 @@
 
 /* Begin PBXFileReference section */
 		34B139A8E147475F9B40B3D5 /* NostrConnectParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NostrConnectParser.swift; sourceTree = "<group>"; };
+		7835E9DD22C448C3893D6D945AFFEA16 /* DeeplinkRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeeplinkRouter.swift; sourceTree = "<group>"; };
 		894FE9FF88CD485ABCD31C05 /* ClientPermissions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClientPermissions.swift; sourceTree = "<group>"; };
 		AE01F2A3B4C5D6E700000001 /* ActivitySummary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivitySummary.swift; sourceTree = "<group>"; };
 		AE01F2A3B4C5D6E700000004 /* Nip19.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Nip19.swift; sourceTree = "<group>"; };
@@ -221,6 +224,7 @@
 				C1A4F2B3C5D6E700000010 /* AccountTheme.swift */,
 				AE01F2A3B4C5D6E700000001 /* ActivitySummary.swift */,
 				EF3D7A582F8BD020005A6545 /* Bech32.swift */,
+				7835E9DD22C448C3893D6D945AFFEA16 /* DeeplinkRouter.swift */,
 				894FE9FF88CD485ABCD31C05 /* ClientPermissions.swift */,
 				DE7E10B1DE7E10B1DE7E10B1 /* DeveloperSettings.swift */,
 				F60FCE002F8BCAE3000FAC0A /* ForegroundRelaySubscription.swift */,
@@ -446,6 +450,7 @@
 				AE01F2A3B4C5D6E700000005 /* Nip19.swift in Sources */,
 				AE01F2A3B4C5D6E700000008 /* SharedKeychain+Enumeration.swift in Sources */,
 				C1A4F2B3C5D6E700000011 /* AccountTheme.swift in Sources */,
+				4963A6373F0641F1B1A1455A330BCB5B /* DeeplinkRouter.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -482,6 +487,7 @@
 				DE7E10C3DE7E10C3DE7E10C3 /* LogExporter.swift in Sources */,
 				AE01F2A3B4C5D6E700000003 /* ActivitySummary.swift in Sources */,
 				AE01F2A3B4C5D6E700000006 /* Nip19.swift in Sources */,
+				B2551C1A4D99451B8AABCA1763DF333C /* DeeplinkRouter.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
