@@ -305,10 +305,16 @@ enum LightSigner {
         // Process the request
         let (responseResult, responseError) = processRequest(method: method, params: params, privateKey: privateKey)
 
-        var responseDict: [String: Any] = ["id": requestId]
-        if let responseResult {
-            responseDict["result"] = responseResult
-        }
+        // NIP-46 response shape is {id, result, error}. The `result` field
+        // MUST be present even on error responses (empty string per JSON-RPC
+        // convention) — strict parsers (e.g. nostr-tools' BunkerSigner under
+        // certain code paths) ignore responses missing `result` and time out
+        // instead of surfacing the error. Closes audit-5 from the 2026-04-17
+        // pre-external-TestFlight audit; symptom was clave.casa staying on a
+        // stale edit page for 45s after a server-side unpair instead of
+        // recovering immediately on the explicit "Invalid or missing bunker
+        // secret" error this view-of-iOS already sends.
+        var responseDict: [String: Any] = ["id": requestId, "result": responseResult ?? ""]
         if let responseError {
             responseDict["error"] = responseError
         }
@@ -636,7 +642,9 @@ enum LightSigner {
         responseRelays: [LightRelay]? = nil,
         responseRelayUrl: String? = nil
     ) async throws {
-        let responseDict: [String: Any] = ["id": requestId, "error": error]
+        // NIP-46 response shape requires `result` field even on errors —
+        // see audit-5 + the matching note in handleRequest's response path.
+        let responseDict: [String: Any] = ["id": requestId, "result": "", "error": error]
         guard let responseData = try? JSONSerialization.data(withJSONObject: responseDict),
               let responseJSON = String(data: responseData, encoding: .utf8) else { return }
 
