@@ -283,6 +283,16 @@ struct AccountDetailView: View {
                     .font(.headline)
                     .foregroundStyle(.primary)
                     .textCase(nil)
+            } footer: {
+                // Sets expectations for the "Edit on clave.casa" row above:
+                // tapping that row opens Safari and (if no existing clave.casa
+                // pairing for this account in localStorage) creates a new pair
+                // via the bunker URI handshake. The caption is intentionally
+                // informational rather than a confirmation alert — keeps the
+                // common case (already paired → instant edit) frictionless.
+                Text("Opens in Safari · pairs with clave.casa if needed")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
     }
