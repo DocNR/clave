@@ -930,56 +930,59 @@ final class AppState {
             "wss://purplepag.es"
         ]
 
-        await withTaskGroup(of: CachedProfile?.self) { group in
+        let results: [FetchedKind0?] = await withTaskGroup(of: FetchedKind0?.self) { group in
             for url in relays {
                 group.addTask {
                     await Self.fetchProfile(from: url, pubkey: pubkey)
                 }
             }
-
-            // Prefer the first relay response with a picture; does not compare
-            // kind:0 created_at timestamps. (TODO: future improvement — compare
-            // event created_at to truly pick the latest replaceable kind:0.)
-            var newest: CachedProfile?
+            var collected: [FetchedKind0?] = []
             for await result in group {
-                guard let result else { continue }
-                if newest == nil { newest = result; continue }
-                // Prefer the one with a picture if the other doesn't have one
-                if newest?.pictureURL == nil && result.pictureURL != nil { newest = result }
+                collected.append(result)
             }
+            return collected
+        }
 
-            guard let cached = newest else { return }
+        // NIP-01: replaceable events — pick the result with the highest
+        // created_at. Per-relay we already get that relay's latest (limit:1
+        // returns the replaceable representative). Cross-relay we must
+        // compare timestamps because relays routinely disagree on the latest
+        // kind:0 (publish failures, mirror lag) and the user's primary
+        // low-latency relay would otherwise win the race with a stale event
+        // — surfaced as "edited profile on clave.casa, but Clave iOS still
+        // shows old fields after pull-to-refresh."
+        guard let winner = Self.mergeKind0(results) else { return }
+        let cached = winner.profile
 
-            // Write the cached image FIRST, then mutate accounts. The accounts
-            // mutation triggers SwiftUI re-renders in any view that reads the
-            // cached image file from disk (HomeView strip, SlimIdentityBar,
-            // AccountDetailView banner). If we mutate accounts first, those
-            // re-renders read stale bytes — the new image only lands on a
-            // *subsequent* render that may never come (no further state
-            // change to trigger it).
-            //
-            // Bug F-fixed: pass pubkey explicitly so the cache file is bound
-            // to the account that triggered the fetch, not whichever account
-            // happens to be current at write-time.
-            if let pic = cached.pictureURL, !pic.isEmpty {
-                await cacheImage(from: pic, pubkey: pubkey)
-            }
+        // Write the cached image FIRST, then mutate accounts. The accounts
+        // mutation triggers SwiftUI re-renders in any view that reads the
+        // cached image file from disk (HomeView strip, SlimIdentityBar,
+        // AccountDetailView banner). If we mutate accounts first, those
+        // re-renders read stale bytes — the new image only lands on a
+        // *subsequent* render that may never come (no further state
+        // change to trigger it).
+        //
+        // Bug F-fixed: pass pubkey explicitly so the cache file is bound
+        // to the account that triggered the fetch, not whichever account
+        // happens to be current at write-time.
+        if let pic = cached.pictureURL, !pic.isEmpty {
+            await cacheImage(from: pic, pubkey: pubkey)
+        }
 
-            await MainActor.run {
-                if self.currentAccount?.pubkeyHex == pubkey {
-                    // Fast path: use existing helper which also updates
-                    // the @Observable currentAccount property.
-                    self.updateCurrentProfile(cached)
-                } else if let idx = self.accounts.firstIndex(where: { $0.pubkeyHex == pubkey }) {
-                    // Non-current account: update the accounts array in-place.
-                    self.accounts[idx] = Account(
-                        pubkeyHex: self.accounts[idx].pubkeyHex,
-                        petname: self.accounts[idx].petname,
-                        addedAt: self.accounts[idx].addedAt,
-                        profile: cached
-                    )
-                    self.persistAccounts()
-                }
+        await MainActor.run {
+            if self.currentAccount?.pubkeyHex == pubkey {
+                // Fast path: use existing helper which also updates
+                // the @Observable currentAccount property.
+                self.updateCurrentProfile(cached)
+            } else if let idx = self.accounts.firstIndex(where: { $0.pubkeyHex == pubkey }) {
+                // Non-current account: update the accounts array in-place.
+                self.accounts[idx] = Account(
+                    pubkeyHex: self.accounts[idx].pubkeyHex,
+                    petname: self.accounts[idx].petname,
+                    addedAt: self.accounts[idx].addedAt,
+                    profile: cached
+                )
+                self.persistAccounts()
             }
         }
     }
@@ -1044,7 +1047,35 @@ final class AppState {
         }
     }
 
-    private static func fetchProfile(from relayURL: String, pubkey: String) async -> CachedProfile? {
+    /// Cross-relay merge result for kind:0 fetches. Pairs the parsed
+    /// `CachedProfile` with the source event's `created_at` so the caller
+    /// can pick the latest replaceable event across relays per NIP-01.
+    /// Internal (not private) so unit tests can construct fixtures via
+    /// `@testable import Clave`.
+    struct FetchedKind0: Equatable {
+        let profile: CachedProfile
+        let createdAt: Int64
+    }
+
+    /// Cross-relay selection for kind:0 fetch results. Per NIP-01,
+    /// replaceable events are uniquely identified by (pubkey, kind) and the
+    /// authoritative event is the one with the highest `created_at`. Returns
+    /// nil if no relay returned a usable event.
+    ///
+    /// Pure function, extracted for unit-testability — see
+    /// `AppStateProfileMergeTests`.
+    static func mergeKind0(_ results: [FetchedKind0?]) -> FetchedKind0? {
+        var winner: FetchedKind0?
+        for result in results {
+            guard let result else { continue }
+            if winner == nil || result.createdAt > winner!.createdAt {
+                winner = result
+            }
+        }
+        return winner
+    }
+
+    private static func fetchProfile(from relayURL: String, pubkey: String) async -> FetchedKind0? {
         do {
             let relay = LightRelay(url: relayURL)
             try await relay.connect(timeout: 5.0)
@@ -1084,14 +1115,23 @@ final class AppState {
                 return nil
             }
 
-            return CachedProfile(
-                displayName: displayName,
-                name: name,
-                pictureURL: pictureURL,
-                about: about,
-                nip05: nip05,
-                lud16: lud16,
-                fetchedAt: Date().timeIntervalSince1970
+            // NSNumber bridges Int / Int64 / Double from JSONSerialization
+            // (the underlying numeric type isn't deterministic across platforms).
+            // Default to 0 if missing — malformed events lose the merge ranking
+            // but don't crash the fetch path.
+            let createdAt = (event["created_at"] as? NSNumber)?.int64Value ?? 0
+
+            return FetchedKind0(
+                profile: CachedProfile(
+                    displayName: displayName,
+                    name: name,
+                    pictureURL: pictureURL,
+                    about: about,
+                    nip05: nip05,
+                    lud16: lud16,
+                    fetchedAt: Date().timeIntervalSince1970
+                ),
+                createdAt: createdAt
             )
         } catch {
             return nil
