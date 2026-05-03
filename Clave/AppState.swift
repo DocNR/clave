@@ -62,6 +62,20 @@ final class AppState {
     /// switching active. Cleared after navigation fires.
     var pendingDetailPubkey: String?
 
+    /// Set when a nostrconnect:// deeplink arrives and the user has only one
+    /// account (or after the user picks from DeeplinkAccountPicker). HomeView
+    /// observes this to present ApprovalSheet.
+    var pendingNostrconnectURI: NostrConnectParser.ParsedURI?
+
+    /// Set when a nostrconnect:// deeplink arrives and the user has 2+
+    /// accounts. HomeView observes this to present DeeplinkAccountPicker.
+    var pendingDeeplinkAccountChoice: NostrConnectParser.ParsedURI?
+
+    /// Pubkey of the account chosen by DeeplinkAccountPicker. Threaded
+    /// through to ApprovalSheet via boundAccountPubkey. Cleared after
+    /// the connect completes or the user cancels.
+    var deeplinkBoundAccount: String?
+
     init() {
         // Drain the /pair-client retry queue on every app foreground. The
         // AppDelegate posts .drainPendingPairOps from applicationDidBecomeActive.
@@ -597,6 +611,25 @@ final class AppState {
         // Legacy key write-through — read by ForegroundRelaySubscription.swift:354
         // until Task 6 updates that callsite.
         defaults.set(pk, forKey: SharedConstants.signerPubkeyHexKey)
+    }
+
+    // MARK: - Deeplink handling (Task 3.3)
+
+    /// Routes an incoming URL deeplink. Called from ClaveApp.onOpenURL via
+    /// a NotificationCenter post (Task 3.7 wires that up). Mutates
+    /// pendingNostrconnectURI or pendingDeeplinkAccountChoice based on
+    /// account count. clave:// and malformed URIs are silently ignored.
+    @MainActor
+    func handleDeeplink(url: URL) {
+        let outcome = DeeplinkRouter.route(url: url, accountCount: accounts.count)
+        switch outcome {
+        case .approve(let parsed):
+            pendingNostrconnectURI = parsed
+        case .pickAccount(let parsed):
+            pendingDeeplinkAccountChoice = parsed
+        case .ignore:
+            break
+        }
     }
 
     // MARK: - Multi-account methods (Task 5)
