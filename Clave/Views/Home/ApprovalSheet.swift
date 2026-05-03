@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ApprovalSheet: View {
     let parsedURI: NostrConnectParser.ParsedURI
+    let boundAccountPubkey: String?
     let onApprove: (ClientPermissions) -> Void
     @Environment(\.dismiss) private var dismiss
     @Environment(AppState.self) private var appState
@@ -13,8 +14,11 @@ struct ApprovalSheet: View {
 
     private let protectedKinds: Set<Int> = SharedStorage.getProtectedKinds()
 
-    init(parsedURI: NostrConnectParser.ParsedURI, onApprove: @escaping (ClientPermissions) -> Void) {
+    init(parsedURI: NostrConnectParser.ParsedURI,
+         boundAccountPubkey: String? = nil,
+         onApprove: @escaping (ClientPermissions) -> Void) {
         self.parsedURI = parsedURI
+        self.boundAccountPubkey = boundAccountPubkey
         self.onApprove = onApprove
         _selectedTrust = State(initialValue: parsedURI.suggestedTrustLevel)
     }
@@ -23,7 +27,7 @@ struct ApprovalSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 24) {
-                    SigningAsHeader(signerPubkeyHex: appState.signerPubkeyHex)
+                    SigningAsHeader(signerPubkeyHex: boundAccountPubkey ?? appState.signerPubkeyHex)
                         .padding(.horizontal)
                         .padding(.top, 12)
                     clientHeader
@@ -206,7 +210,7 @@ struct ApprovalSheet: View {
     // MARK: - Helpers
 
     private var signingAsDisplayLabel: String {
-        let pk = appState.signerPubkeyHex
+        let pk = boundAccountPubkey ?? appState.signerPubkeyHex
         return appState.accounts.first(where: { $0.pubkeyHex == pk })?.displayLabel
             ?? String(pk.prefix(8))
     }
@@ -257,10 +261,10 @@ struct ApprovalSheet: View {
         // pairings). Counts SharedStorage.connectedClients scoped to
         // the current signer. Re-pairing an existing client (same
         // pubkey) isn't blocked since no new row is added.
-        let currentSigner = SharedConstants.sharedDefaults.string(
+        let signerForCheck = boundAccountPubkey ?? SharedConstants.sharedDefaults.string(
             forKey: SharedConstants.currentSignerPubkeyHexKey
         ) ?? ""
-        let connected = SharedStorage.getConnectedClients(for: currentSigner)
+        let connected = SharedStorage.getConnectedClients(for: signerForCheck)
         let alreadyPaired = connected.contains { $0.pubkey == parsedURI.clientPubkey }
         if !alreadyPaired && connected.count >= Account.maxClientsPerAccount {
             showConnectionCapAlert = true
@@ -278,7 +282,7 @@ struct ApprovalSheet: View {
             connectedAt: Date().timeIntervalSince1970,
             lastSeen: Date().timeIntervalSince1970,
             requestCount: 0,
-            signerPubkeyHex: currentSigner
+            signerPubkeyHex: signerForCheck
         )
         onApprove(permissions)
         // Don't call dismiss() here — ConnectSheet handles dismissal
