@@ -237,7 +237,26 @@ struct ConnectedClient: Codable, Identifiable {
 struct CachedProfile: Codable, Equatable {
     var displayName: String?
     var pictureURL: String?
+    var about: String?
+    var nip05: String?
+    var lud16: String?
     var fetchedAt: Double  // timeIntervalSince1970
+
+    init(
+        displayName: String? = nil,
+        pictureURL: String? = nil,
+        about: String? = nil,
+        nip05: String? = nil,
+        lud16: String? = nil,
+        fetchedAt: Double
+    ) {
+        self.displayName = displayName
+        self.pictureURL = pictureURL
+        self.about = about
+        self.nip05 = nip05
+        self.lud16 = lud16
+        self.fetchedAt = fetchedAt
+    }
 }
 
 /// One Nostr identity owned by this device. Persisted as part of

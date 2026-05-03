@@ -86,6 +86,94 @@ final class AccountModelTests: XCTestCase {
         XCTAssertEqual(decoded.fetchedAt, 1700000000.0)
     }
 
+    func testCachedProfile_codableRoundtrip_preservesNewFields() throws {
+        let original = CachedProfile(
+            displayName: "Alice",
+            pictureURL: "https://example.com/a.png",
+            about: "Bitcoin and signal. Long-time relay operator.",
+            nip05: "alice@example.com",
+            lud16: "alice@strike.me",
+            fetchedAt: 1700000000.0
+        )
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(CachedProfile.self, from: data)
+        XCTAssertEqual(decoded.displayName, "Alice")
+        XCTAssertEqual(decoded.pictureURL, "https://example.com/a.png")
+        XCTAssertEqual(decoded.about, "Bitcoin and signal. Long-time relay operator.")
+        XCTAssertEqual(decoded.nip05, "alice@example.com")
+        XCTAssertEqual(decoded.lud16, "alice@strike.me")
+        XCTAssertEqual(decoded.fetchedAt, 1700000000.0)
+    }
+
+    func testCachedProfile_decodesLegacyFormat_missingNewFields() throws {
+        // Pre-2026-05-03 on-disk blob — no about / nip05 / lud16 keys.
+        // Codable's optional defaulting must keep these as nil; no migration.
+        let json = #"{"displayName":"Bob","pictureURL":"https://example.com/b.png","fetchedAt":1700000000.0}"#
+        let data = json.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(CachedProfile.self, from: data)
+        XCTAssertEqual(decoded.displayName, "Bob")
+        XCTAssertEqual(decoded.pictureURL, "https://example.com/b.png")
+        XCTAssertNil(decoded.about)
+        XCTAssertNil(decoded.nip05)
+        XCTAssertNil(decoded.lud16)
+    }
+
+    func testCachedProfile_codable_omittedNewFields_decodeAsNil() throws {
+        // Verify the init defaults work as expected when callers don't pass new fields.
+        let original = CachedProfile(
+            displayName: "Carol",
+            pictureURL: nil,
+            fetchedAt: 1700000000.0
+        )
+        XCTAssertNil(original.about)
+        XCTAssertNil(original.nip05)
+        XCTAssertNil(original.lud16)
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(CachedProfile.self, from: data)
+        XCTAssertNil(decoded.about)
+        XCTAssertNil(decoded.nip05)
+        XCTAssertNil(decoded.lud16)
+    }
+
+    func testCachedProfile_encodedJSON_containsNewKeysWhenSet() throws {
+        // Confirm the on-disk JSON shape carries the new fields (so a future
+        // reinstall recovery or external tool can read them).
+        let original = CachedProfile(
+            displayName: "Dave",
+            pictureURL: nil,
+            about: "test bio",
+            nip05: "dave@example.com",
+            lud16: "dave@strike.me",
+            fetchedAt: 1700000000.0
+        )
+        let data = try JSONEncoder().encode(original)
+        let jsonString = String(data: data, encoding: .utf8) ?? ""
+        XCTAssertTrue(jsonString.contains("\"about\""), "JSON should contain about key")
+        XCTAssertTrue(jsonString.contains("\"nip05\""), "JSON should contain nip05 key")
+        XCTAssertTrue(jsonString.contains("\"lud16\""), "JSON should contain lud16 key")
+    }
+
+    func testCachedProfile_equatable_recognizesNewFieldDifferences() throws {
+        // Equatable conformance must distinguish profiles that differ only
+        // in the new fields (so SwiftUI re-render triggers when about/
+        // nip05/lud16 change without displayName/pictureURL changing).
+        let base = CachedProfile(
+            displayName: "Eve",
+            pictureURL: "https://example.com/e.png",
+            about: "first bio",
+            nip05: "eve@example.com",
+            lud16: "eve@strike.me",
+            fetchedAt: 1700000000.0
+        )
+        var changedAbout = base; changedAbout.about = "second bio"
+        var changedNip05 = base; changedNip05.nip05 = "eve@other.com"
+        var changedLud16 = base; changedLud16.lud16 = "eve@cashapp.com"
+        XCTAssertNotEqual(base, changedAbout)
+        XCTAssertNotEqual(base, changedNip05)
+        XCTAssertNotEqual(base, changedLud16)
+        XCTAssertEqual(base, base)
+    }
+
     // MARK: - SharedConstants keys
 
     func testSharedConstants_newMultiAccountKeys_existAndAreUnique() {
