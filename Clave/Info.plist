@@ -8,6 +8,8 @@
 	</array>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Authenticate to view or export your secret key</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Clave uses the camera to scan Nostrconnect QR codes from web clients so you can sign events without typing long URLs.</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 </dict>
