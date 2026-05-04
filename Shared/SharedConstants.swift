@@ -11,13 +11,7 @@ enum SharedConstants {
     /// Fragment (#) ensures the bunker URI never reaches Cloudflare logs;
     /// clave.casa parses client-side and `history.replaceState`-scrubs after parse.
     static let claveCasaEditBaseURL: String = "https://clave.casa/edit"
-    // TEMP for feat/multi-account internal-TestFlight builds: points at the
-    // parallel test proxy on Dell (port 3047), which has Stage A's
-    // `signer_pubkey` payload field deployed. Production proxy (the
-    // `proxy.clave.casa` URL) does NOT have Stage A yet — flipping back to
-    // the prod URL is the LAST commit on this branch before merging to
-    // main, after Stage A (#22) ships to production.
-    static let defaultProxyURL = "https://proxy-test.clave.casa"
+    static let defaultProxyURL = "https://proxy.clave.casa"
 
     // UserDefaults keys
     static let signerPubkeyHexKey = "signerPubkeyHex"
