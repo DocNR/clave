@@ -31,6 +31,7 @@ const { createRelayPool } = require("./relayPool");
 const { createApnsClient, shouldPruneToken, parseReason } = require("./apnsClient");
 
 const PUBLIC_PRIMARY_URL = process.env.PUBLIC_RELAY_URL || "wss://relay.powr.build";
+const PUBLIC_PROXY_URL = process.env.PUBLIC_PROXY_URL || "https://proxy.clave.casa";
 
 const storage = createStorage(TOKEN_FILE);
 const CLIENTS_FILE = "./clients.json";
@@ -171,7 +172,7 @@ const server = http.createServer((req, res) => {
           return res.end(JSON.stringify({ error: e.message }));
         }
 
-        const expectedUrl = `https://proxy.clave.casa/register`;
+        const expectedUrl = `${PUBLIC_PROXY_URL}/register`;
         const bodyHash = sha256Hex(Buffer.from(body));
         const result = await verifyNip98(authEvent, expectedUrl, "POST", bodyHash);
         if (!result.valid) {
@@ -229,7 +230,7 @@ const server = http.createServer((req, res) => {
           return res.end(JSON.stringify({ error: e.message }));
         }
 
-        const expectedUrl = `https://proxy.clave.casa/unregister`;
+        const expectedUrl = `${PUBLIC_PROXY_URL}/unregister`;
         const bodyHash = sha256Hex(Buffer.from(body));
         const result = await verifyNip98(authEvent, expectedUrl, "POST", bodyHash);
         if (!result.valid) {
@@ -292,7 +293,7 @@ const server = http.createServer((req, res) => {
           return res.end(JSON.stringify({ error: e.message }));
         }
 
-        const expectedUrl = `https://proxy.clave.casa/pair-client`;
+        const expectedUrl = `${PUBLIC_PROXY_URL}/pair-client`;
         const bodyHash = sha256Hex(Buffer.from(body));
         const result = await verifyNip98(authEvent, expectedUrl, "POST", bodyHash);
         if (!result.valid) {
@@ -400,7 +401,7 @@ const server = http.createServer((req, res) => {
           return res.end(JSON.stringify({ error: e.message }));
         }
 
-        const expectedUrl = `https://proxy.clave.casa/unpair-client`;
+        const expectedUrl = `${PUBLIC_PROXY_URL}/unpair-client`;
         const bodyHash = sha256Hex(Buffer.from(body));
         const result = await verifyNip98(authEvent, expectedUrl, "POST", bodyHash);
         if (!result.valid) {
@@ -503,15 +504,17 @@ async function dispatchCaughtEvent({ event, sourceUrl, classification }) {
     },
     relay_url: classification === "PRIMARY" ? PUBLIC_PRIMARY_URL : sourceUrl,
     event_id: event.id,
+    signer_pubkey: targetPubkey,
   };
 
   // Embed the caught event so NSE doesn't have to race the relay's ephemeral
-  // retention window. APNs alert payload cap is 4KB; 3500B leaves ~300B for
-  // the aps container. Oversized events fall through to NSE's existing
+  // retention window. APNs alert payload cap is 4KB; 3415B leaves ~300B for
+  // the aps container after signer_pubkey (~85B). Oversized events fall through
+  // to NSE's existing
   // fetch-from-relay path (same broken behavior as build 21, no regression).
   const eventJSON = JSON.stringify(event);
   const eventBytes = Buffer.byteLength(eventJSON);
-  if (eventBytes <= 3500) {
+  if (eventBytes <= 3415) {
     pushPayload.event = event;
   } else {
     console.log(
