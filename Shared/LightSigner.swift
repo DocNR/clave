@@ -44,6 +44,14 @@ enum LightSigner {
                                  status: "error", errorMessage: "Invalid event")
         }
 
+        // Derive the signer's pubkey from the supplied private key once per
+        // request. Used by Task 4 multi-account scoping for bunker secrets,
+        // touchClient, and kind:3 lastContactSet. If derivation fails (would
+        // indicate a fundamentally invalid privateKey, which shouldn't pass
+        // earlier guards), per-signer storage ops fall through to empty-key
+        // bucket — non-fatal but bounded.
+        let signerPubkey = (try? LightEvent.pubkeyHex(from: privateKey)) ?? ""
+
         // Per-event-id dedupe (audit D.1.1). Both NSE and the foreground
         // relay subscription (Layer 1) call into this function; whichever
         // marks first wins, others skip. Cross-process semantics are lossy
@@ -91,7 +99,7 @@ enum LightSigner {
             logger.error("[LightSigner] Decrypt failed: \(error.localizedDescription, privacy: .public)")
             let result = RequestResult(method: "unknown", eventKind: nil, clientPubkey: senderPubkey,
                                        status: "error", errorMessage: "Decrypt failed")
-            logAndTrack(result: result)
+            logAndTrack(result: result, signerPubkey: signerPubkey)
             return result
         }
 
@@ -102,7 +110,7 @@ enum LightSigner {
             logger.error("[LightSigner] Failed to parse JSON-RPC")
             let result = RequestResult(method: "unknown", eventKind: nil, clientPubkey: senderPubkey,
                                        status: "error", errorMessage: "Invalid JSON-RPC")
-            logAndTrack(result: result)
+            logAndTrack(result: result, signerPubkey: signerPubkey)
             return result
         }
 
@@ -119,20 +127,35 @@ enum LightSigner {
         if method == "connect" {
             // connect params: [remote-signer-pubkey, optional-secret, optional-perms]
             let providedSecret = params.count >= 2 ? params[1] : ""
-            let expectedSecret = SharedStorage.getBunkerSecret()
+            let expectedSecret = SharedStorage.getBunkerSecret(for: signerPubkey)
 
             if !providedSecret.isEmpty && providedSecret == expectedSecret {
-                // Valid secret — check cap before creating new permissions
-                let isExistingClient = SharedStorage.getClientPermissions(for: senderPubkey) != nil
+                // Valid secret — check cap before creating new permissions.
+                // Bug E fix: scope existence check to (current signer, sender)
+                // so a client paired with one account doesn't skip permissions
+                // creation when bunker-connecting to a different account.
+                // Previously the legacy `getClientPermissions(for:)` scanned
+                // all signers, so isExistingClient=true for any cross-paired
+                // client → row never written for the new (signer, client)
+                // pair → HomeView's signer-scoped list missed the connection
+                // and per-connection activity lookups returned no entries.
+                let isExistingClient = SharedStorage.getClientPermissions(signer: signerPubkey, client: senderPubkey) != nil
                 if !isExistingClient {
-                    let currentCount = SharedStorage.getConnectedClients().count
-                    if currentCount >= 5 {
-                        logger.notice("[LightSigner] Bunker connect rejected: pairing cap reached (5)")
+                    // Per-account scoping: count only this signer's clients.
+                    // Was using the unscoped getConnectedClients() which sums
+                    // every account's clients on the device — would falsely
+                    // reject a bunker-connect to a fresh account when other
+                    // accounts already had pairings. ApprovalSheet's cap check
+                    // (nostrconnect URI flow) was already per-signer; this
+                    // brings the bunker URI flow in line.
+                    let currentCount = SharedStorage.getConnectedClients(for: signerPubkey).count
+                    if currentCount >= Account.maxClientsPerAccount {
+                        logger.notice("[LightSigner] Bunker connect rejected: pairing cap reached (\(Account.maxClientsPerAccount))")
                         let result = RequestResult(
                             method: method, eventKind: nil, clientPubkey: senderPubkey,
-                            status: "blocked", errorMessage: "Pairing limit reached (5)"
+                            status: "blocked", errorMessage: "Pairing limit reached (\(Account.maxClientsPerAccount))"
                         )
-                        logAndTrack(result: result, clientName: clientName)
+                        logAndTrack(result: result, signerPubkey: signerPubkey, clientName: clientName)
                         try await sendErrorResponse(
                             requestId: requestId,
                             error: "Pairing limit reached. Unpair an existing client in Clave settings.",
@@ -156,23 +179,27 @@ enum LightSigner {
                         imageURL: nil,
                         connectedAt: Date().timeIntervalSince1970,
                         lastSeen: Date().timeIntervalSince1970,
-                        requestCount: 0
+                        requestCount: 0,
+                        signerPubkeyHex: signerPubkey
                     )
                     SharedStorage.saveClientPermissions(perms)
                     logger.notice("[LightSigner] New client paired with valid secret")
                 } else {
                     logger.notice("[LightSigner] Existing client re-paired with valid secret")
                 }
-                _ = SharedStorage.rotateBunkerSecret()
-            } else if SharedStorage.getClientPermissions(for: senderPubkey) != nil {
-                // Already has permissions — allow reconnect without secret
+                _ = SharedStorage.rotateBunkerSecret(for: signerPubkey)
+            } else if SharedStorage.getClientPermissions(signer: signerPubkey, client: senderPubkey) != nil {
+                // Already paired with THIS (signer, client) — allow reconnect
+                // without secret. Bug E fix: scope to current signer so a
+                // client paired with account A can't reconnect to account B
+                // without re-providing B's bunker secret.
                 logger.notice("[LightSigner] Already-paired client reconnecting")
             } else {
                 // Wrong or missing secret and no permissions — reject
                 logger.notice("[LightSigner] Connect rejected: invalid secret")
                 let result = RequestResult(method: method, eventKind: nil, clientPubkey: senderPubkey,
                                            status: "blocked", errorMessage: "Invalid or missing secret")
-                logAndTrack(result: result, clientName: clientName)
+                logAndTrack(result: result, signerPubkey: signerPubkey, clientName: clientName)
                 try await sendErrorResponse(
                     requestId: requestId, error: "Invalid or missing bunker secret",
                     privateKey: privateKey, senderPubkeyData: senderPubkeyData,
@@ -183,7 +210,14 @@ enum LightSigner {
                 return result
             }
         } else {
-            let perms = SharedStorage.getClientPermissions(for: senderPubkey)
+            // Bug E fix: scope to (current signer, sender). The legacy
+            // `getClientPermissions(for: senderPubkey)` returned a row for
+            // any signer that had paired this client — letting a sign_event
+            // RPC with `p`-tag pointing at signer B be signed by B's nsec
+            // even though only signer A had approved this client. Real
+            // authorization leak. Now the gate requires explicit (signer,
+            // client) consent.
+            let perms = SharedStorage.getClientPermissions(signer: signerPubkey, client: senderPubkey)
 
             if perms == nil {
                 // Unpaired clients may ONLY send `connect` — everything else (including kind:22242
@@ -197,7 +231,7 @@ enum LightSigner {
                 logger.notice("[LightSigner] Rejecting unpaired client for method \(method, privacy: .public)")
                 let result = RequestResult(method: method, eventKind: eventKind, clientPubkey: senderPubkey,
                                            status: "blocked", errorMessage: "Client not paired")
-                logAndTrack(result: result, clientName: clientName)
+                logAndTrack(result: result, signerPubkey: signerPubkey, clientName: clientName)
                 try await sendErrorResponse(
                     requestId: requestId, error: "Client not paired — send connect with valid bunker secret first",
                     privateKey: privateKey, senderPubkeyData: senderPubkeyData,
@@ -245,7 +279,8 @@ enum LightSigner {
                             eventKind: eventKind ?? 0,
                             clientPubkey: senderPubkey,
                             timestamp: Date().timeIntervalSince1970,
-                            responseRelayUrl: responseRelayUrl
+                            responseRelayUrl: responseRelayUrl,
+                            signerPubkeyHex: signerPubkey
                         )
                         SharedStorage.queuePendingRequest(pending)
                         queuedRequestId = pending.id
@@ -254,7 +289,7 @@ enum LightSigner {
                     let result = RequestResult(method: method, eventKind: eventKind, clientPubkey: senderPubkey,
                                                status: "pending", errorMessage: "Queued for approval",
                                                pendingRequestId: queuedRequestId)
-                    logAndTrack(result: result, clientName: clientName)
+                    logAndTrack(result: result, signerPubkey: signerPubkey, clientName: clientName)
                     try await sendErrorResponse(
                         requestId: requestId, error: "Permission denied — open Clave to approve",
                         privateKey: privateKey, senderPubkeyData: senderPubkeyData,
@@ -270,10 +305,16 @@ enum LightSigner {
         // Process the request
         let (responseResult, responseError) = processRequest(method: method, params: params, privateKey: privateKey)
 
-        var responseDict: [String: Any] = ["id": requestId]
-        if let responseResult {
-            responseDict["result"] = responseResult
-        }
+        // NIP-46 response shape is {id, result, error}. The `result` field
+        // MUST be present even on error responses (empty string per JSON-RPC
+        // convention) — strict parsers (e.g. nostr-tools' BunkerSigner under
+        // certain code paths) ignore responses missing `result` and time out
+        // instead of surfacing the error. Closes audit-5 from the 2026-04-17
+        // pre-external-TestFlight audit; symptom was clave.casa staying on a
+        // stale edit page for 45s after a server-side unpair instead of
+        // recovering immediately on the explicit "Invalid or missing bunker
+        // secret" error this view-of-iOS already sends.
+        var responseDict: [String: Any] = ["id": requestId, "result": responseResult ?? ""]
         if let responseError {
             responseDict["error"] = responseError
         }
@@ -283,7 +324,7 @@ enum LightSigner {
             logger.error("[LightSigner] Failed to serialize response")
             let result = RequestResult(method: method, eventKind: eventKind, clientPubkey: senderPubkey,
                                        status: "error", errorMessage: "Serialization failed")
-            logAndTrack(result: result, clientName: clientName)
+            logAndTrack(result: result, signerPubkey: signerPubkey, clientName: clientName)
             return result
         }
 
@@ -316,7 +357,7 @@ enum LightSigner {
             logger.error("[LightSigner] Failed to serialize event for publish")
             let result = RequestResult(method: method, eventKind: eventKind, clientPubkey: senderPubkey,
                                        status: "error", errorMessage: "Publish serialization failed")
-            logAndTrack(result: result, clientName: clientName)
+            logAndTrack(result: result, signerPubkey: signerPubkey, clientName: clientName)
             return result
         }
 
@@ -358,7 +399,7 @@ enum LightSigner {
         var signedSummary: String? = nil
         var signedReferencedEventId: String? = nil
         if status == "signed", method == "sign_event", let json = responseResult {
-            let enrichment = extractSignedEventEnrichment(signedEventJSON: json)
+            let enrichment = extractSignedEventEnrichment(signedEventJSON: json, signerPubkey: signerPubkey)
             signedEventId = enrichment.eventId
             signedSummary = enrichment.summary
             signedReferencedEventId = enrichment.referencedEventId
@@ -368,7 +409,7 @@ enum LightSigner {
                                    status: status, errorMessage: errorMsg,
                                    signedEventId: signedEventId, signedSummary: signedSummary,
                                    signedReferencedEventId: signedReferencedEventId)
-        logAndTrack(result: result, clientName: clientName)
+        logAndTrack(result: result, signerPubkey: signerPubkey, clientName: clientName)
         return result
     }
 
@@ -384,7 +425,14 @@ enum LightSigner {
     /// Failures are best-effort — returns (nil, nil, nil) and lets logging proceed.
     /// Internal (not private) so unit tests can verify enrichment shape without
     /// constructing a full encrypted NIP-46 envelope.
-    static func extractSignedEventEnrichment(signedEventJSON: String) -> (eventId: String?, summary: String?, referencedEventId: String?) {
+    static func extractSignedEventEnrichment(signedEventJSON: String, signerPubkey: String = "") -> (eventId: String?, summary: String?, referencedEventId: String?) {
+        // `signerPubkey` is required for correct kind:3 lastContactSet
+        // scoping (Task 4 of multi-account sprint). Defaulted to "" for
+        // source-compat with existing tests; production callers in
+        // `handleRequest` always pass the real signer pubkey derived from
+        // the request's privateKey. See ~/hq/clave/security-audits/
+        // 2026-04-30-multi-account-pre-implementation.md for the
+        // cross-account corruption hazard this prevents.
         guard let data = signedEventJSON.data(using: .utf8),
               let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return (nil, nil, nil)
@@ -401,7 +449,7 @@ enum LightSigner {
         // *with this sign*, not what would have changed against a stale set.
         let previous: Set<String>?
         if kind == 3 {
-            previous = SharedStorage.getLastContactSet()
+            previous = SharedStorage.getLastContactSet(for: signerPubkey)
         } else {
             previous = nil
         }
@@ -416,7 +464,7 @@ enum LightSigner {
             // Only persist when within the diff cap; over-cap kind:3 doesn't
             // benefit from a snapshot (we fall back to "Updated contact list (N follows)").
             if newSet.count <= ActivitySummary.kind3DiffCap {
-                SharedStorage.saveLastContactSet(newSet)
+                SharedStorage.saveLastContactSet(newSet, for: signerPubkey)
             }
         }
 
@@ -545,7 +593,11 @@ enum LightSigner {
         nil
     }
 
-    private static func logAndTrack(result: RequestResult, clientName: String? = nil) {
+    /// `signerPubkey` is threaded from `handleRequest` so the activity entry
+    /// is stamped with the right signer (Task 3 added the field; Task 4
+    /// connects callers) and `touchClient` updates the correct
+    /// (signer, client) row in multi-account scenarios.
+    private static func logAndTrack(result: RequestResult, signerPubkey: String, clientName: String? = nil) {
         let entry = ActivityEntry(
             id: UUID().uuidString,
             method: result.method,
@@ -556,12 +608,13 @@ enum LightSigner {
             errorMessage: result.errorMessage,
             signedEventId: result.signedEventId,
             signedSummary: result.signedSummary,
-            signedReferencedEventId: result.signedReferencedEventId
+            signedReferencedEventId: result.signedReferencedEventId,
+            signerPubkeyHex: signerPubkey
         )
         SharedStorage.logActivity(entry)
         if result.clientPubkey != "unknown" && result.status != "blocked"
-            && SharedStorage.getClientPermissions(for: result.clientPubkey) != nil {
-            SharedStorage.touchClient(pubkey: result.clientPubkey)
+            && SharedStorage.getClientPermissions(signer: signerPubkey, client: result.clientPubkey) != nil {
+            SharedStorage.touchClient(pubkey: result.clientPubkey, signer: signerPubkey)
         }
     }
 
@@ -589,7 +642,9 @@ enum LightSigner {
         responseRelays: [LightRelay]? = nil,
         responseRelayUrl: String? = nil
     ) async throws {
-        let responseDict: [String: Any] = ["id": requestId, "error": error]
+        // NIP-46 response shape requires `result` field even on errors —
+        // see audit-5 + the matching note in handleRequest's response path.
+        let responseDict: [String: Any] = ["id": requestId, "result": "", "error": error]
         guard let responseData = try? JSONSerialization.data(withJSONObject: responseDict),
               let responseJSON = String(data: responseData, encoding: .utf8) else { return }
 

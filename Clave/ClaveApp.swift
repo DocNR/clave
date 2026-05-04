@@ -12,7 +12,16 @@ struct ClaveApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .onOpenURL { url in
+                    handleDeeplink(url: url)
+                }
         }
+    }
+
+    @MainActor
+    private func handleDeeplink(url: URL) {
+        logger.notice("[Deeplink] received: \(url.absoluteString, privacy: .public)")
+        NotificationCenter.default.post(name: .deeplinkReceived, object: url)
     }
 }
 
@@ -117,8 +126,12 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     }
 
     private func handleForegroundSigningRequest(userInfo: [AnyHashable: Any]) async {
-        guard let nsec = SharedKeychain.loadNsec() else {
-            logger.error("[App] No nsec in Keychain")
+        // Task 6: pubkey-route the Keychain lookup. Same payload-first /
+        // currentSignerPubkeyHexKey fallback as NSE.
+        let signerPubkey = SharedKeychain.resolveSignerPubkey(userInfo: userInfo)
+        guard !signerPubkey.isEmpty,
+              let nsec = SharedKeychain.loadNsec(for: signerPubkey) else {
+            logger.error("[App] No nsec for resolved signer (\(signerPubkey.prefix(8), privacy: .public))")
             return
         }
 
@@ -130,11 +143,17 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             return
         }
 
-        let signerPubkey: String
+        // Defense-in-depth: verify Keychain entry's nsec derives back to
+        // the pubkey we routed by.
+        let derivedPubkey: String
         do {
-            signerPubkey = try LightEvent.pubkeyHex(from: privateKey)
+            derivedPubkey = try LightEvent.pubkeyHex(from: privateKey)
         } catch {
             logger.error("[App] Failed to derive pubkey")
+            return
+        }
+        guard derivedPubkey == signerPubkey else {
+            logger.error("[App] Pubkey mismatch: resolved=\(signerPubkey.prefix(8), privacy: .public) derived=\(derivedPubkey.prefix(8), privacy: .public)")
             return
         }
 
@@ -265,4 +284,8 @@ extension Notification.Name {
     /// AppState observes and re-registers with the proxy if a signer key
     /// exists. Object is the hex-encoded token string.
     static let apnsDeviceTokenAvailable = Notification.Name("apnsDeviceTokenAvailable")
+    /// Posted by ClaveApp.onOpenURL when iOS opens the app via a registered
+    /// URL scheme (nostrconnect:// or clave://). AppState observes and routes
+    /// via DeeplinkRouter to the appropriate pending state.
+    static let deeplinkReceived = Notification.Name("deeplinkReceived")
 }

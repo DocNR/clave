@@ -78,11 +78,11 @@ struct ClientDetailView: View {
         } message: {
             Text("Enter a new name for this client.")
         }
-        .alert("Unpair Client?", isPresented: $showUnpairConfirm) {
+        .alert(unpairAlertTitle, isPresented: $showUnpairConfirm) {
             Button("Unpair", role: .destructive) { performUnpair() }
             Button("Cancel", role: .cancel) { }
         } message: {
-            Text("This will remove all permissions for this client. You will need to reconnect if you want to use it again.")
+            Text(unpairAlertMessage)
         }
         .alert("Clear Overrides?", isPresented: $showOverrideAlert) {
             Button("Change & Clear") {
@@ -104,7 +104,10 @@ struct ClientDetailView: View {
     // MARK: - Load
 
     private func loadPermissions() {
-        if let perms = SharedStorage.getClientPermissions(for: pubkey) {
+        // Task 7: scope to (current account, this client). Phase-2
+        // multi-account: same client paired with multiple accounts
+        // produces distinct rows; this loads the current account's row.
+        if let perms = SharedStorage.getClientPermissions(signer: appState.signerPubkeyHex, client: pubkey) {
             permissions = perms
             selectedTrust = perms.trustLevel
             kindOverrides = perms.kindOverrides
@@ -370,8 +373,12 @@ struct ClientDetailView: View {
     }
 
     private var clientActivityEntries: [ActivityEntry] {
+        // Task 7: scope to current account's activity. The client we're
+        // viewing may also be paired with another account, but this
+        // detail view is scoped to (current signer, this client) — only
+        // show activity that THIS account had with this client.
         Array(
-            SharedStorage.getActivityLog()
+            SharedStorage.getActivityLog(for: appState.signerPubkeyHex)
                 .filter { $0.clientPubkey == pubkey }
                 .sorted { $0.timestamp > $1.timestamp }
                 .prefix(20)
@@ -398,11 +405,30 @@ struct ClientDetailView: View {
 
     private func performUnpair() {
         appState.unpairClientWithProxy(clientPubkey: pubkey)
-        SharedStorage.removeClientPermissions(for: pubkey)
+        // Task 4: scoped variant. See HomeView for rationale.
+        SharedStorage.removeClientPermissions(
+            signer: appState.signerPubkeyHex,
+            client: pubkey
+        )
         dismiss()
     }
 
     // MARK: - Helpers
+
+    private var unpairAlertTitle: String {
+        let clientName = permissions?.name ?? "this connection"
+        let accountLabel = currentAccountDisplayName
+        return "Unpair \(clientName) from @\(accountLabel)?"
+    }
+
+    private var unpairAlertMessage: String {
+        "This connection will no longer be able to sign for this account."
+    }
+
+    private var currentAccountDisplayName: String {
+        appState.currentAccount?.displayLabel
+            ?? String(appState.signerPubkeyHex.prefix(8))
+    }
 
     private var truncatedPubkey: String {
         if pubkey.count > 12 {
@@ -414,8 +440,8 @@ struct ClientDetailView: View {
     private var allKindsSorted: [Int] {
         var kinds = Set<Int>()
 
-        // Kinds this client has used (from activity log)
-        let clientKinds = SharedStorage.getActivityLog()
+        // Task 7: scope to current account's history with this client.
+        let clientKinds = SharedStorage.getActivityLog(for: appState.signerPubkeyHex)
             .filter { $0.clientPubkey == pubkey }
             .compactMap { $0.eventKind }
         kinds.formUnion(clientKinds)

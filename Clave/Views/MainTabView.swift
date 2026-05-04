@@ -43,10 +43,13 @@ struct MainTabView: View {
             // backgrounded). The in-process .pendingRequestsUpdated observer
             // in AppState handles the L1 path; this catches NSE-side queues.
             appState.refreshPendingRequests()
-            // Opportunistic re-register if the cached "last success" is stale
-            // or the last attempt failed (e.g. POST timed out on bad cellular).
-            // Cheap idempotent upsert on the proxy side.
-            appState.ensureRegisteredFresh()
+            // Opportunistic re-register if any account's cached "last success"
+            // is stale or the last attempt failed (e.g. POST timed out on bad
+            // cellular). Per-account throttle prevents hammering. Cheap
+            // idempotent upsert on the proxy side. Multi-account: iterates
+            // all accounts so a non-current account that's overdue still
+            // gets refreshed.
+            appState.ensureAllRegisteredFresh()
             // Sweep blank NC entries (see NotificationCenterSweep.swift).
             sweepBlankNotifications()
         case .inactive:

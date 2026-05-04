@@ -2,18 +2,23 @@ import SwiftUI
 
 struct ApprovalSheet: View {
     let parsedURI: NostrConnectParser.ParsedURI
+    let boundAccountPubkey: String?
     let onApprove: (ClientPermissions) -> Void
     @Environment(\.dismiss) private var dismiss
+    @Environment(AppState.self) private var appState
 
     @State private var selectedTrust: TrustLevel
     @State private var kindOverrides: [Int: Bool] = [:]
     @State private var showPermissions = false
-    @State private var capExceeded = false
+    @State private var showConnectionCapAlert = false
 
     private let protectedKinds: Set<Int> = SharedStorage.getProtectedKinds()
 
-    init(parsedURI: NostrConnectParser.ParsedURI, onApprove: @escaping (ClientPermissions) -> Void) {
+    init(parsedURI: NostrConnectParser.ParsedURI,
+         boundAccountPubkey: String? = nil,
+         onApprove: @escaping (ClientPermissions) -> Void) {
         self.parsedURI = parsedURI
+        self.boundAccountPubkey = boundAccountPubkey
         self.onApprove = onApprove
         _selectedTrust = State(initialValue: parsedURI.suggestedTrustLevel)
     }
@@ -22,6 +27,9 @@ struct ApprovalSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 24) {
+                    SigningAsHeader(signerPubkeyHex: boundAccountPubkey ?? appState.signerPubkeyHex)
+                        .padding(.horizontal)
+                        .padding(.top, 12)
                     clientHeader
                     trustLevelCards
                     permissionsSection
@@ -31,10 +39,10 @@ struct ApprovalSheet: View {
             }
             .navigationTitle("Approve Connection")
             .navigationBarTitleDisplayMode(.inline)
-            .alert("Free tier limit reached", isPresented: $capExceeded) {
+            .alert("Connection limit reached", isPresented: $showConnectionCapAlert) {
                 Button("OK", role: .cancel) { }
             } message: {
-                Text("You've paired the maximum 5 clients. Unpair one from Settings → Clients to continue.")
+                Text(AccountError.connectionCapReached.errorDescription ?? "")
             }
         }
         .snapshotProtected()
@@ -189,7 +197,7 @@ struct ApprovalSheet: View {
             .buttonStyle(.bordered)
             .frame(maxWidth: .infinity)
 
-            Button("Connect") {
+            Button("Connect as @\(signingAsDisplayLabel)") {
                 buildAndApprove()
             }
             .buttonStyle(.borderedProminent)
@@ -200,6 +208,12 @@ struct ApprovalSheet: View {
     }
 
     // MARK: - Helpers
+
+    private var signingAsDisplayLabel: String {
+        let pk = boundAccountPubkey ?? appState.signerPubkeyHex
+        return appState.accounts.first(where: { $0.pubkeyHex == pk })?.displayLabel
+            ?? String(pk.prefix(8))
+    }
 
     private var truncatedPubkey: String {
         let pk = parsedURI.clientPubkey
@@ -241,13 +255,19 @@ struct ApprovalSheet: View {
     }
 
     private func buildAndApprove() {
-        // Free-tier cap: 5 paired clients total (bunker + nostrconnect combined).
-        // Counts the union in SharedStorage.connectedClients. Re-pairing an
-        // existing client (same pubkey) isn't blocked since no new row is added.
-        let connected = SharedStorage.getConnectedClients()
+        // Free-tier cap: 5 paired clients PER ACCOUNT (Task 7 — was
+        // global before multi-account, but the cap is conceptually
+        // per-account: each account independently maintains its own
+        // pairings). Counts SharedStorage.connectedClients scoped to
+        // the current signer. Re-pairing an existing client (same
+        // pubkey) isn't blocked since no new row is added.
+        let signerForCheck = boundAccountPubkey ?? SharedConstants.sharedDefaults.string(
+            forKey: SharedConstants.currentSignerPubkeyHexKey
+        ) ?? ""
+        let connected = SharedStorage.getConnectedClients(for: signerForCheck)
         let alreadyPaired = connected.contains { $0.pubkey == parsedURI.clientPubkey }
-        if !alreadyPaired && connected.count >= 5 {
-            capExceeded = true
+        if !alreadyPaired && connected.count >= Account.maxClientsPerAccount {
+            showConnectionCapAlert = true
             return
         }
 
@@ -261,7 +281,8 @@ struct ApprovalSheet: View {
             imageURL: parsedURI.imageURL,
             connectedAt: Date().timeIntervalSince1970,
             lastSeen: Date().timeIntervalSince1970,
-            requestCount: 0
+            requestCount: 0,
+            signerPubkeyHex: signerForCheck
         )
         onApprove(permissions)
         // Don't call dismiss() here — ConnectSheet handles dismissal

@@ -7,6 +7,17 @@ struct ExportKeySheet: View {
     @State private var authError = ""
     @State private var copied = false
 
+    /// Task 6: load nsec for the current account. Reads
+    /// `currentSignerPubkeyHexKey` from UserDefaults (kept in sync by
+    /// AppState). Stage C (account picker UX) will refactor this sheet
+    /// to take a `pubkey: String` parameter so per-account export from
+    /// AccountDetailView works.
+    private static func loadCurrentNsec() -> String? {
+        let pubkey = SharedConstants.sharedDefaults.string(forKey: SharedConstants.currentSignerPubkeyHexKey) ?? ""
+        guard !pubkey.isEmpty else { return nil }
+        return SharedKeychain.loadNsec(for: pubkey)
+    }
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 24) {
@@ -105,7 +116,7 @@ struct ExportKeySheet: View {
                 ) { success, authenticationError in
                     DispatchQueue.main.async {
                         if success {
-                            nsec = SharedKeychain.loadNsec()
+                            nsec = ExportKeySheet.loadCurrentNsec()
                         } else {
                             authError = authenticationError?.localizedDescription ?? "Authentication failed"
                         }
@@ -113,7 +124,7 @@ struct ExportKeySheet: View {
                 }
             } else {
                 // No authentication available at all — show key directly
-                nsec = SharedKeychain.loadNsec()
+                nsec = ExportKeySheet.loadCurrentNsec()
             }
         }
     }

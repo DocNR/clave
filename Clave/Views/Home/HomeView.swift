@@ -6,6 +6,13 @@ struct HomeView: View {
     @State private var activityLog: [ActivityEntry] = []
     @State private var showConnectSheet = false
     @State private var clientToUnpair: ClientPermissions?
+    @State private var showAddAccountSheet = false
+    @State private var showAccountCapAlert = false
+    @State private var showConnectionCapAlert = false
+    @State private var navigationPath = NavigationPath()
+    @State private var deeplinkApprovalURI: NostrConnectParser.ParsedURI?
+    @State private var deeplinkAccountChoiceURI: NostrConnectParser.ParsedURI?
+    @State private var deeplinkError: String?
     @Environment(\.scenePhase) private var scenePhase
 
     private var signedTodayCount: Int {
@@ -22,7 +29,7 @@ struct HomeView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $navigationPath) {
             List {
                 // Pending approvals
                 if !appState.pendingRequests.isEmpty {
@@ -33,10 +40,12 @@ struct HomeView: View {
                     .listRowBackground(Color.clear)
                 }
 
-                // Identity
+                // Stage C: strip + slim bar replace the build-37 Menu identity bar.
+                // SlimIdentityBar manages its own outer padding (12pt bottom);
+                // no additional spacing added here.
                 Section {
-                    identityBar
-                        .padding(.bottom, 8)
+                    AccountStripView(onAddTapped: handleAddAccountTap)
+                    SlimIdentityBar()
                 }
                 .listRowInsets(EdgeInsets())
                 .listRowBackground(Color.clear)
@@ -45,7 +54,6 @@ struct HomeView: View {
                 // Stats
                 Section {
                     statsRow
-                        .padding(.bottom, 8)
                 }
                 .listRowInsets(EdgeInsets())
                 .listRowBackground(Color.clear)
@@ -53,6 +61,8 @@ struct HomeView: View {
 
                 // Connected Clients
                 Section {
+                    pairNewConnectionRow
+
                     if clients.isEmpty {
                         emptyClientsView
                     } else {
@@ -75,31 +85,125 @@ struct HomeView: View {
                         .foregroundStyle(.primary)
                         .textCase(nil)
                 }
+                .listRowBackground(Color.clear)
             }
             .listStyle(.plain)
+            .listSectionSpacing(0)
+            .scrollContentBackground(.hidden)
+            .background(homeBackgroundGradient.ignoresSafeArea())
             .navigationTitle("Clave")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        showConnectSheet = true
-                    } label: {
-                        Image(systemName: "plus")
-                    }
-                }
+            .navigationBarTitleDisplayMode(.inline)
+            .refreshable {
+                refreshData()
+                await appState.refreshAllProfiles()
             }
-            .onAppear { refreshData() }
+            .onAppear {
+                refreshData()
+                appState.fetchProfilesForAllAccountsIfNeeded()
+            }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active { refreshData() }
             }
+            // Bug H fix: refresh clients + activity when the user switches
+            // account via the strip pills. Without this, the npub label
+            // (read directly from appState.currentAccount) updates correctly
+            // but the @State `clients` and `activityLog` arrays were only
+            // reloaded by refreshData() — which fired on appear / scenePhase
+            // / signingCompleted but never on currentAccount change.
+            .onChange(of: appState.currentAccount?.pubkeyHex) { _, _ in
+                refreshData()
+            }
+            .onChange(of: appState.pendingDetailPubkey) { _, newValue in
+                if let pubkey = newValue {
+                    navigationPath.append(AccountNavTarget.detail(pubkey: pubkey))
+                    appState.pendingDetailPubkey = nil
+                }
+            }
+            .onChange(of: appState.pendingNostrconnectURI?.id) { _, _ in
+                if let uri = appState.pendingNostrconnectURI {
+                    deeplinkApprovalURI = uri
+                    appState.pendingNostrconnectURI = nil
+                }
+            }
+            .onChange(of: appState.pendingDeeplinkAccountChoice?.id) { _, _ in
+                if let uri = appState.pendingDeeplinkAccountChoice {
+                    deeplinkAccountChoiceURI = uri
+                    appState.pendingDeeplinkAccountChoice = nil
+                }
+            }
             .onReceive(NotificationCenter.default.publisher(for: .signingCompleted)) { _ in
                 refreshData()
+            }
+            .navigationDestination(for: AccountNavTarget.self) { target in
+                switch target {
+                case .detail(let pubkey):
+                    AccountDetailView(pubkeyHex: pubkey)
+                }
             }
             .sheet(isPresented: $showConnectSheet, onDismiss: {
                 refreshData()
             }) {
                 ConnectSheet()
             }
-            .alert("Unpair Client?", isPresented: Binding(
+            .sheet(isPresented: $showAddAccountSheet) {
+                AddAccountSheet()
+            }
+            .sheet(item: $deeplinkAccountChoiceURI) { uri in
+                DeeplinkAccountPicker(parsedURI: uri) { pickedPubkey in
+                    appState.deeplinkBoundAccount = pickedPubkey
+                    let captured = uri
+                    deeplinkAccountChoiceURI = nil  // dismiss picker first
+                    DispatchQueue.main.async {
+                        // Defer approval sheet present to the next run loop so the
+                        // picker dismiss animation completes before the new sheet
+                        // tries to present (SwiftUI sheet-chain race fix).
+                        deeplinkApprovalURI = captured
+                    }
+                }
+            }
+            .sheet(item: $deeplinkApprovalURI) { uri in
+                ApprovalSheet(
+                    parsedURI: uri,
+                    boundAccountPubkey: appState.deeplinkBoundAccount
+                ) { permissions in
+                    let captured = uri
+                    let bound = appState.deeplinkBoundAccount
+                    deeplinkApprovalURI = nil
+                    appState.deeplinkBoundAccount = nil
+                    Task {
+                        do {
+                            try await appState.handleNostrConnect(
+                                parsedURI: captured,
+                                permissions: permissions,
+                                boundAccountPubkey: bound
+                            )
+                        } catch {
+                            await MainActor.run {
+                                deeplinkError = error.localizedDescription
+                            }
+                        }
+                    }
+                }
+            }
+            .alert("Connection Failed", isPresented: .init(
+                get: { deeplinkError != nil },
+                set: { if !$0 { deeplinkError = nil } }
+            )) {
+                Button("OK") { deeplinkError = nil }
+            } message: {
+                Text(deeplinkError ?? "Unknown error")
+            }
+            .alert("Account limit reached", isPresented: $showAccountCapAlert) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(AccountError.accountCapReached.errorDescription ?? "")
+            }
+            .alert("Connection limit reached", isPresented: $showConnectionCapAlert) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(AccountError.connectionCapReached.errorDescription ?? "")
+            }
+            .alert(swipeUnpairAlertTitle, isPresented: Binding(
                 get: { clientToUnpair != nil },
                 set: { if !$0 { clientToUnpair = nil } }
             )) {
@@ -107,7 +211,15 @@ struct HomeView: View {
                     if let client = clientToUnpair {
                         withAnimation {
                             appState.unpairClientWithProxy(clientPubkey: client.pubkey)
-                            SharedStorage.removeClientPermissions(for: client.pubkey)
+                            // Task 4: scoped variant — removes only this
+                            // (signer, client) pair, never another account's
+                            // row for the same client. Phase 1 = single
+                            // account in field, so currentAccount.pubkeyHex
+                            // is unambiguous.
+                            SharedStorage.removeClientPermissions(
+                                signer: appState.signerPubkeyHex,
+                                client: client.pubkey
+                            )
                             refreshData()
                         }
                     }
@@ -117,73 +229,64 @@ struct HomeView: View {
                     clientToUnpair = nil
                 }
             } message: {
-                Text("This client will need a new bunker URI with a fresh secret to reconnect.")
+                Text("This connection will no longer be able to sign for this account.")
             }
         }
+        .animation(.easeInOut(duration: 0.3), value: appState.currentAccount?.pubkeyHex)
     }
 
-    // MARK: - Identity Bar
+    // MARK: - Add-account routing
 
-    private var identityBar: some View {
-        HStack(spacing: 12) {
-            profileAvatar
-
-            VStack(alignment: .leading, spacing: 4) {
-                if let name = appState.profile?.displayName, !name.isEmpty {
-                    Text(name)
-                        .font(.subheadline.bold())
-                }
-
-                HStack(spacing: 6) {
-                    Text(truncatedNpub)
-                        .font(.system(.caption, design: .monospaced))
-                        .foregroundStyle(.secondary)
-
-                    Button {
-                        UIPasteboard.general.string = appState.npub
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    } label: {
-                        Image(systemName: "doc.on.doc")
-                            .font(.caption2)
-                    }
-                }
-            }
-
-            Spacer()
-
-            HStack(spacing: 4) {
-                Circle()
-                    .fill(.green)
-                    .frame(width: 8, height: 8)
-                Text("Active")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding()
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
-        .padding(.horizontal)
-        .padding(.top, 8)
-        .onAppear { appState.fetchProfileIfNeeded() }
-    }
-
-    @ViewBuilder
-    private var profileAvatar: some View {
-        if let image = appState.profileImage {
-            Image(uiImage: image)
-                .resizable()
-                .scaledToFill()
-                .frame(width: 48, height: 48)
-                .clipShape(Circle())
+    private func handleAddAccountTap() {
+        if appState.accounts.count >= Account.maxAccountsPerDevice {
+            showAccountCapAlert = true
+            UINotificationFeedbackGenerator().notificationOccurred(.warning)
         } else {
-            AvatarView(pubkeyHex: appState.signerPubkeyHex, name: appState.profile?.displayName)
+            showAddAccountSheet = true
         }
     }
 
-    private var truncatedNpub: String {
-        let npub = appState.npub
-        guard npub.count > 20 else { return npub }
-        return String(npub.prefix(12)) + "..." + String(npub.suffix(6))
+    /// Pre-check connection cap before opening ConnectSheet so the user
+    /// hits the alert at the entry point, not after a NIP-46 connect
+    /// request lands in ApprovalSheet (where ApprovalSheet's own check
+    /// stays as defense-in-depth for cross-device pair attempts).
+    private func handlePairNewConnectionTap() {
+        if clients.count >= Account.maxClientsPerAccount {
+            showConnectionCapAlert = true
+            UINotificationFeedbackGenerator().notificationOccurred(.warning)
+        } else {
+            showConnectSheet = true
+        }
+    }
+
+    // MARK: - Unpair alert helpers
+
+    private var swipeUnpairAlertTitle: String {
+        let clientName = clientToUnpair?.name ?? "this connection"
+        let label = appState.currentAccount?.displayLabel
+            ?? String(appState.signerPubkeyHex.prefix(8))
+        return "Unpair \(clientName) from @\(label)?"
+    }
+
+    // MARK: - Background gradient
+
+    private var homeBackgroundGradient: some View {
+        let theme: AccountTheme
+        if let current = appState.currentAccount {
+            theme = AccountTheme.forAccount(pubkeyHex: current.pubkeyHex)
+        } else {
+            theme = AccountTheme.palette[0]
+        }
+        return LinearGradient(
+            stops: [
+                .init(color: theme.start.opacity(0.42), location: 0.0),
+                .init(color: theme.end.opacity(0.22), location: 0.35),
+                .init(color: theme.end.opacity(0.10), location: 0.70),
+                .init(color: theme.start.opacity(0.04), location: 1.0),
+            ],
+            startPoint: .top,
+            endPoint: .bottom
+        )
     }
 
     // MARK: - Stats Row
@@ -195,7 +298,6 @@ struct HomeView: View {
             statCard(title: "Pending", value: "\(pendingCount)", icon: "clock.badge.exclamationmark.fill", color: .orange)
         }
         .padding(.horizontal)
-        .padding(.bottom, 8)
     }
 
     private func statCard(title: String, value: String, icon: String, color: Color) -> some View {
@@ -216,6 +318,33 @@ struct HomeView: View {
 
     // MARK: - Connected Clients
 
+    private var pairNewConnectionRow: some View {
+        let theme = AccountTheme.forAccount(
+            pubkeyHex: appState.currentAccount?.pubkeyHex ?? ""
+        )
+        return Button {
+            handlePairNewConnectionTap()
+        } label: {
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle()
+                        .fill(theme.accent.opacity(0.18))
+                    Image(systemName: "plus")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(theme.accent)
+                }
+                .frame(width: 22, height: 22)
+                Text("Pair New Connection")
+                    .foregroundStyle(theme.accent)
+                    .font(.body)
+                    .fontWeight(.medium)
+                Spacer()
+            }
+        }
+        .buttonStyle(.plain)
+        .listRowBackground(Color.clear)
+    }
+
     private var emptyClientsView: some View {
         HStack {
             Spacer()
@@ -232,7 +361,7 @@ struct HomeView: View {
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 16)
                 Button {
-                    showConnectSheet = true
+                    handlePairNewConnectionTap()
                 } label: {
                     Label("Connect a Client", systemImage: "plus.circle.fill")
                         .font(.body.bold())
@@ -300,8 +429,11 @@ struct HomeView: View {
 
     private func refreshData() {
         SharedStorage.migrateIfNeeded()
-        clients = SharedStorage.getClientPermissions()
-        activityLog = SharedStorage.getActivityLog()
+        // Task 7: scope to the current account. Phase 1 single-account
+        // user sees the same data as before; Phase 2 multi-account user
+        // sees only the current account's activity.
+        clients = SharedStorage.getClientPermissions(forSigner: appState.signerPubkeyHex)
+        activityLog = SharedStorage.getActivityLog(for: appState.signerPubkeyHex)
         appState.refreshPendingRequests()
         appState.refreshBunkerSecret()
     }

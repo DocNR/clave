@@ -10,3 +10,6 @@ build/
 .env
 .env.*
 !.env.example
+
+# superpowers brainstorming scratch (visual companion mockups, session state)
+.superpowers/

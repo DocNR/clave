@@ -3,6 +3,7 @@ import SwiftUI
 struct PendingApprovalsView: View {
     @Environment(AppState.self) private var appState
     @State private var processing: Set<String> = []
+    @State private var approveErrorMessage: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -33,6 +34,14 @@ struct PendingApprovalsView: View {
         // cards (identityBar, statsRow) can self-pad. This mirrors that
         // pattern so the orange border doesn't touch screen edges.
         .padding(.horizontal)
+        .alert("Couldn't approve request", isPresented: .init(
+            get: { approveErrorMessage != nil },
+            set: { if !$0 { approveErrorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) { approveErrorMessage = nil }
+        } message: {
+            Text(approveErrorMessage ?? "Unknown error")
+        }
     }
 
     private func requestRow(_ request: PendingRequest) -> some View {
@@ -61,6 +70,21 @@ struct PendingApprovalsView: View {
                 Text(relativeTime(request.timestamp))
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
+            }
+
+            // Account context — critical on the highest-risk surface (actual
+            // key material commits here). Multi-account users need to know
+            // which account each pending request belongs to before tapping
+            // Approve. Uses a lightweight caption rather than the full
+            // SigningAsHeader bar to avoid visual competition with the
+            // orange-bordered card.
+            HStack(spacing: 6) {
+                Image(systemName: "person.crop.circle.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                (Text("Signing as ").foregroundStyle(.secondary)
+                 + Text("@\(signerLabel(for: request))").bold().foregroundStyle(.primary))
+                    .font(.caption)
             }
 
             let isProcessing = processing.contains(request.id)
@@ -111,8 +135,15 @@ struct PendingApprovalsView: View {
     }
 
     private func alwaysAllow(_ request: PendingRequest) {
+        // Task 7: use the request's own signer (Task 3 added this field).
+        // Falls back to current account for legacy rows where signer is
+        // empty. Without scoping, the same client paired to multiple
+        // accounts could update the wrong account's permissions row.
+        let signer = request.signerPubkeyHex.isEmpty
+            ? appState.signerPubkeyHex
+            : request.signerPubkeyHex
         if let kind = request.eventKind,
-           var perms = SharedStorage.getClientPermissions(for: request.clientPubkey) {
+           var perms = SharedStorage.getClientPermissions(signer: signer, client: request.clientPubkey) {
             perms.kindOverrides[kind] = true
             SharedStorage.saveClientPermissions(perms)
         }
@@ -122,14 +153,31 @@ struct PendingApprovalsView: View {
     private func approve(_ request: PendingRequest) {
         processing.insert(request.id)
         Task {
-            let success = await appState.approvePendingRequest(request)
+            let outcome = await appState.approvePendingRequest(request)
             processing.remove(request.id)
-            if success {
+            switch outcome {
+            case .signed:
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
-            } else {
+            case .failedKeepingPending(let reason):
                 UINotificationFeedbackGenerator().notificationOccurred(.error)
+                approveErrorMessage = reason
+            case .failedAndRemoved(let reason):
+                UINotificationFeedbackGenerator().notificationOccurred(.error)
+                approveErrorMessage = reason
             }
         }
+    }
+
+    /// Resolves the display label for the signing account of a pending request.
+    /// Resolution order: petname → displayName → hex prefix (first 8 chars).
+    /// Falls back to current account when the request carries no signer hint
+    /// (legacy rows from before Stage C).
+    private func signerLabel(for request: PendingRequest) -> String {
+        let pubkeyHex = request.signerPubkeyHex.isEmpty
+            ? appState.signerPubkeyHex
+            : request.signerPubkeyHex
+        return appState.accounts.first(where: { $0.pubkeyHex == pubkeyHex })?.displayLabel
+            ?? String(pubkeyHex.prefix(8))
     }
 
     private func kindLabel(_ kind: Int) -> String {

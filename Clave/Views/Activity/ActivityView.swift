@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct ActivityView: View {
+    @Environment(AppState.self) private var appState
     @State private var entries: [ActivityEntry] = []
     @State private var selectedFilter = "All"
     @Environment(\.scenePhase) private var scenePhase
@@ -54,6 +55,16 @@ struct ActivityView: View {
             .onAppear { refreshData() }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active { refreshData() }
+            }
+            // Bug H fix: refresh when the user switches account via the
+            // Home identity-bar Menu. Without this the entries array stays
+            // bound to whatever account was current when ActivityView last
+            // appeared. refreshData reads currentSignerPubkeyHexKey from
+            // UserDefaults, which persistCurrentAccountPubkey updates
+            // synchronously, so by the time onChange fires the right
+            // account's data loads.
+            .onChange(of: appState.currentAccount?.pubkeyHex) { _, _ in
+                refreshData()
             }
             .onReceive(NotificationCenter.default.publisher(for: .signingCompleted)) { _ in
                 refreshData()
@@ -123,6 +134,14 @@ struct ActivityView: View {
     }
 
     private func refreshData() {
-        entries = SharedStorage.getActivityLog()
+        // Task 7: scope to current account. ActivityView is the
+        // top-level Activity tab; per the locked decision, activity is
+        // always per-account (no merged toggle). Phase-1 single-account
+        // user sees the same data as before; Phase-2 multi-account user
+        // sees only the current account's history.
+        let currentSigner = SharedConstants.sharedDefaults.string(
+            forKey: SharedConstants.currentSignerPubkeyHexKey
+        ) ?? ""
+        entries = SharedStorage.getActivityLog(for: currentSigner)
     }
 }

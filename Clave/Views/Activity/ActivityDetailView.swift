@@ -138,7 +138,12 @@ struct ActivityDetailView: View {
     /// we pass nil because we don't know the referenced event's kind from
     /// the activity log alone (could be a kind:1 note, kind:30023 article, etc.).
     private func njumpURL(for eventId: String, kindHint: Int?) -> URL? {
-        let connection = SharedStorage.getConnectedClients().first { $0.pubkey == entry.clientPubkey }
+        // Task 7: scope by entry's signer (Task 3 field), with current
+        // account fallback for legacy entries.
+        let entrySigner = entry.signerPubkeyHex.isEmpty
+            ? (SharedConstants.sharedDefaults.string(forKey: SharedConstants.currentSignerPubkeyHexKey) ?? "")
+            : entry.signerPubkeyHex
+        let connection = SharedStorage.getConnectedClients(for: entrySigner).first { $0.pubkey == entry.clientPubkey }
         let relays = connection?.relayUrls ?? []
         let bech32: String
         if relays.isEmpty {
@@ -183,7 +188,12 @@ struct ActivityDetailView: View {
     }
 
     private var permissions: ClientPermissions? {
-        SharedStorage.getClientPermissions(for: entry.clientPubkey)
+        // Task 7: scope by (entry's signer, client) — same fallback
+        // pattern as njumpURL above.
+        let entrySigner = entry.signerPubkeyHex.isEmpty
+            ? (SharedConstants.sharedDefaults.string(forKey: SharedConstants.currentSignerPubkeyHexKey) ?? "")
+            : entry.signerPubkeyHex
+        return SharedStorage.getClientPermissions(signer: entrySigner, client: entry.clientPubkey)
     }
 
     private var connectionLabel: String {
