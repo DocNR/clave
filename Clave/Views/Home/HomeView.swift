@@ -362,6 +362,7 @@ struct HomeView: View {
             // backstory.
             Label("Connect a Client", systemImage: "plus")
                 .font(.body.bold())
+                .foregroundStyle(.white)
                 .frame(maxWidth: .infinity)
         }
         .buttonStyle(.borderedProminent)

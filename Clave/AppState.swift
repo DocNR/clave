@@ -221,6 +221,13 @@ final class AppState {
     // now go through `bunkerURI` (which calls SharedStorage directly) so
     // the cache adds no value.
 
+    /// Increments on every `rotateBunkerSecret()` call so SwiftUI views
+    /// observing this property re-evaluate `bunkerURI` (a computed property
+    /// reading from SharedStorage / UserDefaults — which @Observable can't
+    /// track on its own). Read with a discarded `let _ = appState.bunkerSecretsTick`
+    /// in the view's body to establish the observation dependency.
+    private(set) var bunkerSecretsTick: Int = 0
+
     var bunkerURI: String {
         bunkerURI(for: signerPubkeyHex) ?? ""
     }
@@ -1187,6 +1194,7 @@ final class AppState {
     func rotateBunkerSecret() {
         guard !signerPubkeyHex.isEmpty else { return }
         _ = SharedStorage.rotateBunkerSecret(for: signerPubkeyHex)
+        bunkerSecretsTick &+= 1
     }
 
     // Legacy wrappers — preserved for OnboardingView and SettingsView call

@@ -29,6 +29,12 @@ struct ConnectBunkerTabView: View {
     }
 
     var body: some View {
+        // Observe rotation tick so the view re-evaluates appState.bunkerURI
+        // (computed from SharedStorage) after rotateBunkerSecret() mutates
+        // the underlying UserDefaults value. @Observable can't track
+        // UserDefaults reads, so we read this stored property to force
+        // observation registration.
+        let _ = appState.bunkerSecretsTick
         if appState.bunkerURI.isEmpty {
             // Empty bunker URI — no signer key imported yet. Shouldn't be
             // reachable from the user-facing flow but guard anyway.
@@ -121,6 +127,7 @@ struct ConnectBunkerTabView: View {
                     Image(systemName: copiedBunker ? "checkmark" : "doc.on.doc")
                     Text(copiedBunker ? "Copied" : "Copy URI")
                 }
+                .foregroundStyle(.white)
                 .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
