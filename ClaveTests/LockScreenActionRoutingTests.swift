@@ -56,4 +56,121 @@ final class LockScreenActionRoutingTests: XCTestCase {
         XCTAssertEqual(content.title, "Approve Signing Request")
         XCTAssertEqual(content.interruptionLevel, .active)
     }
+
+    // MARK: - NSE-delivered banner cleanup (PendingApprovalBanner.clear extension)
+    //
+    // `clear(requestId:)` previously only removed locally-scheduled banners
+    // (identifier prefix `"pending-approval-"`). NSE-delivered banners use
+    // the APNs notification identifier (proxy-assigned), so the only stable
+    // way to find them is by `categoryIdentifier` + `userInfo.pendingRequestId`.
+    // These tests verify the pure matcher; the runtime async path is exercised
+    // by manual on-device smoke (TTL purge with a follow request was the
+    // motivating bug — banner stranded in NC after the request expired).
+
+    func test_nseDeliveredIds_matchesCorrectRequestByCategoryAndUserInfo() {
+        let requestId = "target-request-id"
+        let delivered: [DeliveredNotificationSnapshot] = [
+            // Match: NSE-delivered for the target request
+            DeliveredNotificationSnapshot(
+                identifier: "apns-event-1",
+                title: "Approve Signing Request",
+                body: "primal wants to sign Note",
+                categoryIdentifier: PendingApprovalCategory.identifier,
+                userInfo: ["pendingRequestId": requestId, "event_id": "abc"]
+            ),
+            // Same category but different request — must NOT match
+            DeliveredNotificationSnapshot(
+                identifier: "apns-event-2",
+                title: "Approve Signing Request",
+                body: "yakihonne wants to sign Reaction",
+                categoryIdentifier: PendingApprovalCategory.identifier,
+                userInfo: ["pendingRequestId": "different-request"]
+            ),
+            // Same userInfo but different category — must NOT match
+            DeliveredNotificationSnapshot(
+                identifier: "apns-event-3",
+                title: "Approve Signing Request",
+                body: "wrong category",
+                categoryIdentifier: "OTHER_CATEGORY",
+                userInfo: ["pendingRequestId": requestId]
+            ),
+            // Missing userInfo pendingRequestId — must NOT match
+            DeliveredNotificationSnapshot(
+                identifier: "apns-event-4",
+                title: "Approve Signing Request",
+                body: "no request id",
+                categoryIdentifier: PendingApprovalCategory.identifier,
+                userInfo: [:]
+            ),
+        ]
+
+        let result = PendingApprovalBanner.nseDeliveredIds(forRequest: requestId, in: delivered)
+        XCTAssertEqual(result, ["apns-event-1"])
+    }
+
+    func test_nseDeliveredIds_returnsEmptyWhenNoMatch() {
+        let delivered: [DeliveredNotificationSnapshot] = [
+            DeliveredNotificationSnapshot(
+                identifier: "x",
+                title: "y",
+                body: "z",
+                categoryIdentifier: PendingApprovalCategory.identifier,
+                userInfo: ["pendingRequestId": "other"]
+            )
+        ]
+        XCTAssertTrue(
+            PendingApprovalBanner.nseDeliveredIds(forRequest: "missing", in: delivered).isEmpty
+        )
+    }
+
+    func test_nseDeliveredIds_returnsEmptyForEmptyDelivered() {
+        XCTAssertTrue(
+            PendingApprovalBanner.nseDeliveredIds(forRequest: "anything", in: []).isEmpty
+        )
+    }
+
+    // MARK: - Blank notification cleanup (NSE-side sweep at start of next wake)
+    //
+    // NSE's silent-success path leaves an empty-title-empty-body notification
+    // in NC. Old NSE-self-cleanup-after-contentHandler was racy. This pure
+    // filter feeds the new NSE-side sweep that runs at the start of each fresh
+    // wake — race-free because the notifications it removes were committed by
+    // earlier wakes (already in the system).
+
+    func test_blankDeliveredIds_findsEmptyTitleAndBody() {
+        let delivered: [DeliveredNotificationSnapshot] = [
+            blankSnap(id: "blank-empty"),
+            blankSnap(id: "blank-spaces", title: " ", body: " "),
+            blankSnap(id: "blank-whitespace", title: "\n\t ", body: "\t\n"),
+            blankSnap(id: "kept-title", title: "Approve Signing Request", body: ""),
+            blankSnap(id: "kept-body", title: "", body: "Relay rejected"),
+            blankSnap(id: "kept-both", title: "Signing Failed", body: "Bad sig"),
+        ]
+
+        let result = Set(PendingApprovalBanner.blankDeliveredIds(in: delivered))
+        XCTAssertEqual(result, Set(["blank-empty", "blank-spaces", "blank-whitespace"]))
+    }
+
+    func test_blankDeliveredIds_returnsEmptyForNoBlanks() {
+        let delivered = [
+            blankSnap(id: "kept", title: "Approve Signing Request", body: "x")
+        ]
+        XCTAssertTrue(PendingApprovalBanner.blankDeliveredIds(in: delivered).isEmpty)
+    }
+
+    private func blankSnap(
+        id: String,
+        title: String = "",
+        body: String = "",
+        category: String = "",
+        userInfo: [AnyHashable: Any] = [:]
+    ) -> DeliveredNotificationSnapshot {
+        DeliveredNotificationSnapshot(
+            identifier: id,
+            title: title,
+            body: body,
+            categoryIdentifier: category,
+            userInfo: userInfo
+        )
+    }
 }

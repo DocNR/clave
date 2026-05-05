@@ -32,9 +32,35 @@ class NotificationService: UNNotificationServiceExtension {
         logger.notice("[ClaveNSE] didReceive called")
 
         Task {
+            // Clean up blanks left in Notification Center by PRIOR NSE wakes
+            // before doing this wake's work. NSE's old self-cleanup pattern
+            // (call `removeDeliveredNotifications` immediately after
+            // `contentHandler`) is racy because the process exits before iOS
+            // commits the notification. Targeting prior wakes is race-free —
+            // those notifications are already committed; from a fresh NSE
+            // process the remove call reliably runs.
+            await sweepPriorBlankNotifications()
+
             let result = await handleSigningRequest(userInfo: request.content.userInfo)
             deliverContent(result: result)
         }
+    }
+
+    /// Removes empty-title-and-body notifications committed by prior NSE
+    /// wakes. Mirrors `Clave/Views/Components/NotificationCenterSweep.swift`
+    /// but runs from the NSE process so cleanup happens between events
+    /// without requiring the user to foreground Clave. Fire-and-forget the
+    /// final remove call (no completion handler available); awaiting the
+    /// `deliveredNotifications()` lookup keeps NSE alive long enough for
+    /// the XPC message to be issued before the process exits.
+    private func sweepPriorBlankNotifications() async {
+        let center = UNUserNotificationCenter.current()
+        let delivered = await center.deliveredNotifications()
+        let snapshots = delivered.map(DeliveredNotificationSnapshot.init(from:))
+        let blankIds = PendingApprovalBanner.blankDeliveredIds(in: snapshots)
+        guard !blankIds.isEmpty else { return }
+        center.removeDeliveredNotifications(withIdentifiers: blankIds)
+        logger.notice("[ClaveNSE] Swept \(blankIds.count, privacy: .public) blank notification(s) from prior wakes")
     }
 
     private func deliverContent(result: SigningResult) {
