@@ -36,7 +36,13 @@ struct QRCodeView: View {
         .snapshotProtected()
     }
 
-    private var qrImage: Image {
+    private var qrImage: Image { Self.makeImage(for: content) }
+
+    /// Shared QR image generator. Used by this view and by tab bodies that
+    /// embed an inline QR (e.g. ConnectBunkerTabView). Centralizes the
+    /// CIFilter pipeline + correction level + fallback image so future
+    /// changes happen in one place.
+    static func makeImage(for content: String) -> Image {
         let context = CIContext()
         let filter = CIFilter.qrCodeGenerator()
         filter.message = Data(content.utf8)
