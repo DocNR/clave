@@ -78,16 +78,48 @@ final class AppState {
         return pendingRequests.filter { $0.timestamp > cutoff }
     }
 
-    /// First fresh pending request — drives `MainTabView`'s root alert.
-    /// Auto-chains because the binding re-presents whenever this becomes
-    /// non-nil after a queue mutation.
+    /// In-memory set of pending request ids the user has dismissed via the
+    /// root alert's "Not now" button (or any non-Approve/Deny dismissal —
+    /// e.g. system-driven dismissal during navigation). Filtered out of
+    /// `activeApprovalRequest` so the alert doesn't infinite-loop on every
+    /// view re-evaluation. The bell badge / inbox sheet still surface the
+    /// dismissed requests via `pendingApprovalQueueDepth` and
+    /// `freshPendingRequests` — "Not now" means *handle this via the bell*,
+    /// not *throw it away*.
+    ///
+    /// Resets on app relaunch (in-memory only). New requests arriving after
+    /// dismissal still trigger the alert because their ids aren't in this
+    /// set. Dismissed-then-approved/denied/expired ids stay in the set but
+    /// are harmless — the underlying request is gone from `pendingRequests`
+    /// so the filter has nothing to skip past.
+    private var dismissedAlertRequestIds: Set<String> = []
+
+    /// First fresh pending request whose alert has not been dismissed —
+    /// drives `MainTabView`'s root alert. Auto-chains: when the user
+    /// approves/denies the active request, SwiftUI re-evaluates this and
+    /// presents the next undismissed fresh request. When all fresh
+    /// requests are dismissed, returns nil and the alert stays closed
+    /// until a new request arrives.
     var activeApprovalRequest: PendingRequest? {
-        freshPendingRequests.first
+        freshPendingRequests.first { !dismissedAlertRequestIds.contains($0.id) }
     }
 
-    /// Count for the bell-badge + alert title "(N of M)" suffix.
+    /// Count for the bell-badge + alert title "(N of M)" suffix. Counts ALL
+    /// fresh pending requests, including ones the user has dismissed from
+    /// the alert — they're still pending, just being handled via the bell.
     var pendingApprovalQueueDepth: Int {
         freshPendingRequests.count
+    }
+
+    /// Mark the currently-active approval request as alert-dismissed.
+    /// Called from the root alert's "Not now" button and from the binding
+    /// setter when SwiftUI dismisses the alert via a system event (e.g.
+    /// app backgrounding mid-alert). Idempotent — no-op if no active
+    /// request. The request stays in `pendingRequests` so the bell badge
+    /// still reflects it; only the alert presentation is suppressed.
+    func dismissActiveAlert() {
+        guard let id = activeApprovalRequest?.id else { return }
+        dismissedAlertRequestIds.insert(id)
     }
 
     /// Set by long-press on a strip pill; consumed by HomeView's

@@ -223,4 +223,84 @@ final class AppStatePendingApprovalTests: XCTestCase {
 
         XCTAssertNil(SharedStorage.getClientPermissions(signer: testSigner, client: testClient))
     }
+
+    // MARK: - dismissActiveAlert (root alert "Not now" handling)
+    //
+    // Build 54 added a root .alert that auto-presents whenever
+    // activeApprovalRequest != nil. With a no-op binding setter, system-
+    // driven dismissals (navigation, backgrounding, deep-link interrupt)
+    // caused the alert to infinite-loop on every view re-evaluation.
+    // build 56 fix: dismissActiveAlert() adds the active request id to an
+    // in-memory dismissed set; activeApprovalRequest filters those out.
+    // Bell badge / inbox sheet still surface the request — "Not now" means
+    // *handle via the bell*, not *throw away*.
+
+    func test_dismissActiveAlert_skipsToNextUndismissedRequest() {
+        let r1 = makeRequest(id: "r1", ageSeconds: 60)
+        let r2 = makeRequest(id: "r2", ageSeconds: 30)
+        SharedStorage.queuePendingRequest(r1)
+        SharedStorage.queuePendingRequest(r2)
+        appState.refreshPendingRequests()
+
+        XCTAssertEqual(appState.activeApprovalRequest?.id, "r1",
+                       "FIFO queue: oldest fresh request first")
+
+        appState.dismissActiveAlert()
+
+        XCTAssertEqual(appState.activeApprovalRequest?.id, "r2",
+                       "After dismiss, next undismissed fresh request becomes active")
+
+        appState.dismissActiveAlert()
+
+        XCTAssertNil(appState.activeApprovalRequest,
+                     "All fresh requests dismissed → no active request → alert stays closed")
+    }
+
+    func test_dismissActiveAlert_doesNotAffectQueueDepth() {
+        // The bell badge counts ALL fresh pending requests, dismissed-from-
+        // alert or not. Dismissing the alert does NOT reduce the queue —
+        // the user is just routing handling through the bell instead.
+        let r1 = makeRequest(id: "r1", ageSeconds: 30)
+        let r2 = makeRequest(id: "r2", ageSeconds: 60)
+        SharedStorage.queuePendingRequest(r1)
+        SharedStorage.queuePendingRequest(r2)
+        appState.refreshPendingRequests()
+
+        XCTAssertEqual(appState.pendingApprovalQueueDepth, 2)
+
+        appState.dismissActiveAlert()
+        appState.dismissActiveAlert()
+
+        XCTAssertEqual(appState.pendingApprovalQueueDepth, 2,
+                       "Queue depth unchanged — dismissed requests still in inbox")
+        XCTAssertEqual(appState.freshPendingRequests.count, 2,
+                       "Fresh queue unchanged — dismissed requests still in fresh list")
+    }
+
+    func test_dismissActiveAlert_isNoOpWhenNoActiveRequest() {
+        XCTAssertNil(appState.activeApprovalRequest)
+
+        appState.dismissActiveAlert()  // must not crash on empty state
+        appState.dismissActiveAlert()
+
+        XCTAssertNil(appState.activeApprovalRequest)
+    }
+
+    func test_newRequestAfterDismissal_stillTriggersAlert() {
+        // Critical UX guarantee: dismissing one alert must NOT suppress
+        // alerts for future requests. Each new request id gets its own
+        // alert opportunity.
+        let r1 = makeRequest(id: "r1", ageSeconds: 30)
+        SharedStorage.queuePendingRequest(r1)
+        appState.refreshPendingRequests()
+        appState.dismissActiveAlert()
+        XCTAssertNil(appState.activeApprovalRequest)
+
+        let r2 = makeRequest(id: "r2", ageSeconds: 0)
+        SharedStorage.queuePendingRequest(r2)
+        appState.refreshPendingRequests()
+
+        XCTAssertEqual(appState.activeApprovalRequest?.id, "r2",
+                       "New request id not in dismissed set → alert re-arms for it")
+    }
 }

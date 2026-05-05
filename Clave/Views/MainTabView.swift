@@ -47,10 +47,29 @@ struct MainTabView: View {
             alertTitle,
             isPresented: Binding(
                 get: { appState.activeApprovalRequest != nil },
-                set: { _ in /* buttons own removal — no-op setter */ }
+                set: { newValue in
+                    // Approve/Deny/Not-now buttons drive their own state
+                    // (request is removed from pendingRequests, or the id
+                    // is added to dismissedAlertRequestIds). If SwiftUI
+                    // sets isPresented=false while the request is still
+                    // active (system-driven dismissal — e.g. background
+                    // transition mid-alert, deep-link interruption), treat
+                    // it as user-dismiss so the alert doesn't infinite-loop
+                    // on every subsequent view re-evaluation.
+                    if !newValue, appState.activeApprovalRequest != nil {
+                        appState.dismissActiveAlert()
+                    }
+                }
             ),
             presenting: appState.activeApprovalRequest
         ) { request in
+            Button("Not now", role: .cancel) {
+                // Explicit "I'll handle this via the bell" — the request
+                // stays in the queue, badge stays incremented, but the
+                // alert won't re-present for this id until the user
+                // approves/denies via the inbox.
+                appState.dismissActiveAlert()
+            }
             Button("Deny", role: .destructive) {
                 appState.denyPendingRequest(request)
             }
