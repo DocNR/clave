@@ -96,6 +96,7 @@ struct ConnectBunkerTabView: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Bunker URI")
                     .font(.caption)
+                    .fontWeight(.semibold)
                     .foregroundStyle(.secondary)
                     .textCase(.uppercase)
                 Text(appState.bunkerURI)

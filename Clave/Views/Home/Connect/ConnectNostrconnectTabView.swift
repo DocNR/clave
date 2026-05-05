@@ -143,6 +143,7 @@ struct ConnectNostrconnectTabView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Or paste a URI")
                 .font(.caption)
+                .fontWeight(.semibold)
                 .foregroundStyle(.secondary)
                 .textCase(.uppercase)
             TextField("nostrconnect://...", text: $pasteText)
@@ -152,10 +153,10 @@ struct ConnectNostrconnectTabView: View {
                 .textContentType(.URL)
                 .submitLabel(.go)
                 .padding(10)
-                .background(Color(.tertiarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 8))
+                .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 8))
                 .overlay(
                     RoundedRectangle(cornerRadius: 8)
-                        .stroke(pasteError == nil ? Color.clear : Color.red, lineWidth: 1)
+                        .stroke(pasteError == nil ? Color(.separator) : Color.red, lineWidth: 1)
                 )
                 .onSubmit { validateAndSubmit() }
                 .onChange(of: pasteText) { _, _ in

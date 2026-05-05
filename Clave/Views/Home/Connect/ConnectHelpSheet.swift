@@ -15,11 +15,9 @@ struct ConnectHelpSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    Text("Some Nostr web apps and clients let you sign in with a remote signer like Clave. When you choose \"Connect a remote signer,\" they show you a code that starts with nostrconnect://.")
+                    Text("If a Nostr app or website asks you to \"connect a remote signer,\" they'll show you a code starting with nostrconnect://.")
                         .font(.body)
-                    Text("**Bring that code here:** scan the QR with the camera, or copy the URI and paste it into the field below.")
-                        .font(.body)
-                    Text("The URI tells Clave which client wants to connect, where to reach it, and which encryption keys to use. After you paste it, Clave will ask you to approve the connection — including which kinds of events the client can sign.")
+                    Text("Paste or scan that code here. Clave will ask you to approve the connection.")
                         .font(.body)
                         .foregroundStyle(.secondary)
                 }
