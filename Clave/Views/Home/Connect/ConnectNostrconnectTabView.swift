@@ -10,6 +10,14 @@ import AVFoundation
 /// 3-card flow. The user no longer has to choose between scan and paste —
 /// both inputs are visible on the same screen.
 struct ConnectNostrconnectTabView: View {
+    /// Bound to ConnectSheet's parsedURI. When this transitions back to
+    /// nil (e.g. ApprovalSheet was cancelled without completing),
+    /// the view resets isScanning + clears any scanError so the camera
+    /// resumes. Without this, a successful scan permanently sets
+    /// isScanning = false and the viewfinder freezes after cancel
+    /// because .onAppear doesn't re-fire (the view never unmounts —
+    /// the segmented control swaps body inline rather than pushing).
+    let parsedURI: NostrConnectParser.ParsedURI?
     let onParsed: (NostrConnectParser.ParsedURI) -> Void
 
     @State private var pasteText = ""
@@ -43,6 +51,18 @@ struct ConnectNostrconnectTabView: View {
         }
         .sheet(isPresented: $showHelp) {
             ConnectHelpSheet()
+        }
+        .onChange(of: parsedURI?.id) { _, newId in
+            // ApprovalSheet just dismissed without completing pairing
+            // (cancel button OR error path). Reset the scanner so the
+            // user can try again. Without this the viewfinder is frozen
+            // because handleScannedCode set isScanning = false on the
+            // successful detection that triggered ApprovalSheet to
+            // present.
+            if newId == nil {
+                isScanning = true
+                scanError = nil
+            }
         }
     }
 

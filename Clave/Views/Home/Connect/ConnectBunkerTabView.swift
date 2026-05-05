@@ -106,7 +106,14 @@ struct ConnectBunkerTabView: View {
     }
 
     private var actionRow: some View {
-        HStack(spacing: 8) {
+        // Copy URI's resting tint matches the active account's gradient
+        // identity (consistent with HomeView's empty-state CTA, the
+        // smaller Pair New Connection row, and the Account Strip pill).
+        // Flips to .green for the 2-second "Copied" feedback window —
+        // canonical iOS confirmation color, intentionally distinct from
+        // the per-account theme.
+        let theme = AccountTheme.forAccount(pubkeyHex: appState.currentAccount?.pubkeyHex ?? "")
+        return HStack(spacing: 8) {
             Button {
                 copyBunkerURI()
             } label: {
@@ -117,7 +124,7 @@ struct ConnectBunkerTabView: View {
                 .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
-            .tint(copiedBunker ? .green : .accentColor)
+            .tint(copiedBunker ? .green : theme.accent)
 
             Button {
                 appState.rotateBunkerSecret()

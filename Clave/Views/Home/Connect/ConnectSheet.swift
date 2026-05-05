@@ -24,7 +24,7 @@ struct ConnectSheet: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                Picker("", selection: $selectedTab) {
+                Picker("Connection method", selection: $selectedTab) {
                     Text("Bunker").tag(Tab.bunker)
                     Text("Nostrconnect").tag(Tab.nostrconnect)
                 }
@@ -70,7 +70,7 @@ struct ConnectSheet: View {
         case .bunker:
             ConnectBunkerTabView()
         case .nostrconnect:
-            ConnectNostrconnectTabView(onParsed: handleParsed)
+            ConnectNostrconnectTabView(parsedURI: parsedURI, onParsed: handleParsed)
         }
     }
 
