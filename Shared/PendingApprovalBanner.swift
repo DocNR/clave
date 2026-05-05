@@ -28,15 +28,11 @@ enum PendingApprovalBanner {
     /// We pass the request id so denying/approving the same request won't
     /// stack banners.
     static func schedule(requestId: String, clientPubkey: String, eventKind: Int?) {
-        let clientName = SharedStorage.getClientPermissions(for: clientPubkey)?.name
-            ?? String(clientPubkey.prefix(8))
-        let kindDesc = eventKind.map { KnownKinds.label(for: $0) } ?? "event"
-
-        let content = UNMutableNotificationContent()
-        content.title = "Approve Signing Request"
-        content.body = "\(clientName) wants to sign \(kindDesc)"
-        content.sound = .default
-        content.interruptionLevel = .active
+        let content = makeContent(
+            requestId: requestId,
+            clientPubkey: clientPubkey,
+            eventKind: eventKind
+        )
 
         // No trigger → deliver immediately.
         let request = UNNotificationRequest(
@@ -52,6 +48,35 @@ enum PendingApprovalBanner {
                 logger.notice("[Banner] Scheduled pending-approval banner client=\(clientPubkey.prefix(8), privacy: .public) kind=\(eventKind ?? -1, privacy: .public)")
             }
         }
+    }
+
+    /// Pure builder for the notification content. Extracted from
+    /// `schedule` so unit tests can verify the categoryIdentifier +
+    /// userInfo wiring without depending on UNUserNotificationCenter
+    /// authorization or delivery — which are flaky in the simulator
+    /// test runner.
+    static func makeContent(
+        requestId: String,
+        clientPubkey: String,
+        eventKind: Int?
+    ) -> UNMutableNotificationContent {
+        let clientName = SharedStorage.getClientPermissions(for: clientPubkey)?.name
+            ?? String(clientPubkey.prefix(8))
+        let kindDesc = eventKind.map { KnownKinds.label(for: $0) } ?? "event"
+
+        let content = UNMutableNotificationContent()
+        content.title = "Approve Signing Request"
+        content.body = "\(clientName) wants to sign \(kindDesc)"
+        content.sound = .default
+        content.interruptionLevel = .active
+        // Wires the long-press / swipe-down notification UI to surface
+        // Approve + Deny action buttons. Category is registered in
+        // AppDelegate.didFinishLaunchingWithOptions; pendingRequestId is
+        // looked up by AppState's action observer to find the matching
+        // PendingRequest in SharedStorage.
+        content.categoryIdentifier = PendingApprovalCategory.identifier
+        content.userInfo = ["pendingRequestId": requestId]
+        return content
     }
 
     /// Removes the delivered/pending banner for a given request id. Called when

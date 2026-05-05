@@ -9,6 +9,7 @@ struct HomeView: View {
     @State private var showAddAccountSheet = false
     @State private var showAccountCapAlert = false
     @State private var showConnectionCapAlert = false
+    @State private var showInboxSheet = false
     @State private var navigationPath = NavigationPath()
     @State private var deeplinkApprovalURI: NostrConnectParser.ParsedURI?
     @State private var deeplinkAccountChoiceURI: NostrConnectParser.ParsedURI?
@@ -20,8 +21,11 @@ struct HomeView: View {
         return activityLog.filter { $0.status == "signed" && $0.timestamp >= startOfDay }.count
     }
 
+    /// Drives the "Pending" stat card and the bell badge. Reads the
+    /// freshness-filtered count from AppState so stale (>5 min) requests
+    /// don't inflate the surface.
     private var pendingCount: Int {
-        appState.pendingRequests.count
+        appState.pendingApprovalQueueDepth
     }
 
     private var sortedClients: [ClientPermissions] {
@@ -31,14 +35,10 @@ struct HomeView: View {
     var body: some View {
         NavigationStack(path: $navigationPath) {
             List {
-                // Pending approvals
-                if !appState.pendingRequests.isEmpty {
-                    Section {
-                        PendingApprovalsView()
-                    }
-                    .listRowInsets(EdgeInsets())
-                    .listRowBackground(Color.clear)
-                }
+                // Pending approvals moved out of the home list. The root
+                // alert in MainTabView surfaces the active request from
+                // any tab; the bell ToolbarItem opens InboxView for queue
+                // triage. The orange card is deliberately gone.
 
                 // Stage C: strip + slim bar replace the build-37 Menu identity bar.
                 // SlimIdentityBar manages its own outer padding (12pt bottom);
@@ -93,6 +93,21 @@ struct HomeView: View {
             .background(homeBackgroundGradient.ignoresSafeArea())
             .navigationTitle("Clave")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showInboxSheet = true
+                    } label: {
+                        Image(systemName: pendingCount > 0 ? "bell.badge.fill" : "bell")
+                            .symbolRenderingMode(.hierarchical)
+                    }
+                    .accessibilityLabel(
+                        pendingCount > 0
+                        ? "Pending requests: \(pendingCount)"
+                        : "Pending requests"
+                    )
+                }
+            }
             .refreshable {
                 refreshData()
                 await appState.refreshAllProfiles()
@@ -147,6 +162,9 @@ struct HomeView: View {
             }
             .sheet(isPresented: $showAddAccountSheet) {
                 AddAccountSheet()
+            }
+            .sheet(isPresented: $showInboxSheet) {
+                InboxView()
             }
             .sheet(item: $deeplinkAccountChoiceURI) { uri in
                 DeeplinkAccountPicker(parsedURI: uri) { pickedPubkey in
@@ -346,7 +364,11 @@ struct HomeView: View {
     }
 
     private var emptyClientsView: some View {
-        HStack {
+        // Theme tint mirrors the smaller `Pair New Connection` row builder
+        // below — both surfaces represent the same action and should share
+        // the active account's gradient identity.
+        let theme = AccountTheme.forAccount(pubkeyHex: appState.currentAccount?.pubkeyHex ?? "")
+        return HStack {
             Spacer()
             VStack(spacing: 16) {
                 Image(systemName: "person.crop.circle.badge.plus")
@@ -363,11 +385,16 @@ struct HomeView: View {
                 Button {
                     handlePairNewConnectionTap()
                 } label: {
-                    Label("Connect a Client", systemImage: "plus.circle.fill")
+                    // Use the simple `plus` glyph instead of `plus.circle.fill`.
+                    // The filled variant is negative-space (the plus is punched
+                    // THROUGH the circle) so the plus renders the same color as
+                    // the button background — invisible against `.borderedProminent`.
+                    Label("Connect a Client", systemImage: "plus")
                         .font(.body.bold())
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
+                .tint(theme.accent)
                 .padding(.horizontal, 32)
             }
             .padding(.vertical, 40)

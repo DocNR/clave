@@ -57,6 +57,39 @@ final class AppState {
     var pendingRequests: [PendingRequest] = []
     var profileImage: UIImage?
 
+    // MARK: - Pending approval surface (root alert + inbox bell)
+    //
+    // `pendingRequests` is the on-disk source of truth (cap 20, written by
+    // NSE and L1). For the in-app approval UI we want a freshness filter
+    // so that requests aged past the typical NIP-46 client timeout are
+    // never surfaced — clients have long since given up listening for the
+    // signed response, and approving a stale request would publish a
+    // useless event to the relay. `pendingRequestTTLSeconds` is the cutoff;
+    // `purgeStalePendingRequests` is the active cleanup that also writes
+    // an "expired" ActivityEntry so the user has a record.
+    static let pendingRequestTTLSeconds: Double = 300  // 5 minutes
+
+    /// Pending requests whose `timestamp` is within the TTL window. Read by
+    /// the root alert binding, the bell badge, and the inbox sheet. SwiftUI
+    /// re-evaluates whenever `pendingRequests` mutates (Observation tracks
+    /// the read of the stored property).
+    var freshPendingRequests: [PendingRequest] {
+        let cutoff = Date().timeIntervalSince1970 - Self.pendingRequestTTLSeconds
+        return pendingRequests.filter { $0.timestamp > cutoff }
+    }
+
+    /// First fresh pending request — drives `MainTabView`'s root alert.
+    /// Auto-chains because the binding re-presents whenever this becomes
+    /// non-nil after a queue mutation.
+    var activeApprovalRequest: PendingRequest? {
+        freshPendingRequests.first
+    }
+
+    /// Count for the bell-badge + alert title "(N of M)" suffix.
+    var pendingApprovalQueueDepth: Int {
+        freshPendingRequests.count
+    }
+
     /// Set by long-press on a strip pill; consumed by HomeView's
     /// NavigationStack to push AccountDetailView for that account without
     /// switching active. Cleared after navigation fires.
@@ -147,6 +180,19 @@ final class AppState {
                 self?.handleDeeplink(url: url)
             }
         }
+
+        // Lock-screen Approve / Deny actions are handled directly in
+        // `AppDelegate.userNotificationCenter(_:didReceive:)` via
+        // `AppState.handlePendingApprovalAction(requestId:actionId:)` —
+        // a static path that doesn't require an `AppState` instance.
+        // That's deliberate: when iOS launches the app cold to handle
+        // a notification action, the SwiftUI view tree (and `AppState`)
+        // hasn't initialized yet, so a NotificationCenter-based
+        // dispatcher would lose the post. The static path does the
+        // SharedStorage + LightSigner work directly; this `AppState`
+        // (when alive) sees the pending row removal via the
+        // `.pendingRequestsUpdated` observer above and refreshes
+        // automatically.
     }
 
     // MARK: - Foreground subscription bridge
@@ -1161,7 +1207,63 @@ final class AppState {
     }
 
     func refreshPendingRequests() {
+        // Read-only refresh: pull current on-disk state into the
+        // @Observable property. Stale-entry purging is intentionally
+        // NOT run here — `refreshPendingRequests` is also triggered by
+        // the in-process `.pendingRequestsUpdated` observer, which fires
+        // on every queue mutation including legacy/migration writes that
+        // may use sentinel timestamps. The freshness filter at read time
+        // (`freshPendingRequests` computed) keeps the UI clean; the hard
+        // purge below runs from explicit user-active triggers
+        // (MainTabView scenePhase `.active`) where stale-row eviction is
+        // safe and desirable.
         pendingRequests = SharedStorage.getPendingRequests()
+    }
+
+    /// Removes pending requests aged past `pendingRequestTTLSeconds` from
+    /// `SharedStorage` and writes an `ActivityEntry` with status `"expired"`
+    /// for each. Called from `refreshPendingRequests` (which runs on
+    /// `.pendingRequestsUpdated`, scenePhase `.active`, and approve/deny).
+    /// Idempotent: no-op when nothing is stale.
+    ///
+    /// Why a hard purge instead of a read-time filter only: the alert
+    /// binding, bell badge, and inbox sheet all derive from
+    /// `pendingRequests`. If we only filtered at read time, stale rows
+    /// would persist on disk (visible to the next NSE wake, would cap
+    /// the queue at 20, and lock-screen action handlers might still
+    /// resolve them by id). Purging keeps storage and the UI in sync.
+    func purgeStalePendingRequests() {
+        let cutoff = Date().timeIntervalSince1970 - Self.pendingRequestTTLSeconds
+        let onDisk = SharedStorage.getPendingRequests()
+        let stale = onDisk.filter { $0.timestamp <= cutoff }
+        guard !stale.isEmpty else { return }
+        for request in stale {
+            SharedStorage.removePendingRequest(id: request.id)
+            PendingApprovalBanner.clear(requestId: request.id)
+            let entry = ActivityEntry(
+                id: UUID().uuidString,
+                method: request.method,
+                eventKind: request.eventKind,
+                clientPubkey: request.clientPubkey,
+                timestamp: Date().timeIntervalSince1970,
+                status: "expired",
+                errorMessage: "Request timed out before user response",
+                signerPubkeyHex: request.signerPubkeyHex
+            )
+            SharedStorage.logActivity(entry)
+        }
+    }
+
+    /// Set or clear a per-kind override on the (signer, client)
+    /// permissions row. Called from `PendingRequestDetailView` when the
+    /// user toggles "Always allow this kind from <client>". No-op if the
+    /// permissions row doesn't exist (the client must already be paired).
+    func setKindOverride(signer: String, client: String, kind: Int, allowed: Bool) {
+        guard var perms = SharedStorage.getClientPermissions(signer: signer, client: client) else {
+            return
+        }
+        perms.kindOverrides[kind] = allowed
+        SharedStorage.saveClientPermissions(perms)
     }
 
     /// `bunkerURI` getter reads SharedStorage directly each access. This
@@ -1180,20 +1282,77 @@ final class AppState {
         case failedAndRemoved(reason: String)
     }
 
-    /// Approve a pending request: sign and publish the response from the app.
-    /// Task 5: load by the request's signer pubkey (PendingRequest.signerPubkeyHex,
-    /// added in Task 3). Falls back to current account for legacy rows or when
-    /// the request was queued without a signer (pre-Task-3 NSE writes).
-    ///
-    /// Failure handling: if the relay rejects the response wrapper (transient
-    /// drop, rate-limit, auth) we keep the pending row so the user can retry.
-    /// Hard failures (no nsec, malformed event JSON, decoder error) clear the
-    /// row because retry can't succeed.
+    /// Approve a pending request from inside the running app (inbox swipe,
+    /// detail-view button, root alert). Thin delegate to the static
+    /// `performApprove` helper — kept on the instance for source-compat
+    /// with existing call sites and for future per-account UI feedback
+    /// hooks. The static helper does the actual work so `AppDelegate`'s
+    /// lock-screen action handler can run the same path during cold
+    /// launches when no `AppState` instance exists yet.
     func approvePendingRequest(_ request: PendingRequest) async -> ApproveOutcome {
-        let signer = request.signerPubkeyHex.isEmpty ? signerPubkeyHex : request.signerPubkeyHex
+        await Self.performApprove(request)
+    }
+
+    /// Deny a pending request from inside the running app. Thin delegate
+    /// to the static `performDeny` helper. The on-disk `removePendingRequest`
+    /// posts `.pendingRequestsUpdated`; this `AppState`'s observer
+    /// catches it and refreshes the surface — no need to call refresh
+    /// explicitly here.
+    func denyPendingRequest(_ request: PendingRequest) {
+        Self.performDeny(request)
+    }
+
+    /// Static entry point for the lock-screen Approve / Deny notification
+    /// action handler. Safe to call from `AppDelegate` even during a cold
+    /// launch where `AppState` (held by `ContentView`'s @State) may not
+    /// have initialized yet — the work is done via `SharedStorage` +
+    /// `LightSigner` directly. UI refresh on the running-app side is
+    /// driven by `SharedStorage.removePendingRequest` posting
+    /// `.pendingRequestsUpdated`, which `AppState`'s existing observer
+    /// catches when alive.
+    ///
+    /// Looking up the request from storage by id (rather than passing a
+    /// `PendingRequest` through `userInfo`) keeps the wire format simple:
+    /// the notification only carries the id, the storage row carries the
+    /// full record. Idempotent: if the request was already handled (in-app
+    /// alert finished it, second action tap, expired purge), the lookup
+    /// returns nil and we just clear any lingering banner.
+    static func handlePendingApprovalAction(requestId: String, actionId: String) async {
+        guard let request = SharedStorage.getPendingRequests().first(where: { $0.id == requestId }) else {
+            PendingApprovalBanner.clear(requestId: requestId)
+            return
+        }
+        switch actionId {
+        case PendingApprovalCategory.approveActionId:
+            _ = await performApprove(request)
+        case PendingApprovalCategory.denyActionId:
+            performDeny(request)
+        default:
+            break
+        }
+    }
+
+    /// Approve a pending request: sign and publish the response.
+    /// Task 5: loads by the request's signer pubkey (PendingRequest.signerPubkeyHex,
+    /// added in Task 3); falls back to the current account for legacy rows
+    /// (UserDefaults read so this works without an AppState instance).
+    ///
+    /// Failure handling: relay rejection of the response wrapper (transient
+    /// drop, rate-limit, auth) keeps the pending row so the user can retry
+    /// from the inbox. Hard failures (no nsec, malformed event JSON, decoder
+    /// error) clear the row because retry can't succeed.
+    static func performApprove(_ request: PendingRequest) async -> ApproveOutcome {
+        let signer: String
+        if !request.signerPubkeyHex.isEmpty {
+            signer = request.signerPubkeyHex
+        } else {
+            signer = SharedConstants.sharedDefaults.string(
+                forKey: SharedConstants.currentSignerPubkeyHexKey
+            ) ?? ""
+        }
         guard !signer.isEmpty,
               let nsec = SharedKeychain.loadNsec(for: signer) else {
-            removePending(request)
+            performRemovePending(request)
             return .failedAndRemoved(reason: "Signing key unavailable.")
         }
 
@@ -1201,14 +1360,13 @@ final class AppState {
         do {
             privateKey = try Bech32.decodeNsec(nsec)
         } catch {
-            removePending(request)
+            performRemovePending(request)
             return .failedAndRemoved(reason: "Could not decode signing key.")
         }
 
-        // Reconstruct the request event dict from stored JSON
         guard let data = request.requestEventJSON.data(using: .utf8),
               let requestEvent = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            removePending(request)
+            performRemovePending(request)
             return .failedAndRemoved(reason: "Pending request data corrupted.")
         }
 
@@ -1221,31 +1379,24 @@ final class AppState {
                 responseRelayUrl: request.responseRelayUrl
             )
             if result.status == "signed" {
-                removePending(request)
+                performRemovePending(request)
                 return .signed
             }
-            // Soft failure (most commonly: relay returned OK:false on the
-            // signed response wrapper). Keep the pending row so the user can
-            // retry without re-initiating from the client.
             let reason = result.errorMessage ?? "Relay did not accept the signed response. Try Approve again."
             return .failedKeepingPending(reason: reason)
         } catch {
-            // Decryption/sign error — not recoverable by retry on the same row.
-            removePending(request)
+            performRemovePending(request)
             return .failedAndRemoved(reason: error.localizedDescription)
         }
     }
 
-    private func removePending(_ request: PendingRequest) {
-        SharedStorage.removePendingRequest(id: request.id)
-        PendingApprovalBanner.clear(requestId: request.id)
-        refreshPendingRequests()
+    static func performDeny(_ request: PendingRequest) {
+        performRemovePending(request)
     }
 
-    func denyPendingRequest(_ request: PendingRequest) {
+    private static func performRemovePending(_ request: PendingRequest) {
         SharedStorage.removePendingRequest(id: request.id)
         PendingApprovalBanner.clear(requestId: request.id)
-        refreshPendingRequests()
     }
 
     /// Perform the nostrconnect:// handshake across all relays listed in the URI.
