@@ -83,22 +83,23 @@ enum PendingApprovalBanner {
     /// the user approves, denies, or the TTL purge expires a pending request,
     /// so the banner doesn't linger in Notification Center.
     ///
-    /// Two flavors of banner can exist for a given pending request:
+    /// Three flavors of cleanup happen in this call:
     ///
-    ///   1. Locally-scheduled by `schedule(...)` above — identifier
-    ///      `"pending-approval-<requestId>"`. The synchronous remove below
-    ///      handles these.
+    ///   1. Locally-scheduled banners — identifier `"pending-approval-<requestId>"`.
+    ///      The synchronous remove below handles these.
     ///   2. NSE-delivered via APNs (`ClaveNSE/NotificationService.swift`
     ///      `.pending` case). These use the APNs request identifier (proxy-
-    ///      assigned, not our prefix), so we have to match by `userInfo`
-    ///      payload. The async path below enumerates delivered notifications
-    ///      and removes any whose `categoryIdentifier` is ours and whose
-    ///      `pendingRequestId` userInfo matches.
-    ///
-    /// Without (2), a TTL-purged or approved/denied request leaves an NSE-
-    /// delivered banner stranded in Notification Center; long-pressing
-    /// Approve from the stale banner would silently fail because the
-    /// `SharedStorage` row is already gone.
+    ///      assigned, not our prefix), so we match by `categoryIdentifier`
+    ///      + `userInfo.pendingRequestId` instead.
+    ///   3. Blank notifications from prior NSE silent-success wakes. The
+    ///      lock-screen Approve / Deny action handler runs the main app in
+    ///      *background* (action options are `.authenticationRequired` only —
+    ///      see `ClaveApp.swift:79`), which means `scenePhase .active` never
+    ///      fires and `MainTabView`'s `sweepBlankNotifications()` doesn't run.
+    ///      Without sweeping blanks here, a blank from an earlier wake would
+    ///      stay in NC after the user took an action. Since we're already
+    ///      enumerating delivered notifications for (2), the blank-filter
+    ///      add is one extra line.
     static func clear(requestId: String) {
         let center = UNUserNotificationCenter.current()
         let localIdentifier = "pending-approval-\(requestId)"
@@ -109,9 +110,11 @@ enum PendingApprovalBanner {
             let delivered = await center.deliveredNotifications()
             let snapshots = delivered.map(DeliveredNotificationSnapshot.init(from:))
             let nseIdentifiers = nseDeliveredIds(forRequest: requestId, in: snapshots)
-            guard !nseIdentifiers.isEmpty else { return }
-            center.removeDeliveredNotifications(withIdentifiers: nseIdentifiers)
-            logger.notice("[Banner] Cleared \(nseIdentifiers.count, privacy: .public) NSE-delivered banner(s) for request \(requestId.prefix(8), privacy: .public)")
+            let blankIdentifiers = blankDeliveredIds(in: snapshots)
+            let toRemove = nseIdentifiers + blankIdentifiers
+            guard !toRemove.isEmpty else { return }
+            center.removeDeliveredNotifications(withIdentifiers: toRemove)
+            logger.notice("[Banner] Cleared \(nseIdentifiers.count, privacy: .public) NSE banner(s) + \(blankIdentifiers.count, privacy: .public) blank(s) for request \(requestId.prefix(8), privacy: .public)")
         }
     }
 
