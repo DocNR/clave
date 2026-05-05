@@ -80,11 +80,102 @@ enum PendingApprovalBanner {
     }
 
     /// Removes the delivered/pending banner for a given request id. Called when
-    /// the user approves or denies a pending request via the UI so the banner
-    /// doesn't linger in Notification Center.
+    /// the user approves, denies, or the TTL purge expires a pending request,
+    /// so the banner doesn't linger in Notification Center.
+    ///
+    /// Two flavors of banner can exist for a given pending request:
+    ///
+    ///   1. Locally-scheduled by `schedule(...)` above — identifier
+    ///      `"pending-approval-<requestId>"`. The synchronous remove below
+    ///      handles these.
+    ///   2. NSE-delivered via APNs (`ClaveNSE/NotificationService.swift`
+    ///      `.pending` case). These use the APNs request identifier (proxy-
+    ///      assigned, not our prefix), so we have to match by `userInfo`
+    ///      payload. The async path below enumerates delivered notifications
+    ///      and removes any whose `categoryIdentifier` is ours and whose
+    ///      `pendingRequestId` userInfo matches.
+    ///
+    /// Without (2), a TTL-purged or approved/denied request leaves an NSE-
+    /// delivered banner stranded in Notification Center; long-pressing
+    /// Approve from the stale banner would silently fail because the
+    /// `SharedStorage` row is already gone.
     static func clear(requestId: String) {
-        let identifier = "pending-approval-\(requestId)"
-        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [identifier])
-        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [identifier])
+        let center = UNUserNotificationCenter.current()
+        let localIdentifier = "pending-approval-\(requestId)"
+        center.removePendingNotificationRequests(withIdentifiers: [localIdentifier])
+        center.removeDeliveredNotifications(withIdentifiers: [localIdentifier])
+
+        Task {
+            let delivered = await center.deliveredNotifications()
+            let snapshots = delivered.map(DeliveredNotificationSnapshot.init(from:))
+            let nseIdentifiers = nseDeliveredIds(forRequest: requestId, in: snapshots)
+            guard !nseIdentifiers.isEmpty else { return }
+            center.removeDeliveredNotifications(withIdentifiers: nseIdentifiers)
+            logger.notice("[Banner] Cleared \(nseIdentifiers.count, privacy: .public) NSE-delivered banner(s) for request \(requestId.prefix(8), privacy: .public)")
+        }
+    }
+
+    /// Pure filter: returns identifiers of notifications that are NSE-delivered
+    /// pending-approval banners for the given request id. Extracted so unit
+    /// tests can verify the matcher without touching `UNUserNotificationCenter`.
+    static func nseDeliveredIds(
+        forRequest requestId: String,
+        in delivered: [DeliveredNotificationSnapshot]
+    ) -> [String] {
+        delivered.compactMap { snapshot in
+            guard snapshot.categoryIdentifier == PendingApprovalCategory.identifier else { return nil }
+            guard let id = snapshot.userInfo["pendingRequestId"] as? String,
+                  id == requestId else { return nil }
+            return snapshot.identifier
+        }
+    }
+
+    /// Pure filter: returns identifiers of notifications whose title and body
+    /// are both empty after trimming. Used by the NSE-side sweep that runs at
+    /// the start of each wake to clean up blanks left behind by prior wakes
+    /// (see `ClaveNSE/NotificationService.swift`). Mirrors the logic in
+    /// `Clave/Views/Components/NotificationCenterSweep.swift` but runs in a
+    /// context where the racy NSE-self-cleanup pattern can't reach.
+    static func blankDeliveredIds(
+        in delivered: [DeliveredNotificationSnapshot]
+    ) -> [String] {
+        delivered.compactMap { snapshot in
+            let trimmedTitle = snapshot.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            let trimmedBody = snapshot.body.trimmingCharacters(in: .whitespacesAndNewlines)
+            return (trimmedTitle.isEmpty && trimmedBody.isEmpty) ? snapshot.identifier : nil
+        }
+    }
+}
+
+/// Test-friendly snapshot of the fields we filter on. Initialized from a
+/// `UNNotification` at runtime; constructed directly in unit tests since
+/// `UNNotification`'s designated initializer isn't accessible.
+struct DeliveredNotificationSnapshot {
+    let identifier: String
+    let title: String
+    let body: String
+    let categoryIdentifier: String
+    let userInfo: [AnyHashable: Any]
+
+    init(from notification: UNNotification) {
+        self.identifier = notification.request.identifier
+        self.title = notification.request.content.title
+        self.body = notification.request.content.body
+        self.categoryIdentifier = notification.request.content.categoryIdentifier
+        self.userInfo = notification.request.content.userInfo
+    }
+
+    init(
+        identifier: String,
+        title: String,
+        body: String,
+        categoryIdentifier: String,
+        userInfo: [AnyHashable: Any]
+    ) {
+        self.identifier = identifier
+        self.title = title
+        self.body = body
+        self.categoryIdentifier = categoryIdentifier
+        self.userInfo = userInfo
     }
 }
