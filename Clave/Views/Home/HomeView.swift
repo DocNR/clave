@@ -51,6 +51,15 @@ struct HomeView: View {
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
 
+                // Primary CTA — always visible. Replaces the previous
+                // in-list pairNewConnectionRow + empty-state big button.
+                Section {
+                    connectClientButton
+                }
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+
                 // Stats
                 Section {
                     statsRow
@@ -61,10 +70,8 @@ struct HomeView: View {
 
                 // Connected Clients
                 Section {
-                    pairNewConnectionRow
-
                     if clients.isEmpty {
-                        emptyClientsView
+                        emptyClientsHint
                     } else {
                         ForEach(sortedClients) { client in
                             NavigationLink(destination: ClientDetailView(pubkey: client.pubkey)) {
@@ -334,72 +341,56 @@ struct HomeView: View {
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
     }
 
-    // MARK: - Connected Clients
+    // MARK: - Primary CTA
 
-    private var pairNewConnectionRow: some View {
-        let theme = AccountTheme.forAccount(
-            pubkeyHex: appState.currentAccount?.pubkeyHex ?? ""
-        )
+    /// Always-visible primary CTA for the "connect a Nostr client" flow.
+    /// Sits above stats / below the mini bar. Replaces the previous
+    /// in-list `pairNewConnectionRow` (small themed row inside the Connected
+    /// Clients section) and the in-list empty-state large button — there is
+    /// now ONE surface for this action regardless of whether clients exist.
+    /// Uses theme.accent so the tint matches the active account's gradient
+    /// identity (consistent with the account strip, ConnectBunkerTabView's
+    /// Copy URI button, and other per-account chrome).
+    private var connectClientButton: some View {
+        let theme = AccountTheme.forAccount(pubkeyHex: appState.currentAccount?.pubkeyHex ?? "")
         return Button {
             handlePairNewConnectionTap()
         } label: {
-            HStack(spacing: 12) {
-                ZStack {
-                    Circle()
-                        .fill(theme.accent.opacity(0.18))
-                    Image(systemName: "plus")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(theme.accent)
-                }
-                .frame(width: 22, height: 22)
-                Text("Pair New Connection")
-                    .foregroundStyle(theme.accent)
-                    .font(.body)
-                    .fontWeight(.medium)
-                Spacer()
-            }
+            // Use simple `plus` glyph (not `plus.circle.fill`) — the filled
+            // variant has a negative-space plus that renders invisibly
+            // against the borderedProminent fill. See Task 7 commit for
+            // backstory.
+            Label("Connect a Client", systemImage: "plus")
+                .font(.body.bold())
+                .frame(maxWidth: .infinity)
         }
-        .buttonStyle(.plain)
-        .listRowBackground(Color.clear)
+        .buttonStyle(.borderedProminent)
+        .tint(theme.accent)
+        .padding(.horizontal, 16)
     }
 
-    private var emptyClientsView: some View {
-        // Theme tint mirrors the smaller `Pair New Connection` row builder
-        // below — both surfaces represent the same action and should share
-        // the active account's gradient identity.
-        let theme = AccountTheme.forAccount(pubkeyHex: appState.currentAccount?.pubkeyHex ?? "")
-        return HStack {
-            Spacer()
-            VStack(spacing: 16) {
-                Image(systemName: "person.crop.circle.badge.plus")
-                    .font(.system(size: 48))
-                    .foregroundStyle(.tertiary)
-                Text("No clients connected")
-                    .font(.headline)
-                    .foregroundStyle(.secondary)
-                Text("Connect a Nostr client like Nostur or noStrudel to start signing events remotely.")
-                    .font(.subheadline)
-                    .foregroundStyle(.tertiary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 16)
-                Button {
-                    handlePairNewConnectionTap()
-                } label: {
-                    // Use the simple `plus` glyph instead of `plus.circle.fill`.
-                    // The filled variant is negative-space (the plus is punched
-                    // THROUGH the circle) so the plus renders the same color as
-                    // the button background — invisible against `.borderedProminent`.
-                    Label("Connect a Client", systemImage: "plus")
-                        .font(.body.bold())
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(theme.accent)
-                .padding(.horizontal, 32)
-            }
-            .padding(.vertical, 40)
-            Spacer()
+    // MARK: - Connected Clients
+
+    /// Small in-list hint shown when no clients are paired. The primary CTA
+    /// lives above stats now (`connectClientButton`), so this surface stays
+    /// minimal — just enough text to confirm "yes, you're looking at an
+    /// empty list" without duplicating the action button.
+    private var emptyClientsHint: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "person.crop.circle.badge.plus")
+                .font(.system(size: 32))
+                .foregroundStyle(.tertiary)
+            Text("No clients connected yet")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            Text("Tap **Connect a Client** above to get started.")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
         }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 24)
+        .listRowBackground(Color.clear)
     }
 
     private func clientRow(_ client: ClientPermissions) -> some View {
