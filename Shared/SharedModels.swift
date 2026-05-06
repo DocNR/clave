@@ -26,6 +26,14 @@ struct ActivityEntry: Codable, Identifiable {
     /// else; `signedEventId` always carries the user's actual signed event
     /// for the Copy button.
     let signedReferencedEventId: String?
+    /// Full JSON of the signed event, captured at sign time. Populated for
+    /// successful sign_event entries; nil for everything else (encryption
+    /// methods, blocked, error, expired, pending). Powers the "View raw
+    /// event" disclosure on `ActivityDetailView` for forensic/debug review.
+    /// Storage cost is bounded — most events are 200B–1KB, log cap is 200
+    /// entries, so worst case ~200KB. Optional + decodeIfPresent so legacy
+    /// rows decode cleanly with this field nil.
+    let signedEventJSON: String?
     /// Pubkey of the signer this activity belongs to (Task 3 of multi-account
     /// sprint). Empty string for unmigrated legacy rows; backfilled by Task 8
     /// migration. After migration completes, every row has this populated.
@@ -43,6 +51,7 @@ struct ActivityEntry: Codable, Identifiable {
         signedEventId: String? = nil,
         signedSummary: String? = nil,
         signedReferencedEventId: String? = nil,
+        signedEventJSON: String? = nil,
         signerPubkeyHex: String = ""
     ) {
         self.id = id
@@ -55,12 +64,13 @@ struct ActivityEntry: Codable, Identifiable {
         self.signedEventId = signedEventId
         self.signedSummary = signedSummary
         self.signedReferencedEventId = signedReferencedEventId
+        self.signedEventJSON = signedEventJSON
         self.signerPubkeyHex = signerPubkeyHex
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, method, eventKind, clientPubkey, timestamp, status, errorMessage
-        case signedEventId, signedSummary, signedReferencedEventId
+        case signedEventId, signedSummary, signedReferencedEventId, signedEventJSON
         case signerPubkeyHex
     }
 
@@ -76,12 +86,13 @@ struct ActivityEntry: Codable, Identifiable {
         signedEventId = try c.decodeIfPresent(String.self, forKey: .signedEventId)
         signedSummary = try c.decodeIfPresent(String.self, forKey: .signedSummary)
         signedReferencedEventId = try c.decodeIfPresent(String.self, forKey: .signedReferencedEventId)
+        signedEventJSON = try c.decodeIfPresent(String.self, forKey: .signedEventJSON)
         signerPubkeyHex = try c.decodeIfPresent(String.self, forKey: .signerPubkeyHex) ?? ""
     }
 }
 
 /// A signing request for a protected kind, queued by the NSE for in-app approval.
-struct PendingRequest: Codable, Identifiable {
+struct PendingRequest: Codable, Identifiable, Hashable {
     let id: String              // UUID
     let requestEventJSON: String // full relay event JSON (encrypted content, pubkey, etc.)
     let method: String

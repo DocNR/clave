@@ -9,6 +9,7 @@ struct HomeView: View {
     @State private var showAddAccountSheet = false
     @State private var showAccountCapAlert = false
     @State private var showConnectionCapAlert = false
+    @State private var showInboxSheet = false
     @State private var navigationPath = NavigationPath()
     @State private var deeplinkApprovalURI: NostrConnectParser.ParsedURI?
     @State private var deeplinkAccountChoiceURI: NostrConnectParser.ParsedURI?
@@ -20,8 +21,11 @@ struct HomeView: View {
         return activityLog.filter { $0.status == "signed" && $0.timestamp >= startOfDay }.count
     }
 
+    /// Drives the "Pending" stat card and the bell badge. Reads the
+    /// freshness-filtered count from AppState so stale (>5 min) requests
+    /// don't inflate the surface.
     private var pendingCount: Int {
-        appState.pendingRequests.count
+        appState.pendingApprovalQueueDepth
     }
 
     private var sortedClients: [ClientPermissions] {
@@ -31,14 +35,10 @@ struct HomeView: View {
     var body: some View {
         NavigationStack(path: $navigationPath) {
             List {
-                // Pending approvals
-                if !appState.pendingRequests.isEmpty {
-                    Section {
-                        PendingApprovalsView()
-                    }
-                    .listRowInsets(EdgeInsets())
-                    .listRowBackground(Color.clear)
-                }
+                // Pending approvals moved out of the home list. The root
+                // alert in MainTabView surfaces the active request from
+                // any tab; the bell ToolbarItem opens InboxView for queue
+                // triage. The orange card is deliberately gone.
 
                 // Stage C: strip + slim bar replace the build-37 Menu identity bar.
                 // SlimIdentityBar manages its own outer padding (12pt bottom);
@@ -46,6 +46,15 @@ struct HomeView: View {
                 Section {
                     AccountStripView(onAddTapped: handleAddAccountTap)
                     SlimIdentityBar()
+                }
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+
+                // Primary CTA — always visible. Replaces the previous
+                // in-list pairNewConnectionRow + empty-state big button.
+                Section {
+                    connectClientButton
                 }
                 .listRowInsets(EdgeInsets())
                 .listRowBackground(Color.clear)
@@ -61,10 +70,8 @@ struct HomeView: View {
 
                 // Connected Clients
                 Section {
-                    pairNewConnectionRow
-
                     if clients.isEmpty {
-                        emptyClientsView
+                        emptyClientsHint
                     } else {
                         ForEach(sortedClients) { client in
                             NavigationLink(destination: ClientDetailView(pubkey: client.pubkey)) {
@@ -93,6 +100,21 @@ struct HomeView: View {
             .background(homeBackgroundGradient.ignoresSafeArea())
             .navigationTitle("Clave")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showInboxSheet = true
+                    } label: {
+                        Image(systemName: pendingCount > 0 ? "bell.badge.fill" : "bell")
+                            .symbolRenderingMode(.hierarchical)
+                    }
+                    .accessibilityLabel(
+                        pendingCount > 0
+                        ? "Pending requests: \(pendingCount)"
+                        : "Pending requests"
+                    )
+                }
+            }
             .refreshable {
                 refreshData()
                 await appState.refreshAllProfiles()
@@ -147,6 +169,9 @@ struct HomeView: View {
             }
             .sheet(isPresented: $showAddAccountSheet) {
                 AddAccountSheet()
+            }
+            .sheet(isPresented: $showInboxSheet) {
+                InboxView()
             }
             .sheet(item: $deeplinkAccountChoiceURI) { uri in
                 DeeplinkAccountPicker(parsedURI: uri) { pickedPubkey in
@@ -295,7 +320,20 @@ struct HomeView: View {
         HStack(spacing: 12) {
             statCard(title: "Signed Today", value: "\(signedTodayCount)", icon: "checkmark.circle.fill", color: .green)
             statCard(title: "Clients", value: "\(clients.count)", icon: "person.2.fill", color: .blue)
-            statCard(title: "Pending", value: "\(pendingCount)", icon: "clock.badge.exclamationmark.fill", color: .orange)
+            // Pending tile routes to the same InboxView the bell opens —
+            // a second affordance for the user to manage pending requests
+            // without hunting for the bell. Wrapped in a Button so the
+            // tile gets the standard tap-highlight; the visual treatment
+            // stays identical to the non-tappable tiles. (Signed Today /
+            // Clients aren't tappable here — Bug 6 in BACKLOG covers
+            // routing those to filtered Activity, separate sprint.)
+            Button {
+                showInboxSheet = true
+            } label: {
+                statCard(title: "Pending", value: "\(pendingCount)", icon: "clock.badge.exclamationmark.fill", color: .orange)
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("Opens the pending requests inbox")
         }
         .padding(.horizontal)
     }
@@ -307,6 +345,7 @@ struct HomeView: View {
                 .foregroundStyle(color)
             Text(value)
                 .font(.title2.bold())
+                .foregroundStyle(.primary)
             Text(title)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
@@ -316,63 +355,57 @@ struct HomeView: View {
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
     }
 
-    // MARK: - Connected Clients
+    // MARK: - Primary CTA
 
-    private var pairNewConnectionRow: some View {
-        let theme = AccountTheme.forAccount(
-            pubkeyHex: appState.currentAccount?.pubkeyHex ?? ""
-        )
+    /// Always-visible primary CTA for the "connect a Nostr client" flow.
+    /// Sits above stats / below the mini bar. Replaces the previous
+    /// in-list `pairNewConnectionRow` (small themed row inside the Connected
+    /// Clients section) and the in-list empty-state large button — there is
+    /// now ONE surface for this action regardless of whether clients exist.
+    /// Uses theme.accent so the tint matches the active account's gradient
+    /// identity (consistent with the account strip, ConnectBunkerTabView's
+    /// Copy URI button, and other per-account chrome).
+    private var connectClientButton: some View {
+        let theme = AccountTheme.forAccount(pubkeyHex: appState.currentAccount?.pubkeyHex ?? "")
         return Button {
             handlePairNewConnectionTap()
         } label: {
-            HStack(spacing: 12) {
-                ZStack {
-                    Circle()
-                        .fill(theme.accent.opacity(0.18))
-                    Image(systemName: "plus")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(theme.accent)
-                }
-                .frame(width: 22, height: 22)
-                Text("Pair New Connection")
-                    .foregroundStyle(theme.accent)
-                    .font(.body)
-                    .fontWeight(.medium)
-                Spacer()
-            }
+            // Use simple `plus` glyph (not `plus.circle.fill`) — the filled
+            // variant has a negative-space plus that renders invisibly
+            // against the borderedProminent fill. See Task 7 commit for
+            // backstory.
+            Label("Connect a Client", systemImage: "plus")
+                .font(.body.bold())
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity)
         }
-        .buttonStyle(.plain)
-        .listRowBackground(Color.clear)
+        .buttonStyle(.borderedProminent)
+        .tint(theme.accent)
+        .padding(.horizontal, 16)
     }
 
-    private var emptyClientsView: some View {
-        HStack {
-            Spacer()
-            VStack(spacing: 16) {
-                Image(systemName: "person.crop.circle.badge.plus")
-                    .font(.system(size: 48))
-                    .foregroundStyle(.tertiary)
-                Text("No clients connected")
-                    .font(.headline)
-                    .foregroundStyle(.secondary)
-                Text("Connect a Nostr client like Nostur or noStrudel to start signing events remotely.")
-                    .font(.subheadline)
-                    .foregroundStyle(.tertiary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 16)
-                Button {
-                    handlePairNewConnectionTap()
-                } label: {
-                    Label("Connect a Client", systemImage: "plus.circle.fill")
-                        .font(.body.bold())
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .padding(.horizontal, 32)
-            }
-            .padding(.vertical, 40)
-            Spacer()
+    // MARK: - Connected Clients
+
+    /// Small in-list hint shown when no clients are paired. The primary CTA
+    /// lives above stats now (`connectClientButton`), so this surface stays
+    /// minimal — just enough text to confirm "yes, you're looking at an
+    /// empty list" without duplicating the action button.
+    private var emptyClientsHint: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "person.crop.circle.badge.plus")
+                .font(.system(size: 32))
+                .foregroundStyle(.tertiary)
+            Text("No clients connected yet")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            Text("Tap **Connect a Client** above to get started.")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
         }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 24)
+        .listRowBackground(Color.clear)
     }
 
     private func clientRow(_ client: ClientPermissions) -> some View {

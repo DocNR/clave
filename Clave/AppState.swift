@@ -57,6 +57,139 @@ final class AppState {
     var pendingRequests: [PendingRequest] = []
     var profileImage: UIImage?
 
+    // MARK: - Pending approval surface (root alert + inbox bell)
+    //
+    // `pendingRequests` is the on-disk source of truth (cap 20, written by
+    // NSE and L1). For the in-app approval UI we want a freshness filter
+    // so that requests aged past the typical NIP-46 client timeout are
+    // never surfaced — clients have long since given up listening for the
+    // signed response, and approving a stale request would publish a
+    // useless event to the relay. `pendingRequestTTLSeconds` is the cutoff;
+    // `purgeStalePendingRequests` is the active cleanup that also writes
+    // an "expired" ActivityEntry so the user has a record.
+    static let pendingRequestTTLSeconds: Double = 300  // 5 minutes
+
+    /// Pending requests whose `timestamp` is within the TTL window. Read by
+    /// the root alert binding, the bell badge, and the inbox sheet. SwiftUI
+    /// re-evaluates whenever `pendingRequests` mutates (Observation tracks
+    /// the read of the stored property).
+    var freshPendingRequests: [PendingRequest] {
+        let cutoff = Date().timeIntervalSince1970 - Self.pendingRequestTTLSeconds
+        return pendingRequests.filter { $0.timestamp > cutoff }
+    }
+
+    /// In-memory set of pending request ids the user has dismissed via the
+    /// root alert's "Not now" button (or any non-Approve/Deny dismissal —
+    /// e.g. system-driven dismissal during navigation). Filtered out of
+    /// `activeApprovalRequest` so the alert doesn't infinite-loop on every
+    /// view re-evaluation. The bell badge / inbox sheet still surface the
+    /// dismissed requests via `pendingApprovalQueueDepth` and
+    /// `freshPendingRequests` — "Not now" means *handle this via the bell*,
+    /// not *throw it away*.
+    ///
+    /// Resets on app relaunch (in-memory only). New requests arriving after
+    /// dismissal still trigger the alert because their ids aren't in this
+    /// set. Dismissed-then-approved/denied/expired ids stay in the set but
+    /// are harmless — the underlying request is gone from `pendingRequests`
+    /// so the filter has nothing to skip past.
+    private var dismissedAlertRequestIds: Set<String> = []
+
+    /// First fresh pending request whose alert has not been dismissed —
+    /// drives `MainTabView`'s root alert. Auto-chains: when the user
+    /// approves/denies the active request, SwiftUI re-evaluates this and
+    /// presents the next undismissed fresh request. When all fresh
+    /// requests are dismissed, returns nil and the alert stays closed
+    /// until a new request arrives.
+    var activeApprovalRequest: PendingRequest? {
+        freshPendingRequests.first { !dismissedAlertRequestIds.contains($0.id) }
+    }
+
+    /// Count for the bell-badge + alert title "(N of M)" suffix. Counts ALL
+    /// fresh pending requests, including ones the user has dismissed from
+    /// the alert — they're still pending, just being handled via the bell.
+    var pendingApprovalQueueDepth: Int {
+        freshPendingRequests.count
+    }
+
+    /// Mark the currently-active approval request as alert-dismissed. The
+    /// request stays in `pendingRequests` so the bell badge still reflects
+    /// it; only the alert presentation is suppressed. Idempotent — no-op
+    /// if no active request.
+    ///
+    /// Internal helper retained for testing and potential future per-request
+    /// dismiss UI; the root alert's "Not now" button calls
+    /// `dismissAllActiveAlerts` instead so a single tap escapes the whole
+    /// batch (see method below for rationale).
+    func dismissActiveAlert() {
+        guard let id = activeApprovalRequest?.id else { return }
+        dismissedAlertRequestIds.insert(id)
+    }
+
+    /// Mark every currently-fresh pending request as alert-dismissed in one
+    /// pass. Called from the root alert's "Not now" button.
+    ///
+    /// Why dismiss all rather than just the active one: per-request
+    /// dismissal would auto-chain to the next request's alert immediately
+    /// — which is exactly the "alert keeps popping back up" UX the user
+    /// originally complained about. "Not now" is a session-level defer
+    /// ("handle the whole batch via the bell"), distinct from Approve /
+    /// Deny which are per-request decisions.
+    ///
+    /// New requests arriving after this call still arm the alert because
+    /// their ids aren't in the dismissed set.
+    func dismissAllActiveAlerts() {
+        for request in freshPendingRequests {
+            dismissedAlertRequestIds.insert(request.id)
+        }
+        // Chain is closed by user — reset progress so the next chain
+        // (when a new request arrives) starts at "1 of N" again.
+        processedInChain = 0
+    }
+
+    // MARK: - Alert chain position tracking
+    //
+    // The root alert's title shows "X of N" so the user knows how deep
+    // the queue is. Pre-build-59 the format was "1 of <queueDepth>",
+    // which always read "1" and used the *remaining* count — so a chain
+    // of 3 went 1-of-3 → 1-of-2 → 1-of-1 instead of the expected
+    // 1-of-3 → 2-of-3 → 3-of-3.
+    //
+    // Fix: track a `processedInChain` counter that increments on each
+    // approve/deny and resets when the chain ends. Position is
+    // `processedInChain + 1`; total is current fresh count plus already-
+    // processed (so new requests arriving mid-chain bump the total —
+    // 2-of-3 with R4 incoming becomes 2-of-4).
+
+    /// Number of requests already approved/denied within the current
+    /// chain. Resets to 0 when the chain ends (`activeApprovalRequest`
+    /// becomes nil), when "Not now" closes the batch, or whenever
+    /// `refreshPendingRequests` observes that no chain is active. The
+    /// reset is defensive — multiple paths can end a chain (TTL purge,
+    /// lock-screen action while app alive, dismissAll), and we don't
+    /// want stale progress carrying into the next chain.
+    private(set) var processedInChain: Int = 0
+
+    /// 1-based position of the active request within the current chain.
+    /// Used in the root alert's title. Always >= 1 when
+    /// `activeApprovalRequest` is non-nil. Undefined-but-harmless when
+    /// no chain is active (UI doesn't show the title in that state).
+    var chainPosition: Int {
+        processedInChain + 1
+    }
+
+    /// Total chain size for the title. Sums (fresh AND non-dismissed)
+    /// remaining + already processed so new requests arriving mid-chain
+    /// naturally bump the total. Filtering out dismissed requests is
+    /// critical: after "Not now" closes a batch and a fresh request
+    /// arrives, the new chain is "1 of 1" — not "1 of N" where N
+    /// includes the just-dismissed batch.
+    var chainTotal: Int {
+        let visibleRemaining = freshPendingRequests.filter {
+            !dismissedAlertRequestIds.contains($0.id)
+        }
+        return visibleRemaining.count + processedInChain
+    }
+
     /// Set by long-press on a strip pill; consumed by HomeView's
     /// NavigationStack to push AccountDetailView for that account without
     /// switching active. Cleared after navigation fires.
@@ -147,6 +280,19 @@ final class AppState {
                 self?.handleDeeplink(url: url)
             }
         }
+
+        // Lock-screen Approve / Deny actions are handled directly in
+        // `AppDelegate.userNotificationCenter(_:didReceive:)` via
+        // `AppState.handlePendingApprovalAction(requestId:actionId:)` —
+        // a static path that doesn't require an `AppState` instance.
+        // That's deliberate: when iOS launches the app cold to handle
+        // a notification action, the SwiftUI view tree (and `AppState`)
+        // hasn't initialized yet, so a NotificationCenter-based
+        // dispatcher would lose the post. The static path does the
+        // SharedStorage + LightSigner work directly; this `AppState`
+        // (when alive) sees the pending row removal via the
+        // `.pendingRequestsUpdated` observer above and refreshes
+        // automatically.
     }
 
     // MARK: - Foreground subscription bridge
@@ -174,6 +320,13 @@ final class AppState {
     // `SharedStorage.getBunkerSecret(for:)`. Zero view callers; all reads
     // now go through `bunkerURI` (which calls SharedStorage directly) so
     // the cache adds no value.
+
+    /// Increments on every `rotateBunkerSecret()` call so SwiftUI views
+    /// observing this property re-evaluate `bunkerURI` (a computed property
+    /// reading from SharedStorage / UserDefaults — which @Observable can't
+    /// track on its own). Read with a discarded `let _ = appState.bunkerSecretsTick`
+    /// in the view's body to establish the observation dependency.
+    private(set) var bunkerSecretsTick: Int = 0
 
     var bunkerURI: String {
         bunkerURI(for: signerPubkeyHex) ?? ""
@@ -1141,6 +1294,7 @@ final class AppState {
     func rotateBunkerSecret() {
         guard !signerPubkeyHex.isEmpty else { return }
         _ = SharedStorage.rotateBunkerSecret(for: signerPubkeyHex)
+        bunkerSecretsTick &+= 1
     }
 
     // Legacy wrappers — preserved for OnboardingView and SettingsView call
@@ -1161,7 +1315,72 @@ final class AppState {
     }
 
     func refreshPendingRequests() {
+        // Read-only refresh: pull current on-disk state into the
+        // @Observable property. Stale-entry purging is intentionally
+        // NOT run here — `refreshPendingRequests` is also triggered by
+        // the in-process `.pendingRequestsUpdated` observer, which fires
+        // on every queue mutation including legacy/migration writes that
+        // may use sentinel timestamps. The freshness filter at read time
+        // (`freshPendingRequests` computed) keeps the UI clean; the hard
+        // purge below runs from explicit user-active triggers
+        // (MainTabView scenePhase `.active`) where stale-row eviction is
+        // safe and desirable.
         pendingRequests = SharedStorage.getPendingRequests()
+        // Defensive chain-counter reset: any path that empties the alert
+        // chain (TTL purge clearing the active request, lock-screen
+        // approve/deny while app is alive, multi-account switch, etc.)
+        // funnels through `pendingRequests` mutation → this observer.
+        // If no chain is active, processedInChain MUST be 0 so the next
+        // chain (when a fresh request arrives) starts at "1 of N" again.
+        if activeApprovalRequest == nil && processedInChain > 0 {
+            processedInChain = 0
+        }
+    }
+
+    /// Removes pending requests aged past `pendingRequestTTLSeconds` from
+    /// `SharedStorage` and writes an `ActivityEntry` with status `"expired"`
+    /// for each. Called from `refreshPendingRequests` (which runs on
+    /// `.pendingRequestsUpdated`, scenePhase `.active`, and approve/deny).
+    /// Idempotent: no-op when nothing is stale.
+    ///
+    /// Why a hard purge instead of a read-time filter only: the alert
+    /// binding, bell badge, and inbox sheet all derive from
+    /// `pendingRequests`. If we only filtered at read time, stale rows
+    /// would persist on disk (visible to the next NSE wake, would cap
+    /// the queue at 20, and lock-screen action handlers might still
+    /// resolve them by id). Purging keeps storage and the UI in sync.
+    func purgeStalePendingRequests() {
+        let cutoff = Date().timeIntervalSince1970 - Self.pendingRequestTTLSeconds
+        let onDisk = SharedStorage.getPendingRequests()
+        let stale = onDisk.filter { $0.timestamp <= cutoff }
+        guard !stale.isEmpty else { return }
+        for request in stale {
+            SharedStorage.removePendingRequest(id: request.id)
+            PendingApprovalBanner.clear(requestId: request.id)
+            let entry = ActivityEntry(
+                id: UUID().uuidString,
+                method: request.method,
+                eventKind: request.eventKind,
+                clientPubkey: request.clientPubkey,
+                timestamp: Date().timeIntervalSince1970,
+                status: "expired",
+                errorMessage: "Request timed out before user response",
+                signerPubkeyHex: request.signerPubkeyHex
+            )
+            SharedStorage.logActivity(entry)
+        }
+    }
+
+    /// Set or clear a per-kind override on the (signer, client)
+    /// permissions row. Called from `PendingRequestDetailView` when the
+    /// user toggles "Always allow this kind from <client>". No-op if the
+    /// permissions row doesn't exist (the client must already be paired).
+    func setKindOverride(signer: String, client: String, kind: Int, allowed: Bool) {
+        guard var perms = SharedStorage.getClientPermissions(signer: signer, client: client) else {
+            return
+        }
+        perms.kindOverrides[kind] = allowed
+        SharedStorage.saveClientPermissions(perms)
     }
 
     /// `bunkerURI` getter reads SharedStorage directly each access. This
@@ -1180,20 +1399,107 @@ final class AppState {
         case failedAndRemoved(reason: String)
     }
 
-    /// Approve a pending request: sign and publish the response from the app.
-    /// Task 5: load by the request's signer pubkey (PendingRequest.signerPubkeyHex,
-    /// added in Task 3). Falls back to current account for legacy rows or when
-    /// the request was queued without a signer (pre-Task-3 NSE writes).
+    /// Approve a pending request from inside the running app (inbox swipe,
+    /// detail-view button, root alert). Thin delegate to the static
+    /// `performApprove` helper plus chain-position advancement.
     ///
-    /// Failure handling: if the relay rejects the response wrapper (transient
-    /// drop, rate-limit, auth) we keep the pending row so the user can retry.
-    /// Hard failures (no nsec, malformed event JSON, decoder error) clear the
-    /// row because retry can't succeed.
+    /// On `.signed` or `.failedAndRemoved` outcomes the request is gone
+    /// from `pendingRequests`, so the chain progresses one step. We pull
+    /// fresh state synchronously (don't wait for the
+    /// `.pendingRequestsUpdated` observer's main-queue dispatch) and bump
+    /// `processedInChain` in the same actor block so the alert title
+    /// re-evaluates atomically — without the sync, SwiftUI would briefly
+    /// paint "X of total-1" before settling on "X of total".
+    ///
+    /// `.failedKeepingPending` keeps the request for retry, so the chain
+    /// doesn't advance.
     func approvePendingRequest(_ request: PendingRequest) async -> ApproveOutcome {
-        let signer = request.signerPubkeyHex.isEmpty ? signerPubkeyHex : request.signerPubkeyHex
+        let outcome = await Self.performApprove(request)
+        switch outcome {
+        case .signed, .failedAndRemoved:
+            advanceChainPosition()
+        case .failedKeepingPending:
+            break
+        }
+        return outcome
+    }
+
+    /// Deny a pending request from inside the running app. Like approve,
+    /// advances the chain counter synchronously so the alert title
+    /// re-evaluates atomically with the queue shrinkage.
+    func denyPendingRequest(_ request: PendingRequest) {
+        Self.performDeny(request)
+        advanceChainPosition()
+    }
+
+    /// Synchronously refresh `pendingRequests` from `SharedStorage`,
+    /// increment `processedInChain`, and reset on natural chain end.
+    /// Called from approve/deny instance methods. Pulls state from
+    /// `SharedStorage` directly because the `.pendingRequestsUpdated`
+    /// observer's main-queue dispatch hasn't run yet at this point —
+    /// without the explicit pull, `pendingRequests` would still hold
+    /// the just-removed request when the title re-evaluates.
+    private func advanceChainPosition() {
+        pendingRequests = SharedStorage.getPendingRequests()
+        processedInChain += 1
+        // Natural chain end (queue drained or all remaining are dismissed)
+        // resets the counter so the next chain starts fresh.
+        if activeApprovalRequest == nil {
+            processedInChain = 0
+        }
+    }
+
+    /// Static entry point for the lock-screen Approve / Deny notification
+    /// action handler. Safe to call from `AppDelegate` even during a cold
+    /// launch where `AppState` (held by `ContentView`'s @State) may not
+    /// have initialized yet — the work is done via `SharedStorage` +
+    /// `LightSigner` directly. UI refresh on the running-app side is
+    /// driven by `SharedStorage.removePendingRequest` posting
+    /// `.pendingRequestsUpdated`, which `AppState`'s existing observer
+    /// catches when alive.
+    ///
+    /// Looking up the request from storage by id (rather than passing a
+    /// `PendingRequest` through `userInfo`) keeps the wire format simple:
+    /// the notification only carries the id, the storage row carries the
+    /// full record. Idempotent: if the request was already handled (in-app
+    /// alert finished it, second action tap, expired purge), the lookup
+    /// returns nil and we just clear any lingering banner.
+    static func handlePendingApprovalAction(requestId: String, actionId: String) async {
+        guard let request = SharedStorage.getPendingRequests().first(where: { $0.id == requestId }) else {
+            PendingApprovalBanner.clear(requestId: requestId)
+            return
+        }
+        switch actionId {
+        case PendingApprovalCategory.approveActionId:
+            _ = await performApprove(request)
+        case PendingApprovalCategory.denyActionId:
+            performDeny(request)
+        default:
+            break
+        }
+    }
+
+    /// Approve a pending request: sign and publish the response.
+    /// Task 5: loads by the request's signer pubkey (PendingRequest.signerPubkeyHex,
+    /// added in Task 3); falls back to the current account for legacy rows
+    /// (UserDefaults read so this works without an AppState instance).
+    ///
+    /// Failure handling: relay rejection of the response wrapper (transient
+    /// drop, rate-limit, auth) keeps the pending row so the user can retry
+    /// from the inbox. Hard failures (no nsec, malformed event JSON, decoder
+    /// error) clear the row because retry can't succeed.
+    static func performApprove(_ request: PendingRequest) async -> ApproveOutcome {
+        let signer: String
+        if !request.signerPubkeyHex.isEmpty {
+            signer = request.signerPubkeyHex
+        } else {
+            signer = SharedConstants.sharedDefaults.string(
+                forKey: SharedConstants.currentSignerPubkeyHexKey
+            ) ?? ""
+        }
         guard !signer.isEmpty,
               let nsec = SharedKeychain.loadNsec(for: signer) else {
-            removePending(request)
+            performRemovePending(request)
             return .failedAndRemoved(reason: "Signing key unavailable.")
         }
 
@@ -1201,14 +1507,13 @@ final class AppState {
         do {
             privateKey = try Bech32.decodeNsec(nsec)
         } catch {
-            removePending(request)
+            performRemovePending(request)
             return .failedAndRemoved(reason: "Could not decode signing key.")
         }
 
-        // Reconstruct the request event dict from stored JSON
         guard let data = request.requestEventJSON.data(using: .utf8),
               let requestEvent = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            removePending(request)
+            performRemovePending(request)
             return .failedAndRemoved(reason: "Pending request data corrupted.")
         }
 
@@ -1221,31 +1526,24 @@ final class AppState {
                 responseRelayUrl: request.responseRelayUrl
             )
             if result.status == "signed" {
-                removePending(request)
+                performRemovePending(request)
                 return .signed
             }
-            // Soft failure (most commonly: relay returned OK:false on the
-            // signed response wrapper). Keep the pending row so the user can
-            // retry without re-initiating from the client.
             let reason = result.errorMessage ?? "Relay did not accept the signed response. Try Approve again."
             return .failedKeepingPending(reason: reason)
         } catch {
-            // Decryption/sign error — not recoverable by retry on the same row.
-            removePending(request)
+            performRemovePending(request)
             return .failedAndRemoved(reason: error.localizedDescription)
         }
     }
 
-    private func removePending(_ request: PendingRequest) {
-        SharedStorage.removePendingRequest(id: request.id)
-        PendingApprovalBanner.clear(requestId: request.id)
-        refreshPendingRequests()
+    static func performDeny(_ request: PendingRequest) {
+        performRemovePending(request)
     }
 
-    func denyPendingRequest(_ request: PendingRequest) {
+    private static func performRemovePending(_ request: PendingRequest) {
         SharedStorage.removePendingRequest(id: request.id)
         PendingApprovalBanner.clear(requestId: request.id)
-        refreshPendingRequests()
     }
 
     /// Perform the nostrconnect:// handshake across all relays listed in the URI.

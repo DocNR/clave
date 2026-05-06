@@ -3,7 +3,9 @@ import SwiftUI
 struct ActivityDetailView: View {
     let entry: ActivityEntry
 
+    @Environment(AppState.self) private var appState
     @State private var showConnectionInfo = false
+    @State private var showRawEvent = false
 
     /// Kinds njump.me renders meaningfully. Used to gate the "Open on njump.me"
     /// button — for kinds outside this set (e.g., kind:22242 relay auth, DMs)
@@ -41,6 +43,10 @@ struct ActivityDetailView: View {
 
     var body: some View {
         List {
+            clientSection
+            if appState.accounts.count > 1 {
+                accountSection
+            }
             if hasSignedEvent {
                 signedEventSection
             }
@@ -49,6 +55,9 @@ struct ActivityDetailView: View {
             if showStatusSection {
                 statusSection
             }
+            if let json = entry.signedEventJSON, !json.isEmpty {
+                rawEventSection(json: json)
+            }
         }
         .navigationTitle("Activity Detail")
         .navigationBarTitleDisplayMode(.inline)
@@ -56,6 +65,32 @@ struct ActivityDetailView: View {
             if let perms = permissions {
                 ConnectionInfoSheet(perms: perms)
             }
+        }
+    }
+
+    // MARK: - Client + Account headers (shared with PendingRequestDetailView)
+
+    private var clientSection: some View {
+        Section {
+            ClientIdentityHeader(clientPubkey: entry.clientPubkey)
+        }
+    }
+
+    private var accountSection: some View {
+        Section("On account") {
+            AccountStripeRow(signerPubkeyHex: entry.signerPubkeyHex)
+        }
+    }
+
+    // MARK: - Raw event disclosure (signed sign_event entries only)
+
+    private func rawEventSection(json: String) -> some View {
+        Section {
+            RawEventDisclosure(
+                title: "View raw event",
+                json: json,
+                isExpanded: $showRawEvent
+            )
         }
     }
 

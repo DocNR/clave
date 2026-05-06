@@ -28,15 +28,11 @@ enum PendingApprovalBanner {
     /// We pass the request id so denying/approving the same request won't
     /// stack banners.
     static func schedule(requestId: String, clientPubkey: String, eventKind: Int?) {
-        let clientName = SharedStorage.getClientPermissions(for: clientPubkey)?.name
-            ?? String(clientPubkey.prefix(8))
-        let kindDesc = eventKind.map { KnownKinds.label(for: $0) } ?? "event"
-
-        let content = UNMutableNotificationContent()
-        content.title = "Approve Signing Request"
-        content.body = "\(clientName) wants to sign \(kindDesc)"
-        content.sound = .default
-        content.interruptionLevel = .active
+        let content = makeContent(
+            requestId: requestId,
+            clientPubkey: clientPubkey,
+            eventKind: eventKind
+        )
 
         // No trigger → deliver immediately.
         let request = UNNotificationRequest(
@@ -54,12 +50,135 @@ enum PendingApprovalBanner {
         }
     }
 
+    /// Pure builder for the notification content. Extracted from
+    /// `schedule` so unit tests can verify the categoryIdentifier +
+    /// userInfo wiring without depending on UNUserNotificationCenter
+    /// authorization or delivery — which are flaky in the simulator
+    /// test runner.
+    static func makeContent(
+        requestId: String,
+        clientPubkey: String,
+        eventKind: Int?
+    ) -> UNMutableNotificationContent {
+        let clientName = SharedStorage.getClientPermissions(for: clientPubkey)?.name
+            ?? String(clientPubkey.prefix(8))
+        let kindDesc = eventKind.map { KnownKinds.label(for: $0) } ?? "event"
+
+        let content = UNMutableNotificationContent()
+        content.title = "Approve Signing Request"
+        content.body = "\(clientName) wants to sign \(kindDesc)"
+        content.sound = .default
+        content.interruptionLevel = .active
+        // Wires the long-press / swipe-down notification UI to surface
+        // Approve + Deny action buttons. Category is registered in
+        // AppDelegate.didFinishLaunchingWithOptions; pendingRequestId is
+        // looked up by AppState's action observer to find the matching
+        // PendingRequest in SharedStorage.
+        content.categoryIdentifier = PendingApprovalCategory.identifier
+        content.userInfo = ["pendingRequestId": requestId]
+        return content
+    }
+
     /// Removes the delivered/pending banner for a given request id. Called when
-    /// the user approves or denies a pending request via the UI so the banner
-    /// doesn't linger in Notification Center.
+    /// the user approves, denies, or the TTL purge expires a pending request,
+    /// so the banner doesn't linger in Notification Center.
+    ///
+    /// Three flavors of cleanup happen in this call:
+    ///
+    ///   1. Locally-scheduled banners — identifier `"pending-approval-<requestId>"`.
+    ///      The synchronous remove below handles these.
+    ///   2. NSE-delivered via APNs (`ClaveNSE/NotificationService.swift`
+    ///      `.pending` case). These use the APNs request identifier (proxy-
+    ///      assigned, not our prefix), so we match by `categoryIdentifier`
+    ///      + `userInfo.pendingRequestId` instead.
+    ///   3. Blank notifications from prior NSE silent-success wakes. The
+    ///      lock-screen Approve / Deny action handler runs the main app in
+    ///      *background* (action options are `.authenticationRequired` only —
+    ///      see `ClaveApp.swift:79`), which means `scenePhase .active` never
+    ///      fires and `MainTabView`'s `sweepBlankNotifications()` doesn't run.
+    ///      Without sweeping blanks here, a blank from an earlier wake would
+    ///      stay in NC after the user took an action. Since we're already
+    ///      enumerating delivered notifications for (2), the blank-filter
+    ///      add is one extra line.
     static func clear(requestId: String) {
-        let identifier = "pending-approval-\(requestId)"
-        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [identifier])
-        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [identifier])
+        let center = UNUserNotificationCenter.current()
+        let localIdentifier = "pending-approval-\(requestId)"
+        center.removePendingNotificationRequests(withIdentifiers: [localIdentifier])
+        center.removeDeliveredNotifications(withIdentifiers: [localIdentifier])
+
+        Task {
+            let delivered = await center.deliveredNotifications()
+            let snapshots = delivered.map(DeliveredNotificationSnapshot.init(from:))
+            let nseIdentifiers = nseDeliveredIds(forRequest: requestId, in: snapshots)
+            let blankIdentifiers = blankDeliveredIds(in: snapshots)
+            let toRemove = nseIdentifiers + blankIdentifiers
+            guard !toRemove.isEmpty else { return }
+            center.removeDeliveredNotifications(withIdentifiers: toRemove)
+            logger.notice("[Banner] Cleared \(nseIdentifiers.count, privacy: .public) NSE banner(s) + \(blankIdentifiers.count, privacy: .public) blank(s) for request \(requestId.prefix(8), privacy: .public)")
+        }
+    }
+
+    /// Pure filter: returns identifiers of notifications that are NSE-delivered
+    /// pending-approval banners for the given request id. Extracted so unit
+    /// tests can verify the matcher without touching `UNUserNotificationCenter`.
+    static func nseDeliveredIds(
+        forRequest requestId: String,
+        in delivered: [DeliveredNotificationSnapshot]
+    ) -> [String] {
+        delivered.compactMap { snapshot in
+            guard snapshot.categoryIdentifier == PendingApprovalCategory.identifier else { return nil }
+            guard let id = snapshot.userInfo["pendingRequestId"] as? String,
+                  id == requestId else { return nil }
+            return snapshot.identifier
+        }
+    }
+
+    /// Pure filter: returns identifiers of notifications whose title and body
+    /// are both empty after trimming. Used by the NSE-side sweep that runs at
+    /// the start of each wake to clean up blanks left behind by prior wakes
+    /// (see `ClaveNSE/NotificationService.swift`). Mirrors the logic in
+    /// `Clave/Views/Components/NotificationCenterSweep.swift` but runs in a
+    /// context where the racy NSE-self-cleanup pattern can't reach.
+    static func blankDeliveredIds(
+        in delivered: [DeliveredNotificationSnapshot]
+    ) -> [String] {
+        delivered.compactMap { snapshot in
+            let trimmedTitle = snapshot.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            let trimmedBody = snapshot.body.trimmingCharacters(in: .whitespacesAndNewlines)
+            return (trimmedTitle.isEmpty && trimmedBody.isEmpty) ? snapshot.identifier : nil
+        }
+    }
+}
+
+/// Test-friendly snapshot of the fields we filter on. Initialized from a
+/// `UNNotification` at runtime; constructed directly in unit tests since
+/// `UNNotification`'s designated initializer isn't accessible.
+struct DeliveredNotificationSnapshot {
+    let identifier: String
+    let title: String
+    let body: String
+    let categoryIdentifier: String
+    let userInfo: [AnyHashable: Any]
+
+    init(from notification: UNNotification) {
+        self.identifier = notification.request.identifier
+        self.title = notification.request.content.title
+        self.body = notification.request.content.body
+        self.categoryIdentifier = notification.request.content.categoryIdentifier
+        self.userInfo = notification.request.content.userInfo
+    }
+
+    init(
+        identifier: String,
+        title: String,
+        body: String,
+        categoryIdentifier: String,
+        userInfo: [AnyHashable: Any]
+    ) {
+        self.identifier = identifier
+        self.title = title
+        self.body = body
+        self.categoryIdentifier = categoryIdentifier
+        self.userInfo = userInfo
     }
 }

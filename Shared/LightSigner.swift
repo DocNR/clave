@@ -27,6 +27,10 @@ enum LightSigner {
         /// 9735). Forwarded into ActivityEntry to redirect the njump
         /// button to the more-meaningful target.
         var signedReferencedEventId: String? = nil
+        /// Full JSON of the signed event, captured at sign time for the
+        /// "View raw event" disclosure on `ActivityDetailView`. Set only
+        /// for successful sign_event results; nil otherwise.
+        var signedEventJSON: String? = nil
     }
 
     static func handleRequest(
@@ -395,20 +399,25 @@ enum LightSigner {
         // Enrich activity log for successful sign_event with the resulting
         // event id and a tag-derived one-liner. Side-effect: kind:3 also
         // updates the persisted contact-set snapshot used for diffing.
+        // For successful sign_event, also retain the signed event JSON
+        // for the activity detail's "View raw event" disclosure.
         var signedEventId: String? = nil
         var signedSummary: String? = nil
         var signedReferencedEventId: String? = nil
+        var signedEventJSON: String? = nil
         if status == "signed", method == "sign_event", let json = responseResult {
             let enrichment = extractSignedEventEnrichment(signedEventJSON: json, signerPubkey: signerPubkey)
             signedEventId = enrichment.eventId
             signedSummary = enrichment.summary
             signedReferencedEventId = enrichment.referencedEventId
+            signedEventJSON = json
         }
 
         let result = RequestResult(method: method, eventKind: eventKind, clientPubkey: senderPubkey,
                                    status: status, errorMessage: errorMsg,
                                    signedEventId: signedEventId, signedSummary: signedSummary,
-                                   signedReferencedEventId: signedReferencedEventId)
+                                   signedReferencedEventId: signedReferencedEventId,
+                                   signedEventJSON: signedEventJSON)
         logAndTrack(result: result, signerPubkey: signerPubkey, clientName: clientName)
         return result
     }
@@ -609,6 +618,7 @@ enum LightSigner {
             signedEventId: result.signedEventId,
             signedSummary: result.signedSummary,
             signedReferencedEventId: result.signedReferencedEventId,
+            signedEventJSON: result.signedEventJSON,
             signerPubkeyHex: signerPubkey
         )
         SharedStorage.logActivity(entry)
