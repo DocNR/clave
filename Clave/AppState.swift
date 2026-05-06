@@ -111,15 +111,36 @@ final class AppState {
         freshPendingRequests.count
     }
 
-    /// Mark the currently-active approval request as alert-dismissed.
-    /// Called from the root alert's "Not now" button and from the binding
-    /// setter when SwiftUI dismisses the alert via a system event (e.g.
-    /// app backgrounding mid-alert). Idempotent — no-op if no active
-    /// request. The request stays in `pendingRequests` so the bell badge
-    /// still reflects it; only the alert presentation is suppressed.
+    /// Mark the currently-active approval request as alert-dismissed. The
+    /// request stays in `pendingRequests` so the bell badge still reflects
+    /// it; only the alert presentation is suppressed. Idempotent — no-op
+    /// if no active request.
+    ///
+    /// Internal helper retained for testing and potential future per-request
+    /// dismiss UI; the root alert's "Not now" button calls
+    /// `dismissAllActiveAlerts` instead so a single tap escapes the whole
+    /// batch (see method below for rationale).
     func dismissActiveAlert() {
         guard let id = activeApprovalRequest?.id else { return }
         dismissedAlertRequestIds.insert(id)
+    }
+
+    /// Mark every currently-fresh pending request as alert-dismissed in one
+    /// pass. Called from the root alert's "Not now" button.
+    ///
+    /// Why dismiss all rather than just the active one: per-request
+    /// dismissal would auto-chain to the next request's alert immediately
+    /// — which is exactly the "alert keeps popping back up" UX the user
+    /// originally complained about. "Not now" is a session-level defer
+    /// ("handle the whole batch via the bell"), distinct from Approve /
+    /// Deny which are per-request decisions.
+    ///
+    /// New requests arriving after this call still arm the alert because
+    /// their ids aren't in the dismissed set.
+    func dismissAllActiveAlerts() {
+        for request in freshPendingRequests {
+            dismissedAlertRequestIds.insert(request.id)
+        }
     }
 
     /// Set by long-press on a strip pill; consumed by HomeView's

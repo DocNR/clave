@@ -303,4 +303,64 @@ final class AppStatePendingApprovalTests: XCTestCase {
         XCTAssertEqual(appState.activeApprovalRequest?.id, "r2",
                        "New request id not in dismissed set → alert re-arms for it")
     }
+
+    // MARK: - dismissAllActiveAlerts (root alert "Not now" handling)
+    //
+    // Build 57+ "Not now" button calls dismissAllActiveAlerts to escape
+    // the entire alert batch in one tap, not just the active request.
+    // Per-request dismissal would auto-chain to the next request — the
+    // exact "alert keeps popping back up" behavior the button is supposed
+    // to suppress. Approve and Deny remain per-request (they're
+    // decisions, not deferrals); the bell badge / inbox still surface
+    // every dismissed-but-still-pending request.
+
+    func test_dismissAllActiveAlerts_silencesAllFreshRequests() {
+        let r1 = makeRequest(id: "r1", ageSeconds: 30)
+        let r2 = makeRequest(id: "r2", ageSeconds: 60)
+        let r3 = makeRequest(id: "r3", ageSeconds: 90)
+        SharedStorage.queuePendingRequest(r1)
+        SharedStorage.queuePendingRequest(r2)
+        SharedStorage.queuePendingRequest(r3)
+        appState.refreshPendingRequests()
+
+        XCTAssertNotNil(appState.activeApprovalRequest)
+        XCTAssertEqual(appState.pendingApprovalQueueDepth, 3)
+
+        appState.dismissAllActiveAlerts()
+
+        XCTAssertNil(appState.activeApprovalRequest,
+                     "All fresh requests dismissed → alert stays closed")
+        XCTAssertEqual(appState.pendingApprovalQueueDepth, 3,
+                       "Bell badge unchanged — requests still in inbox")
+    }
+
+    func test_dismissAllActiveAlerts_isNoOpWhenEmpty() {
+        XCTAssertEqual(appState.freshPendingRequests.count, 0)
+
+        appState.dismissAllActiveAlerts()  // must not crash on empty state
+
+        XCTAssertNil(appState.activeApprovalRequest)
+    }
+
+    func test_dismissAllActiveAlerts_doesNotSilenceFutureRequests() {
+        let r1 = makeRequest(id: "r1", ageSeconds: 30)
+        let r2 = makeRequest(id: "r2", ageSeconds: 60)
+        SharedStorage.queuePendingRequest(r1)
+        SharedStorage.queuePendingRequest(r2)
+        appState.refreshPendingRequests()
+
+        appState.dismissAllActiveAlerts()
+        XCTAssertNil(appState.activeApprovalRequest)
+
+        // New request arrives after dismiss-all — its id isn't in the
+        // dismissed set, so the alert MUST re-arm. This is the critical
+        // guarantee that prevents "Not now" from silencing the app
+        // permanently.
+        let r3 = makeRequest(id: "r3", ageSeconds: 0)
+        SharedStorage.queuePendingRequest(r3)
+        appState.refreshPendingRequests()
+
+        XCTAssertEqual(appState.activeApprovalRequest?.id, "r3",
+                       "New request after dismiss-all must re-arm the alert")
+    }
 }

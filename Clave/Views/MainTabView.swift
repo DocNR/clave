@@ -77,11 +77,14 @@ struct MainTabView: View {
             presenting: appState.activeApprovalRequest
         ) { request in
             Button("Not now", role: .cancel) {
-                // Explicit "I'll handle this via the bell" — the request
-                // stays in the queue, badge stays incremented, but the
-                // alert won't re-present for this id until the user
-                // approves/denies via the inbox.
-                appState.dismissActiveAlert()
+                // Explicit "I'll handle the whole batch via the bell" —
+                // dismisses all currently-fresh pending alerts, not just
+                // the active one. Per-request dismissal would auto-chain
+                // to the next request's alert immediately, which is the
+                // very "alert keeps popping back up" UX this button is
+                // supposed to escape. Bell badge / inbox sheet still
+                // surface every dismissed request.
+                appState.dismissAllActiveAlerts()
             }
             Button("Deny", role: .destructive) {
                 appState.denyPendingRequest(request)
