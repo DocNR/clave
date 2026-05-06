@@ -14,7 +14,7 @@ struct AddAccountSheet: View {
 
     enum Mode: String, CaseIterable {
         case generate = "Generate new"
-        case paste = "Paste nsec"
+        case paste = "nsec1... or hex secret key"
     }
 
     @State private var mode: Mode = .generate

@@ -84,3 +84,16 @@ enum SharedConstants {
         UserDefaults(suiteName: appGroup)!
     }
 }
+
+/// Shared identifiers for the lock-screen pending-approval notification
+/// category. Both NSE (which sets the category on its modified APNs
+/// content for backgrounded pushes) and the main app (which registers
+/// the category and routes action taps via `UNUserNotificationCenter`)
+/// reference these constants. Lives in `SharedConstants.swift` because
+/// both targets compile this file — `PendingApprovalBanner.swift` is
+/// app-only since NSE never schedules local banners.
+enum PendingApprovalCategory {
+    static let identifier = "PENDING_SIGNING_REQUEST"
+    static let approveActionId = "APPROVE_SIGNING"
+    static let denyActionId = "DENY_SIGNING"
+}

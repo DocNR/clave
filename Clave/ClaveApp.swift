@@ -32,6 +32,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
         UNUserNotificationCenter.current().delegate = self
+        registerPendingApprovalCategory()
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
             logger.notice("[APNs] Authorization granted: \(granted), error: \(String(describing: error))")
             if granted {
@@ -42,6 +43,57 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         }
         SharedStorage.migrateIfNeeded()
         return true
+    }
+
+    /// Wires up the long-press / swipe-down action buttons on the
+    /// pending-approval notification (NSE-modified APNs push, or local
+    /// L1 banner). Both notification emission paths set
+    /// `categoryIdentifier = PendingApprovalCategory.identifier`; this
+    /// registers the matching category so the system knows which actions
+    /// to render. Both actions run in the background — Clave does NOT
+    /// come to foreground when you tap Approve/Deny; the action handler
+    /// loads the nsec, signs (or removes the row for deny), publishes
+    /// the response, and clears the banner without a foreground
+    /// transition. Approve still requires biometric auth via
+    /// `.authenticationRequired` before iOS dispatches the action —
+    /// shoulder-surfing defense.
+    ///
+    /// User-facing reminder: action buttons aren't rendered inline on
+    /// the compact banner — iOS hides them until the user long-presses
+    /// (or pulls down on) the banner. This is platform-standard, not a
+    /// Clave-specific decision. The post-set verification log below
+    /// helps debug "I don't see actions on the banner" reports — if
+    /// the category isn't listed in Console, a registration timing or
+    /// build issue is at play; otherwise the user just needs to use
+    /// the long-press gesture.
+    private func registerPendingApprovalCategory() {
+        let approveAction = UNNotificationAction(
+            identifier: PendingApprovalCategory.approveActionId,
+            title: "Approve",
+            // No `.foreground` — Approve must NOT open the app. The
+            // handler in `userNotificationCenter(_:didReceive:)` runs
+            // in the main app process either way (iOS launches us in
+            // background if terminated); we just don't want the
+            // foreground UI transition. `.authenticationRequired` still
+            // gates with Face ID before the handler fires.
+            options: [.authenticationRequired]
+        )
+        let denyAction = UNNotificationAction(
+            identifier: PendingApprovalCategory.denyActionId,
+            title: "Deny",
+            options: [.destructive]
+        )
+        let category = UNNotificationCategory(
+            identifier: PendingApprovalCategory.identifier,
+            actions: [approveAction, denyAction],
+            intentIdentifiers: [],
+            options: [.customDismissAction]
+        )
+        UNUserNotificationCenter.current().setNotificationCategories([category])
+        UNUserNotificationCenter.current().getNotificationCategories { categories in
+            let ids = categories.map { $0.identifier }.sorted()
+            logger.notice("[App] notification categories registered: \(ids, privacy: .public)")
+        }
     }
 
     func application(
@@ -122,6 +174,63 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             // NSE marked this as silent success — suppress.
             logger.notice("[App] willPresent: APNs push empty title — suppress")
             completionHandler([])
+        }
+    }
+
+    // MARK: - Lock-Screen Action Routing
+    //
+    // Fires when the user taps Approve or Deny on the long-press / swipe
+    // pending-approval notification UI. We do NOT route through AppState
+    // because AppDelegate doesn't own it (held by ContentView's @State)
+    // and during a cold launch from a notification action the SwiftUI
+    // view tree hasn't initialized yet — a NotificationCenter-based
+    // dispatch would post into the void. Instead we call the static
+    // `AppState.handlePendingApprovalAction` path, which does the
+    // SharedStorage + LightSigner work directly. The AppState instance
+    // (if alive) observes the resulting `.pendingRequestsUpdated` post
+    // from SharedStorage and refreshes its UI surface.
+    //
+    // Approve runs in background (no `.foreground` flag on the action) —
+    // user stays where they were, sees the banner clear when signing
+    // completes. iOS gives the app ~30s of background time which is
+    // ample for a typical sign+publish round-trip. Face ID is gated by
+    // the action's `.authenticationRequired` option before this handler
+    // is even called.
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        let userInfo = response.notification.request.content.userInfo
+        let actionId = response.actionIdentifier
+        logger.notice("[App] didReceive action=\(actionId, privacy: .public)")
+
+        // Default action (notification body tap) and dismiss action: nothing
+        // to route — iOS brings the app forward (or doesn't), and the root
+        // alert presents over whatever loads if there's still a pending
+        // request in queue.
+        guard actionId == PendingApprovalCategory.approveActionId
+              || actionId == PendingApprovalCategory.denyActionId else {
+            completionHandler()
+            return
+        }
+
+        guard let requestId = userInfo["pendingRequestId"] as? String else {
+            logger.error("[App] action \(actionId, privacy: .public) without pendingRequestId in userInfo")
+            completionHandler()
+            return
+        }
+
+        // Hold the system completion handler until the work finishes so
+        // iOS knows we're still doing useful work and gives us the full
+        // background time budget. For Deny this is microseconds; for
+        // Approve it's typically <2s (relay round-trip).
+        Task {
+            await AppState.handlePendingApprovalAction(
+                requestId: requestId,
+                actionId: actionId
+            )
+            completionHandler()
         }
     }
 

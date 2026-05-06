@@ -6,7 +6,7 @@ private let logger = Logger(subsystem: "dev.nostr.clave.ClaveNSE", category: "si
 private struct SigningResult {
     enum Status {
         case success
-        case pending(clientPubkey: String, eventKind: Int?)
+        case pending(clientPubkey: String, eventKind: Int?, requestId: String?)
         case error(String)
         case noEvents
     }
@@ -32,9 +32,35 @@ class NotificationService: UNNotificationServiceExtension {
         logger.notice("[ClaveNSE] didReceive called")
 
         Task {
+            // Clean up blanks left in Notification Center by PRIOR NSE wakes
+            // before doing this wake's work. NSE's old self-cleanup pattern
+            // (call `removeDeliveredNotifications` immediately after
+            // `contentHandler`) is racy because the process exits before iOS
+            // commits the notification. Targeting prior wakes is race-free —
+            // those notifications are already committed; from a fresh NSE
+            // process the remove call reliably runs.
+            await sweepPriorBlankNotifications()
+
             let result = await handleSigningRequest(userInfo: request.content.userInfo)
             deliverContent(result: result)
         }
+    }
+
+    /// Removes empty-title-and-body notifications committed by prior NSE
+    /// wakes. Mirrors `Clave/Views/Components/NotificationCenterSweep.swift`
+    /// but runs from the NSE process so cleanup happens between events
+    /// without requiring the user to foreground Clave. Fire-and-forget the
+    /// final remove call (no completion handler available); awaiting the
+    /// `deliveredNotifications()` lookup keeps NSE alive long enough for
+    /// the XPC message to be issued before the process exits.
+    private func sweepPriorBlankNotifications() async {
+        let center = UNUserNotificationCenter.current()
+        let delivered = await center.deliveredNotifications()
+        let snapshots = delivered.map(DeliveredNotificationSnapshot.init(from:))
+        let blankIds = PendingApprovalBanner.blankDeliveredIds(in: snapshots)
+        guard !blankIds.isEmpty else { return }
+        center.removeDeliveredNotifications(withIdentifiers: blankIds)
+        logger.notice("[ClaveNSE] Swept \(blankIds.count, privacy: .public) blank notification(s) from prior wakes")
     }
 
     private func deliverContent(result: SigningResult) {
@@ -59,13 +85,25 @@ class NotificationService: UNNotificationServiceExtension {
             content.interruptionLevel = .active
             contentHandler?(content)
 
-        case .pending(let clientPubkey, let eventKind):
+        case .pending(let clientPubkey, let eventKind, let requestId):
             let clientName = SharedStorage.getClientPermissions(for: clientPubkey)?.name
                 ?? String(clientPubkey.prefix(8))
             let kindDesc = eventKind.map { KnownKinds.label(for: $0) } ?? "event"
             content.title = "Approve Signing Request"
             content.body = "\(clientName) wants to sign \(kindDesc)"
             content.interruptionLevel = .active
+            // Wires the long-press / swipe-down notification UI to surface
+            // Approve + Deny action buttons. Category is registered in the
+            // main app (AppDelegate.didFinishLaunchingWithOptions). When the
+            // user taps an action, the system delivers it to the main app
+            // process where AppState's observer looks up the request by id
+            // and invokes the matching approve/deny path.
+            content.categoryIdentifier = PendingApprovalCategory.identifier
+            if let requestId {
+                var info = content.userInfo
+                info["pendingRequestId"] = requestId
+                content.userInfo = info
+            }
             contentHandler?(content)
 
         case .success, .noEvents:
@@ -181,6 +219,7 @@ class NotificationService: UNNotificationServiceExtension {
             var handledCount = 0
             var lastPendingPubkey: String? = nil
             var lastPendingKind: Int? = nil
+            var lastPendingRequestId: String? = nil
 
             // Process connect requests before anything else so pairing state is
             // established before sign_event/encrypt/decrypt requests in the same batch.
@@ -216,11 +255,9 @@ class NotificationService: UNNotificationServiceExtension {
                     if result.status == "error" {
                         lastError = result.errorMessage
                     } else if result.status == "pending" {
-                        lastPendingPubkey = eventPubkey
-                        // Extract the kind from the request event's content if available
-                        if let kindVal = event["kind"] as? Int {
-                            lastPendingKind = kindVal
-                        }
+                        lastPendingPubkey = result.clientPubkey
+                        lastPendingKind = result.eventKind
+                        lastPendingRequestId = result.pendingRequestId
                     }
                 } catch {
                     // Treat errors as non-fatal — event may not be for us
@@ -233,7 +270,11 @@ class NotificationService: UNNotificationServiceExtension {
             if handledCount == 0 {
                 return SigningResult(status: .noEvents)
             } else if let pendingPubkey = lastPendingPubkey {
-                return SigningResult(status: .pending(clientPubkey: pendingPubkey, eventKind: lastPendingKind))
+                return SigningResult(status: .pending(
+                    clientPubkey: pendingPubkey,
+                    eventKind: lastPendingKind,
+                    requestId: lastPendingRequestId
+                ))
             } else if let error = lastError {
                 return SigningResult(status: .error(error))
             } else {
