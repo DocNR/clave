@@ -47,18 +47,31 @@ struct MainTabView: View {
             alertTitle,
             isPresented: Binding(
                 get: { appState.activeApprovalRequest != nil },
-                set: { newValue in
-                    // Approve/Deny/Not-now buttons drive their own state
-                    // (request is removed from pendingRequests, or the id
-                    // is added to dismissedAlertRequestIds). If SwiftUI
-                    // sets isPresented=false while the request is still
-                    // active (system-driven dismissal — e.g. background
-                    // transition mid-alert, deep-link interruption), treat
-                    // it as user-dismiss so the alert doesn't infinite-loop
-                    // on every subsequent view re-evaluation.
-                    if !newValue, appState.activeApprovalRequest != nil {
-                        appState.dismissActiveAlert()
-                    }
+                set: { _ in
+                    // No-op setter is critical for auto-chain. SwiftUI
+                    // calls setter(false) synchronously when ANY button is
+                    // tapped (including Approve/Deny — they're not the
+                    // .cancel role but SwiftUI dismisses the alert on tap
+                    // regardless). At that moment the async approve/deny
+                    // Task hasn't run yet, so pendingRequests still has the
+                    // current request, and any "if request still active,
+                    // treat as dismissal" logic here would incorrectly add
+                    // the in-flight id to dismissedAlertRequestIds — which
+                    // breaks the chain because the next request would then
+                    // re-arm but SwiftUI is already in dismissal animation.
+                    //
+                    // Auto-chain works because the binding's getter re-
+                    // evaluates as `pendingRequests` mutates (Task completes
+                    // → request removed → next freshPendingRequests.first
+                    // becomes activeApprovalRequest); the alert's
+                    // `presenting:` value rotates to the next request and
+                    // SwiftUI updates content in place. No dismissal,
+                    // no re-presentation.
+                    //
+                    // Explicit dismissal happens via the "Not now" button
+                    // calling `dismissActiveAlert()` directly. System-
+                    // driven dismissals (backgrounding) don't fire setter
+                    // because iOS alerts persist across foreground state.
                 }
             ),
             presenting: appState.activeApprovalRequest
