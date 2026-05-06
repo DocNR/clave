@@ -320,7 +320,20 @@ struct HomeView: View {
         HStack(spacing: 12) {
             statCard(title: "Signed Today", value: "\(signedTodayCount)", icon: "checkmark.circle.fill", color: .green)
             statCard(title: "Clients", value: "\(clients.count)", icon: "person.2.fill", color: .blue)
-            statCard(title: "Pending", value: "\(pendingCount)", icon: "clock.badge.exclamationmark.fill", color: .orange)
+            // Pending tile routes to the same InboxView the bell opens —
+            // a second affordance for the user to manage pending requests
+            // without hunting for the bell. Wrapped in a Button so the
+            // tile gets the standard tap-highlight; the visual treatment
+            // stays identical to the non-tappable tiles. (Signed Today /
+            // Clients aren't tappable here — Bug 6 in BACKLOG covers
+            // routing those to filtered Activity, separate sprint.)
+            Button {
+                showInboxSheet = true
+            } label: {
+                statCard(title: "Pending", value: "\(pendingCount)", icon: "clock.badge.exclamationmark.fill", color: .orange)
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("Opens the pending requests inbox")
         }
         .padding(.horizontal)
     }
@@ -332,6 +345,7 @@ struct HomeView: View {
                 .foregroundStyle(color)
             Text(value)
                 .font(.title2.bold())
+                .foregroundStyle(.primary)
             Text(title)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
