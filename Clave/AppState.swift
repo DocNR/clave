@@ -141,6 +141,53 @@ final class AppState {
         for request in freshPendingRequests {
             dismissedAlertRequestIds.insert(request.id)
         }
+        // Chain is closed by user — reset progress so the next chain
+        // (when a new request arrives) starts at "1 of N" again.
+        processedInChain = 0
+    }
+
+    // MARK: - Alert chain position tracking
+    //
+    // The root alert's title shows "X of N" so the user knows how deep
+    // the queue is. Pre-build-59 the format was "1 of <queueDepth>",
+    // which always read "1" and used the *remaining* count — so a chain
+    // of 3 went 1-of-3 → 1-of-2 → 1-of-1 instead of the expected
+    // 1-of-3 → 2-of-3 → 3-of-3.
+    //
+    // Fix: track a `processedInChain` counter that increments on each
+    // approve/deny and resets when the chain ends. Position is
+    // `processedInChain + 1`; total is current fresh count plus already-
+    // processed (so new requests arriving mid-chain bump the total —
+    // 2-of-3 with R4 incoming becomes 2-of-4).
+
+    /// Number of requests already approved/denied within the current
+    /// chain. Resets to 0 when the chain ends (`activeApprovalRequest`
+    /// becomes nil), when "Not now" closes the batch, or whenever
+    /// `refreshPendingRequests` observes that no chain is active. The
+    /// reset is defensive — multiple paths can end a chain (TTL purge,
+    /// lock-screen action while app alive, dismissAll), and we don't
+    /// want stale progress carrying into the next chain.
+    private(set) var processedInChain: Int = 0
+
+    /// 1-based position of the active request within the current chain.
+    /// Used in the root alert's title. Always >= 1 when
+    /// `activeApprovalRequest` is non-nil. Undefined-but-harmless when
+    /// no chain is active (UI doesn't show the title in that state).
+    var chainPosition: Int {
+        processedInChain + 1
+    }
+
+    /// Total chain size for the title. Sums (fresh AND non-dismissed)
+    /// remaining + already processed so new requests arriving mid-chain
+    /// naturally bump the total. Filtering out dismissed requests is
+    /// critical: after "Not now" closes a batch and a fresh request
+    /// arrives, the new chain is "1 of 1" — not "1 of N" where N
+    /// includes the just-dismissed batch.
+    var chainTotal: Int {
+        let visibleRemaining = freshPendingRequests.filter {
+            !dismissedAlertRequestIds.contains($0.id)
+        }
+        return visibleRemaining.count + processedInChain
     }
 
     /// Set by long-press on a strip pill; consumed by HomeView's
@@ -1279,6 +1326,15 @@ final class AppState {
         // (MainTabView scenePhase `.active`) where stale-row eviction is
         // safe and desirable.
         pendingRequests = SharedStorage.getPendingRequests()
+        // Defensive chain-counter reset: any path that empties the alert
+        // chain (TTL purge clearing the active request, lock-screen
+        // approve/deny while app is alive, multi-account switch, etc.)
+        // funnels through `pendingRequests` mutation → this observer.
+        // If no chain is active, processedInChain MUST be 0 so the next
+        // chain (when a fresh request arrives) starts at "1 of N" again.
+        if activeApprovalRequest == nil && processedInChain > 0 {
+            processedInChain = 0
+        }
     }
 
     /// Removes pending requests aged past `pendingRequestTTLSeconds` from
@@ -1345,22 +1401,52 @@ final class AppState {
 
     /// Approve a pending request from inside the running app (inbox swipe,
     /// detail-view button, root alert). Thin delegate to the static
-    /// `performApprove` helper — kept on the instance for source-compat
-    /// with existing call sites and for future per-account UI feedback
-    /// hooks. The static helper does the actual work so `AppDelegate`'s
-    /// lock-screen action handler can run the same path during cold
-    /// launches when no `AppState` instance exists yet.
+    /// `performApprove` helper plus chain-position advancement.
+    ///
+    /// On `.signed` or `.failedAndRemoved` outcomes the request is gone
+    /// from `pendingRequests`, so the chain progresses one step. We pull
+    /// fresh state synchronously (don't wait for the
+    /// `.pendingRequestsUpdated` observer's main-queue dispatch) and bump
+    /// `processedInChain` in the same actor block so the alert title
+    /// re-evaluates atomically — without the sync, SwiftUI would briefly
+    /// paint "X of total-1" before settling on "X of total".
+    ///
+    /// `.failedKeepingPending` keeps the request for retry, so the chain
+    /// doesn't advance.
     func approvePendingRequest(_ request: PendingRequest) async -> ApproveOutcome {
-        await Self.performApprove(request)
+        let outcome = await Self.performApprove(request)
+        switch outcome {
+        case .signed, .failedAndRemoved:
+            advanceChainPosition()
+        case .failedKeepingPending:
+            break
+        }
+        return outcome
     }
 
-    /// Deny a pending request from inside the running app. Thin delegate
-    /// to the static `performDeny` helper. The on-disk `removePendingRequest`
-    /// posts `.pendingRequestsUpdated`; this `AppState`'s observer
-    /// catches it and refreshes the surface — no need to call refresh
-    /// explicitly here.
+    /// Deny a pending request from inside the running app. Like approve,
+    /// advances the chain counter synchronously so the alert title
+    /// re-evaluates atomically with the queue shrinkage.
     func denyPendingRequest(_ request: PendingRequest) {
         Self.performDeny(request)
+        advanceChainPosition()
+    }
+
+    /// Synchronously refresh `pendingRequests` from `SharedStorage`,
+    /// increment `processedInChain`, and reset on natural chain end.
+    /// Called from approve/deny instance methods. Pulls state from
+    /// `SharedStorage` directly because the `.pendingRequestsUpdated`
+    /// observer's main-queue dispatch hasn't run yet at this point —
+    /// without the explicit pull, `pendingRequests` would still hold
+    /// the just-removed request when the title re-evaluates.
+    private func advanceChainPosition() {
+        pendingRequests = SharedStorage.getPendingRequests()
+        processedInChain += 1
+        // Natural chain end (queue drained or all remaining are dismissed)
+        // resets the counter so the next chain starts fresh.
+        if activeApprovalRequest == nil {
+            processedInChain = 0
+        }
     }
 
     /// Static entry point for the lock-screen Approve / Deny notification

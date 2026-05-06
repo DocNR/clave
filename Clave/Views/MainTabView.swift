@@ -156,8 +156,12 @@ struct MainTabView: View {
     // MARK: - Alert content
 
     /// Title is method-aware (sign vs encrypt vs decrypt) and shows the
-    /// queue position when 2+ requests are pending so users know how
-    /// deep the chain runs before they start tapping.
+    /// chain position (e.g. "(2 of 3)") when 2+ requests are stacked so
+    /// users know how deep the chain runs and how far through they are.
+    /// Position tracks `chainPosition`/`chainTotal` from AppState so the
+    /// number stays synced as Approve/Deny advance through the queue —
+    /// "1 of 3" → "2 of 3" → "3 of 3" rather than "1 of 3" → "1 of 2"
+    /// → "1 of 1" (pre-build-59 bug).
     private var alertTitle: String {
         guard let request = appState.activeApprovalRequest else { return "" }
         let base: String
@@ -171,8 +175,9 @@ struct MainTabView: View {
         default:
             base = "Approve Request"
         }
-        let depth = appState.pendingApprovalQueueDepth
-        return depth > 1 ? "\(base) (1 of \(depth))" : base
+        let total = appState.chainTotal
+        let position = appState.chainPosition
+        return total > 1 ? "\(base) (\(position) of \(total))" : base
     }
 
     private func alertMessage(for request: PendingRequest) -> String {

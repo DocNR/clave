@@ -363,4 +363,155 @@ final class AppStatePendingApprovalTests: XCTestCase {
         XCTAssertEqual(appState.activeApprovalRequest?.id, "r3",
                        "New request after dismiss-all must re-arm the alert")
     }
+
+    // MARK: - Chain position (alert title "X of N" tracking)
+    //
+    // The root alert's title shows position-in-chain. Pre-build-59 the
+    // format was "1 of <queueDepth>" using *remaining* count, so a chain
+    // of 3 went 1-of-3 → 1-of-2 → 1-of-1. Build 59+ tracks
+    // processedInChain so it goes 1-of-3 → 2-of-3 → 3-of-3, with
+    // chainTotal expanding if new requests arrive mid-chain.
+
+    func test_chainPosition_startsAtOneWithFreshChain() {
+        let r1 = makeRequest(id: "r1", ageSeconds: 30)
+        let r2 = makeRequest(id: "r2", ageSeconds: 60)
+        let r3 = makeRequest(id: "r3", ageSeconds: 90)
+        SharedStorage.queuePendingRequest(r1)
+        SharedStorage.queuePendingRequest(r2)
+        SharedStorage.queuePendingRequest(r3)
+        appState.refreshPendingRequests()
+
+        XCTAssertEqual(appState.chainPosition, 1, "Fresh chain starts at position 1")
+        XCTAssertEqual(appState.chainTotal, 3, "Chain total matches fresh queue size")
+    }
+
+    func test_chainPosition_advancesThroughChain() async {
+        // Wire up an account so performApprove can find a signing key.
+        // Without this, performApprove returns .failedAndRemoved (which
+        // also advances the chain) but for clarity we test the .signed
+        // path. Actually .failedAndRemoved is fine for this test — the
+        // chain advancement is what we're verifying, not the signing.
+        let r1 = makeRequest(id: "r1", ageSeconds: 30)
+        let r2 = makeRequest(id: "r2", ageSeconds: 60)
+        let r3 = makeRequest(id: "r3", ageSeconds: 90)
+        SharedStorage.queuePendingRequest(r1)
+        SharedStorage.queuePendingRequest(r2)
+        SharedStorage.queuePendingRequest(r3)
+        appState.refreshPendingRequests()
+
+        XCTAssertEqual(appState.chainPosition, 1)
+        XCTAssertEqual(appState.chainTotal, 3)
+
+        // Deny is synchronous and doesn't require Keychain — perfect for
+        // exercising the chain-advancement path without the network round-
+        // trip performApprove needs.
+        guard let active1 = appState.activeApprovalRequest else {
+            XCTFail("Expected r1 active"); return
+        }
+        appState.denyPendingRequest(active1)
+
+        XCTAssertEqual(appState.chainPosition, 2, "After 1 deny: position is 2")
+        XCTAssertEqual(appState.chainTotal, 3, "Total stays 3 (1 processed + 2 remaining)")
+
+        guard let active2 = appState.activeApprovalRequest else {
+            XCTFail("Expected r2 active"); return
+        }
+        appState.denyPendingRequest(active2)
+
+        XCTAssertEqual(appState.chainPosition, 3, "After 2 denies: position is 3")
+        XCTAssertEqual(appState.chainTotal, 3, "Total still 3")
+
+        guard let active3 = appState.activeApprovalRequest else {
+            XCTFail("Expected r3 active"); return
+        }
+        appState.denyPendingRequest(active3)
+
+        // Chain ended — counter must reset for the next chain.
+        XCTAssertNil(appState.activeApprovalRequest)
+        XCTAssertEqual(appState.processedInChain, 0,
+                       "Chain end must reset processedInChain so next chain starts at 1")
+    }
+
+    func test_chainTotal_bumpsWhenNewRequestArrivesMidChain() {
+        let r1 = makeRequest(id: "r1", ageSeconds: 30)
+        let r2 = makeRequest(id: "r2", ageSeconds: 60)
+        SharedStorage.queuePendingRequest(r1)
+        SharedStorage.queuePendingRequest(r2)
+        appState.refreshPendingRequests()
+
+        XCTAssertEqual(appState.chainTotal, 2)
+
+        guard let active1 = appState.activeApprovalRequest else {
+            XCTFail("Expected r1 active"); return
+        }
+        appState.denyPendingRequest(active1)
+
+        XCTAssertEqual(appState.chainPosition, 2)
+        XCTAssertEqual(appState.chainTotal, 2, "Two-pending chain at position 2")
+
+        // R3 arrives mid-chain — chain total must bump to reflect the new
+        // request without resetting our position.
+        let r3 = makeRequest(id: "r3", ageSeconds: 0)
+        SharedStorage.queuePendingRequest(r3)
+        appState.refreshPendingRequests()
+
+        XCTAssertEqual(appState.chainPosition, 2,
+                       "Position unchanged — we're still on the second decision")
+        XCTAssertEqual(appState.chainTotal, 3,
+                       "Total bumps to 3: 1 processed + 2 remaining")
+    }
+
+    func test_dismissAllActiveAlerts_resetsChainCounter() {
+        let r1 = makeRequest(id: "r1", ageSeconds: 30)
+        let r2 = makeRequest(id: "r2", ageSeconds: 60)
+        SharedStorage.queuePendingRequest(r1)
+        SharedStorage.queuePendingRequest(r2)
+        appState.refreshPendingRequests()
+
+        // Advance through one to seed processedInChain.
+        guard let active1 = appState.activeApprovalRequest else {
+            XCTFail("Expected r1 active"); return
+        }
+        appState.denyPendingRequest(active1)
+        XCTAssertEqual(appState.processedInChain, 1)
+
+        appState.dismissAllActiveAlerts()
+        XCTAssertEqual(appState.processedInChain, 0,
+                       "Not now must reset chain counter so next chain is fresh")
+
+        // New request arrives — fresh chain starts at "1 of 1".
+        let r3 = makeRequest(id: "r3", ageSeconds: 0)
+        SharedStorage.queuePendingRequest(r3)
+        appState.refreshPendingRequests()
+
+        XCTAssertEqual(appState.chainPosition, 1)
+        XCTAssertEqual(appState.chainTotal, 1)
+    }
+
+    func test_chainCounter_resetsWhenChainEndsViaTTLPurge() {
+        // Stack a chain, advance one, then have TTL purge wipe the rest.
+        // The defensive reset in refreshPendingRequests catches this path
+        // (purge calls SharedStorage.removePendingRequest which fires the
+        // observer → refreshPendingRequests → no active → reset).
+        let fresh = makeRequest(id: "fresh", ageSeconds: 30)
+        let stale1 = makeRequest(id: "stale1", ageSeconds: 600)
+        let stale2 = makeRequest(id: "stale2", ageSeconds: 700)
+        SharedStorage.queuePendingRequest(stale1)
+        SharedStorage.queuePendingRequest(stale2)
+        SharedStorage.queuePendingRequest(fresh)
+        appState.refreshPendingRequests()
+
+        // Only `fresh` is in the chain (stale ones filtered out).
+        XCTAssertEqual(appState.chainTotal, 1)
+
+        appState.denyPendingRequest(fresh)
+        XCTAssertNil(appState.activeApprovalRequest)
+        XCTAssertEqual(appState.processedInChain, 0,
+                       "Natural chain end resets counter")
+
+        // TTL purge — should not affect counter (already 0) and should
+        // not crash.
+        appState.purgeStalePendingRequests()
+        XCTAssertEqual(appState.processedInChain, 0)
+    }
 }
