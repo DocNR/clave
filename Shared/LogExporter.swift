@@ -18,7 +18,7 @@ enum LogExporter {
     /// are silently filtered out of "Copy Recent Logs" — the user becomes blind
     /// to that code path's activity.
     static let allCategories: [String] = [
-        "relay", "signer", "storage", "apns", "app", "fg-sub", "banner", "nc-sweep"
+        "relay", "signer", "storage", "apns", "app", "fg-sub", "banner", "nc-sweep", "pair"
     ]
 
     /// Fetch main-app logs from the unified log store within the given time window.

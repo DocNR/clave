@@ -118,8 +118,21 @@ enum LightSigner {
             return result
         }
 
-        let params = json["params"] as? [String] ?? []
-        logger.notice("[LightSigner] Method: \(method, privacy: .public)")
+        let params: [String]
+        if let strs = json["params"] as? [String] {
+            params = strs
+        } else {
+            // Some clients send mixed-type params (e.g. an object for sign_event
+            // instead of the spec-required JSON-stringified string). Without
+            // this log, the request silently degrades to "missing params"
+            // downstream and the wire trace can't tell shape-mismatch from
+            // genuinely-missing-params. Helps client-side debugging.
+            if let raw = json["params"] {
+                logger.warning("[LightSigner] params not [String]: type=\(String(describing: type(of: raw)), privacy: .public) method=\(method, privacy: .public) id=\(requestId.prefix(8), privacy: .public)")
+            }
+            params = []
+        }
+        logger.notice("[LightSigner] Method: \(method, privacy: .public) id=\(requestId.prefix(8), privacy: .public)")
 
         // Extract event kind for sign_event
         let eventKind = extractEventKind(method: method, params: params)
@@ -130,6 +143,13 @@ enum LightSigner {
         // --- Per-client permission checks ---
         if method == "connect" {
             // connect params: [remote-signer-pubkey, optional-secret, optional-perms]
+            // Audit-2: warn (don't reject) when params[0] doesn't match this
+            // signer's pubkey. Routing already worked via the kind:24133 #p
+            // tag so a mismatch is informational — but it's a useful diagnostic
+            // for clients that pick the wrong target in multi-account flows.
+            if let target = params.first, !target.isEmpty, target != signerPubkey {
+                logger.warning("[LightSigner] connect target mismatch: params[0]=\(target.prefix(8), privacy: .public) signer=\(signerPubkey.prefix(8), privacy: .public)")
+            }
             let providedSecret = params.count >= 2 ? params[1] : ""
             let expectedSecret = SharedStorage.getBunkerSecret(for: signerPubkey)
 
