@@ -444,11 +444,9 @@ final class AppState {
         SharedKeychain.deleteNsec()
     }
 
-    /// Replaces `loadCachedProfile()` — only loads the on-disk image cache
-    /// (profile metadata is now sourced from `currentAccount.profile`).
-    /// Profile image filename is per-pubkey (Task 8 will move existing
-    /// `profile_image.jpg` to per-pubkey naming); for now we read the
-    /// legacy file path which still works for the migrated single account.
+    /// Loads the on-disk image cache for the current account. Profile
+    /// metadata itself is sourced from `currentAccount.profile`. Image
+    /// filename is per-pubkey via the `cachedImageURL` computed property.
     private func loadCachedProfileImage() {
         if let imageData = try? Data(contentsOf: cachedImageURL),
            let image = UIImage(data: imageData) {
@@ -638,8 +636,8 @@ final class AppState {
         //    per-pubkey cache file. Without this, deleted accounts left
         //    `cached-profile-<pubkey>.dat` orphans on disk forever.
         try? FileManager.default.removeItem(at: cachedImageURL(for: pubkey))
-        // Legacy global file: only meaningful for users who never went through
-        // Task 8 migration. Keep the cleanup for hygiene.
+        // Defensive: also sweep any pre-multi-account `profile_image.jpg`
+        // orphan from the build-31 era. Idempotent no-op for fresh installs.
         let container = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: SharedConstants.appGroup)
         if let imageURL = container?.appendingPathComponent("profile_image.jpg") {
             try? FileManager.default.removeItem(at: imageURL)
@@ -701,13 +699,9 @@ final class AppState {
         persistAccounts()
     }
 
-    // `loadCachedProfile()` and `saveCachedProfile(_:)` removed in Task 5.
-    // Profile metadata now lives inside `currentAccount.profile`
-    // (persisted via `persistAccounts()` → `accountsKey`). The legacy
-    // `cachedProfileKey` UserDefaults entry is no longer the source of
-    // truth; Task 8 will explicitly remove it as part of full migration.
-    // Profile image still loads from disk via `loadCachedProfileImage()`
-    // (called from loadState).
+    // Profile metadata lives inside `currentAccount.profile` (persisted
+    // via `persistAccounts()` → `accountsKey`). Profile image loads from
+    // disk via `loadCachedProfileImage()` (called from loadState).
 
     /// Per-pubkey on-disk profile image cache path. File extension is
     /// `.dat` (not `.jpg`) because we don't enforce the source
