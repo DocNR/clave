@@ -58,7 +58,7 @@ final class LogExporterFormattingTests: XCTestCase {
         // by main-app OSLogStore; intentionally excluded.
         let expected: Set<String> = [
             "relay", "signer", "storage", "apns", "app",
-            "fg-sub", "banner", "nc-sweep"
+            "fg-sub", "banner", "nc-sweep", "pair"
         ]
         let actual = Set(LogExporter.allCategories)
         XCTAssertEqual(actual, expected,

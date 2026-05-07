@@ -2,7 +2,10 @@ import Foundation
 import CryptoKit
 import NostrSDK
 import Observation
+import os.log
 import UIKit
+
+private let logger = Logger(subsystem: "dev.nostr.clave", category: "pair")
 
 enum ClaveError: LocalizedError {
     case noSignerKey
@@ -1917,6 +1920,7 @@ final class AppState {
         // Use the explicitly-provided signer (e.g. boundAccountPubkey from deeplink)
         // or fall back to the current account — matching unpairClientWithProxy's pattern.
         let resolvedSigner = signer ?? signerPubkeyHex
+        logger.notice("[Pair] pair-client begin client=\(clientPubkey.prefix(8), privacy: .public) signer=\(resolvedSigner.prefix(8), privacy: .public) relays=\(relayUrls.count, privacy: .public)")
         SharedStorage.setClientRelayUrls(pubkey: clientPubkey, relayUrls: relayUrls, signer: resolvedSigner)
 
         // Layer 1: relay-set may have changed; refresh the foreground sub.
@@ -1929,24 +1933,34 @@ final class AppState {
         // the correct account. Matches unpairClientWithProxy's capture pattern.
         let capturedSigner = resolvedSigner
         guard !capturedSigner.isEmpty,
-              let nsec = SharedKeychain.loadNsec(for: capturedSigner) else { return }
+              let nsec = SharedKeychain.loadNsec(for: capturedSigner) else {
+            logger.error("[Pair] pair-client abort: empty signer or no nsec in Keychain client=\(clientPubkey.prefix(8), privacy: .public)")
+            return
+        }
         let privateKey: Data
         do {
             privateKey = try Bech32.decodeNsec(nsec)
         } catch {
+            logger.error("[Pair] pair-client abort: Bech32 decode failed err=\(error.localizedDescription, privacy: .public)")
             return
         }
 
         let proxyURL = SharedConstants.sharedDefaults.string(forKey: SharedConstants.proxyURLKey)
             ?? SharedConstants.defaultProxyURL
         let pairURL = "\(proxyURL)/pair-client"
-        guard let url = URL(string: pairURL) else { return }
+        guard let url = URL(string: pairURL) else {
+            logger.error("[Pair] pair-client abort: invalid URL=\(pairURL, privacy: .public)")
+            return
+        }
 
         let bodyDict: [String: Any] = [
             "client_pubkey": clientPubkey,
             "relay_urls": relayUrls
         ]
-        guard let bodyData = try? JSONSerialization.data(withJSONObject: bodyDict) else { return }
+        guard let bodyData = try? JSONSerialization.data(withJSONObject: bodyDict) else {
+            logger.error("[Pair] pair-client abort: body serialization failed")
+            return
+        }
         let bodyHash = SHA256.hash(data: bodyData).map { String(format: "%02x", $0) }.joined()
 
         let authHeader: String
@@ -1958,6 +1972,7 @@ final class AppState {
                 bodySha256Hex: bodyHash
             )
         } catch {
+            logger.error("[Pair] pair-client abort: NIP-98 sign failed err=\(error.localizedDescription, privacy: .public)")
             return
         }
 
@@ -1968,10 +1983,22 @@ final class AppState {
         request.setValue(authHeader, forHTTPHeaderField: "X-Clave-Auth")
         request.httpBody = bodyData
 
-        URLSession.shared.dataTask(with: request) { _, response, _ in
+        URLSession.shared.dataTask(with: request) { _, response, error in
             let http = response as? HTTPURLResponse
-            if http?.statusCode == 200 { return }
+            if http?.statusCode == 200 {
+                logger.notice("[Pair] pair-client ok client=\(clientPubkey.prefix(8), privacy: .public) signer=\(capturedSigner.prefix(8), privacy: .public)")
+                return
+            }
             // Any non-200 (including network error → http == nil) queues for retry.
+            let statusStr: String
+            if let code = http?.statusCode {
+                statusStr = "\(code)"
+            } else if let error {
+                statusStr = "net-err:\(error.localizedDescription)"
+            } else {
+                statusStr = "no-response"
+            }
+            logger.error("[Pair] pair-client failed status=\(statusStr, privacy: .public) — queued for retry client=\(clientPubkey.prefix(8), privacy: .public)")
             let op = PairOp(
                 id: UUID().uuidString,
                 kind: .pair,
@@ -2004,22 +2031,33 @@ final class AppState {
         // failure closure enqueues the PairOp under the correct account
         // even if the user-driven account switch races the in-flight request.
         let capturedSigner = signer ?? signerPubkeyHex
+        logger.notice("[Pair] unpair-client begin client=\(clientPubkey.prefix(8), privacy: .public) signer=\(capturedSigner.prefix(8), privacy: .public)")
         guard !capturedSigner.isEmpty,
-              let nsec = SharedKeychain.loadNsec(for: capturedSigner) else { return }
+              let nsec = SharedKeychain.loadNsec(for: capturedSigner) else {
+            logger.error("[Pair] unpair-client abort: empty signer or no nsec in Keychain client=\(clientPubkey.prefix(8), privacy: .public)")
+            return
+        }
         let privateKey: Data
         do {
             privateKey = try Bech32.decodeNsec(nsec)
         } catch {
+            logger.error("[Pair] unpair-client abort: Bech32 decode failed err=\(error.localizedDescription, privacy: .public)")
             return
         }
 
         let proxyURL = SharedConstants.sharedDefaults.string(forKey: SharedConstants.proxyURLKey)
             ?? SharedConstants.defaultProxyURL
         let unpairURL = "\(proxyURL)/unpair-client"
-        guard let url = URL(string: unpairURL) else { return }
+        guard let url = URL(string: unpairURL) else {
+            logger.error("[Pair] unpair-client abort: invalid URL=\(unpairURL, privacy: .public)")
+            return
+        }
 
         let bodyDict: [String: Any] = ["client_pubkey": clientPubkey]
-        guard let bodyData = try? JSONSerialization.data(withJSONObject: bodyDict) else { return }
+        guard let bodyData = try? JSONSerialization.data(withJSONObject: bodyDict) else {
+            logger.error("[Pair] unpair-client abort: body serialization failed")
+            return
+        }
         let bodyHash = SHA256.hash(data: bodyData).map { String(format: "%02x", $0) }.joined()
 
         let authHeader: String
@@ -2031,6 +2069,7 @@ final class AppState {
                 bodySha256Hex: bodyHash
             )
         } catch {
+            logger.error("[Pair] unpair-client abort: NIP-98 sign failed err=\(error.localizedDescription, privacy: .public)")
             return
         }
 
@@ -2041,9 +2080,21 @@ final class AppState {
         request.setValue(authHeader, forHTTPHeaderField: "X-Clave-Auth")
         request.httpBody = bodyData
 
-        URLSession.shared.dataTask(with: request) { _, response, _ in
+        URLSession.shared.dataTask(with: request) { _, response, error in
             let http = response as? HTTPURLResponse
-            if http?.statusCode == 200 { return }
+            if http?.statusCode == 200 {
+                logger.notice("[Pair] unpair-client ok client=\(clientPubkey.prefix(8), privacy: .public) signer=\(capturedSigner.prefix(8), privacy: .public)")
+                return
+            }
+            let statusStr: String
+            if let code = http?.statusCode {
+                statusStr = "\(code)"
+            } else if let error {
+                statusStr = "net-err:\(error.localizedDescription)"
+            } else {
+                statusStr = "no-response"
+            }
+            logger.error("[Pair] unpair-client failed status=\(statusStr, privacy: .public) — queued for retry client=\(clientPubkey.prefix(8), privacy: .public)")
             let op = PairOp(
                 id: UUID().uuidString,
                 kind: .unpair,
