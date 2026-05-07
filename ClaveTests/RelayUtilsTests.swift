@@ -1,17 +1,15 @@
 import XCTest
 @testable import Clave
 
-final class AppStateMultiRelayHelpersTests: XCTestCase {
+final class RelayUtilsTests: XCTestCase {
 
     func testConnectToRelaysReturnsEmptyForEmptyInput() async {
-        let appState = AppState()
-        let result = await appState._testOnlyConnectToRelays(urls: [], timeout: 1.0)
+        let result = await RelayUtils.connectToRelays(urls: [], timeout: 1.0)
         XCTAssertEqual(result.count, 0)
     }
 
     func testConnectToRelaysSkipsUnreachableURLs() async {
-        let appState = AppState()
-        let result = await appState._testOnlyConnectToRelays(
+        let result = await RelayUtils.connectToRelays(
             urls: ["wss://127.0.0.1:1", "wss://not-a-real-relay.invalid.test"],
             timeout: 1.5
         )
@@ -19,14 +17,12 @@ final class AppStateMultiRelayHelpersTests: XCTestCase {
     }
 
     func testPublishEventToRelaysReturnsZeroForEmptyInput() async {
-        let appState = AppState()
-        let count = await appState._testOnlyPublishEventToRelays([], event: ["kind": 1])
+        let count = await RelayUtils.publishEventToRelays([], event: ["kind": 1])
         XCTAssertEqual(count, 0)
     }
 
     func testFetchEventsFromRelaysReturnsEmptyForEmptyInput() async {
-        let appState = AppState()
-        let events = await appState._testOnlyFetchEventsFromRelays([], filter: [:], timeout: 1.0)
+        let events = await RelayUtils.fetchEventsFromRelays([], filter: [:], timeout: 1.0)
         XCTAssertEqual(events.count, 0)
     }
 }
