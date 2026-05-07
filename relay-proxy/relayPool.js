@@ -18,6 +18,16 @@ function createRelayPool({
   reconnectMaxMs = 600_000, // 10 min
   pingIntervalMs = PING_INTERVAL_MS,
   pongTimeoutMs = PONG_TIMEOUT_MS,
+  // Evict relays that fail to reach `open` state this many times in a row
+  // without ever succeeding once. Catches relays that are permanently
+  // broken from this proxy's perspective (403 NIP-42-AUTH-required like
+  // nostr.wine, 502/down like garden.zap.cooking) without disturbing
+  // healthy-but-flapping relays that actually connect successfully.
+  // Default 10 — with the standard backoff schedule (1s, 2s, 4s, …,
+  // capped at 600s), 10 failures takes ~17 minutes; long enough to
+  // ride out a real outage, short enough to stop wasting resources on
+  // a permanent dead relay.
+  maxFailuresWithoutSuccess = 10,
 } = {}) {
   const pool = new Map();
 
@@ -85,6 +95,7 @@ function createRelayPool({
     entry.ws.on("open", () => {
       entry.state = "ready";
       entry.backoffMs = reconnectInitialMs; // reset backoff on success
+      entry.successfulOpens++;
       logger.log(`[RelayPool] ${entry.url} connected`);
       sendReq(entry);
       startHeartbeat(entry);
@@ -118,6 +129,26 @@ function createRelayPool({
       entry.state = "closed";
       entry.failures++;
       stopHeartbeat(entry);
+      // Permanent-failure eviction: relay has never managed to reach `open`
+      // and has now failed `maxFailuresWithoutSuccess` times. Stop the
+      // reconnect loop. Entry stays in the pool with `evicted: true` so
+      // refCount tracking still works for `releaseRelay`. When the last
+      // ref drops, the entry is deleted; a future `addRelay` call (after
+      // a fresh pair) creates a brand-new entry and gives the relay
+      // another chance.
+      if (
+        !entry.evicted &&
+        entry.successfulOpens === 0 &&
+        entry.failures >= maxFailuresWithoutSuccess
+      ) {
+        entry.evicted = true;
+        entry.state = "evicted";
+        logger.error(
+          `[RelayPool] ${entry.url} permanently failed after ${entry.failures} attempts ` +
+          `(no successful opens) — releasing from active reconnect; refCount=${entry.refCount}`
+        );
+        return;
+      }
       scheduleReconnect(entry);
     });
 
@@ -137,6 +168,10 @@ function createRelayPool({
     const existing = pool.get(url);
     if (existing) {
       existing.refCount++;
+      // Don't reattempt connection on an evicted entry — the eviction
+      // verdict stands until refCount drops to 0 and the entry is deleted.
+      // A fresh `addRelay` after deletion creates a new entry that will
+      // try again from scratch.
       return;
     }
     const entry = {
@@ -146,6 +181,8 @@ function createRelayPool({
       state: "connecting",
       backoffMs: reconnectInitialMs,
       failures: 0,
+      successfulOpens: 0,
+      evicted: false,
       reconnectTimer: null,
       pingTimer: null,
       pongTimer: null,
@@ -185,6 +222,8 @@ function createRelayPool({
       refCount: entry.refCount,
       state: entry.state,
       failures: entry.failures,
+      successfulOpens: entry.successfulOpens,
+      evicted: entry.evicted,
     };
   }
 
