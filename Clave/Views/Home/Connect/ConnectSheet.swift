@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Entry view for connecting a Nostr client. One sheet; segmented control
 /// switches between Bunker (Clave shows a code to a client) and Nostrconnect
@@ -79,9 +80,15 @@ struct ConnectSheet: View {
             Color.black.opacity(0.4).ignoresSafeArea()
             VStack(spacing: 16) {
                 ProgressView().controlSize(.large)
-                Text("Connecting...")
-                    .font(.headline)
-                    .foregroundStyle(.white)
+                VStack(spacing: 6) {
+                    Text("Connecting...")
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                    Text("Stay in Clave for a few seconds")
+                        .font(.subheadline)
+                        .foregroundStyle(.white.opacity(0.85))
+                        .multilineTextAlignment(.center)
+                }
             }
             .padding(32)
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
@@ -99,18 +106,29 @@ struct ConnectSheet: View {
         let captured = uri
         let capturedPerms = permissions
         parsedURI = nil
-        Task {
+        Task { @MainActor in
+            // Extend foreground execution so the handshake survives the user
+            // swiping to the client app mid-flight. Critical window is the
+            // initial connect→ack→pair-client (~2-3s); after that NSE can
+            // service follow-up RPCs via the proxy's secondary subscription.
+            var bgTaskID: UIBackgroundTaskIdentifier = .invalid
+            bgTaskID = UIApplication.shared.beginBackgroundTask(withName: "nostrconnect-handshake") {
+                if bgTaskID != .invalid {
+                    UIApplication.shared.endBackgroundTask(bgTaskID)
+                    bgTaskID = .invalid
+                }
+            }
             do {
                 try await appState.handleNostrConnect(parsedURI: captured, permissions: capturedPerms)
-                await MainActor.run {
-                    isConnecting = false
-                    dismiss()
-                }
+                isConnecting = false
+                dismiss()
             } catch {
-                await MainActor.run {
-                    connectionError = error.localizedDescription
-                    isConnecting = false
-                }
+                connectionError = error.localizedDescription
+                isConnecting = false
+            }
+            if bgTaskID != .invalid {
+                UIApplication.shared.endBackgroundTask(bgTaskID)
+                bgTaskID = .invalid
             }
         }
     }

@@ -140,12 +140,20 @@ struct ConnectNostrconnectTabView: View {
     }
 
     private var pasteSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             Text("Or paste a URI")
                 .font(.caption)
                 .fontWeight(.semibold)
                 .foregroundStyle(.secondary)
                 .textCase(.uppercase)
+            Button {
+                pasteFromClipboard()
+            } label: {
+                Label("Paste Nostrconnect URI", systemImage: "doc.on.clipboard")
+                    .font(.subheadline.weight(.medium))
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
             TextField("nostrconnect://...", text: $pasteText)
                 .font(.system(.caption, design: .monospaced))
                 .textInputAutocapitalization(.never)
@@ -198,6 +206,16 @@ struct ConnectNostrconnectTabView: View {
         } catch {
             pasteError = "That doesn't look like a valid nostrconnect URI."
         }
+    }
+
+    private func pasteFromClipboard() {
+        guard let clipboard = UIPasteboard.general.string,
+              !clipboard.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            pasteError = "Clipboard is empty."
+            return
+        }
+        pasteText = clipboard
+        validateAndSubmit()
     }
 
     private func handleScannedCode(_ code: String) {

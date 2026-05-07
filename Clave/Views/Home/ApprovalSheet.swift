@@ -197,8 +197,14 @@ struct ApprovalSheet: View {
             .buttonStyle(.bordered)
             .frame(maxWidth: .infinity)
 
-            Button("Connect as @\(signingAsDisplayLabel)") {
+            Button {
                 buildAndApprove()
+            } label: {
+                Text("Connect as @\(signingAsDisplayLabel)")
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .minimumScaleFactor(0.7)
+                    .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
             .tint(.blue)
