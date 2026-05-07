@@ -1,24 +1,23 @@
 import XCTest
 @testable import Clave
 
-/// Task 5 of the multi-account sprint (`feat/multi-account`).
+/// AppState multi-account surface tests.
 ///
-/// Verifies the new AppState multi-account surface:
+/// Verifies:
 /// - `accounts` + `currentAccount` published state
 /// - Derived `signerPubkeyHex` and `profile` from currentAccount
 /// - `switchToAccount`, `addAccount`, `generateAccount`, `deleteAccount`,
 ///   `renamePetname`
-/// - `bootstrapFromLegacyKeychainIfNeeded` (one-shot legacy → new format)
-/// - `cleanupOrphanLegacyKeychainEntry` (defensive every-launch sweep)
+/// - `recoverAccountsFromKeychainIfNeeded` (reinstall recovery from
+///   iOS Storage settings UserDefaults wipe)
+/// - `cleanupOrphanLegacyKeychainEntry` (defensive every-launch sweep
+///   for build-31-era bootstrap orphans; sunset candidate)
 /// - Petname sanitization (audit 2026-04-30 finding A3)
 /// - `deleteAccount` ordering (audit finding A2)
 ///
 /// These tests focus on local state transitions (UserDefaults +
 /// Keychain). Proxy registration paths are NOT exercised — they're
 /// network calls verified by manual TestFlight testing.
-///
-/// Plan: ~/hq/clave/plans/2026-04-30-multi-account-sprint.md
-/// Security audit: ~/hq/clave/security-audits/2026-04-30-multi-account-pre-implementation.md
 final class AppStateMultiAccountTests: XCTestCase {
 
     // SECURITY (audit A4): generated test fixtures, never hardcoded
@@ -229,172 +228,6 @@ final class AppStateMultiAccountTests: XCTestCase {
                      "All-whitespace input should clear the petname, not leave empty string")
     }
 
-    // MARK: - Bootstrap (legacy → multi-account)
-
-    func testBootstrap_legacyKeychainEntryPresent_seedsAccountsKey() throws {
-        // Setup: legacy state — single nsec under fixed-account name + the
-        // legacy signerPubkeyHexKey set. accountsKey is NOT set.
-        try SharedKeychain.saveNsec(testNsecA)  // legacy fixed-account
-        SharedConstants.sharedDefaults.set(testPubkeyA, forKey: SharedConstants.signerPubkeyHexKey)
-        SharedConstants.sharedDefaults.removeObject(forKey: SharedConstants.accountsKey)
-        SharedConstants.sharedDefaults.removeObject(forKey: SharedConstants.currentSignerPubkeyHexKey)
-
-        // Trigger bootstrap by creating a fresh AppState + loadState.
-        let fresh = AppState()
-        fresh.loadState()
-
-        // accountsKey now populated with the legacy account
-        XCTAssertEqual(fresh.accounts.count, 1)
-        XCTAssertEqual(fresh.accounts.first?.pubkeyHex, testPubkeyA)
-        XCTAssertEqual(fresh.currentAccount?.pubkeyHex, testPubkeyA)
-        // New pubkey-keyed entry exists
-        XCTAssertNotNil(SharedKeychain.loadNsec(for: testPubkeyA))
-        // Legacy entry is GONE
-        XCTAssertNil(SharedKeychain.loadNsec(),
-                     "Legacy fixed-account Keychain entry must be deleted after bootstrap")
-        // currentSignerPubkeyHexKey persisted
-        XCTAssertEqual(
-            SharedConstants.sharedDefaults.string(forKey: SharedConstants.currentSignerPubkeyHexKey),
-            testPubkeyA
-        )
-    }
-
-    func testBootstrap_freshInstall_noLegacyState_isNoOp() {
-        // Setup: pristine — no Keychain, no UserDefaults entries
-        wipeAllState()
-
-        let fresh = AppState()
-        fresh.loadState()
-
-        XCTAssertEqual(fresh.accounts.count, 0)
-        XCTAssertNil(fresh.currentAccount)
-        XCTAssertEqual(fresh.signerPubkeyHex, "")
-    }
-
-    // MARK: - Defensive cleanup of orphan legacy entry
-
-    // MARK: - Bootstrap backfill of legacy records (Task 7 dependency)
-
-    func testBootstrap_backfillsSignerPubkeyHexOnLegacyRecords() throws {
-        // Setup: legacy state — single nsec under fixed-account name, the
-        // legacy signerPubkeyHexKey set, AND existing records with empty
-        // signerPubkeyHex (Task 3 default for missing wire-format key).
-        try SharedKeychain.saveNsec(testNsecA)  // legacy
-        SharedConstants.sharedDefaults.set(testPubkeyA, forKey: SharedConstants.signerPubkeyHexKey)
-        SharedConstants.sharedDefaults.removeObject(forKey: SharedConstants.accountsKey)
-
-        // Pre-bootstrap: stash records with empty signer (build-31 shape)
-        SharedStorage.logActivity(ActivityEntry(
-            id: "legacy-1", method: "sign_event", eventKind: 1,
-            clientPubkey: "client-1", timestamp: 1, status: "signed",
-            errorMessage: nil
-            // signerPubkeyHex defaulted to ""
-        ))
-        SharedStorage.queuePendingRequest(PendingRequest(
-            id: "legacy-pending-1", requestEventJSON: "{}", method: "sign_event",
-            eventKind: 1, clientPubkey: "client-1", timestamp: 1,
-            responseRelayUrl: nil
-        ))
-        SharedStorage.saveClientPermissions(ClientPermissions(
-            pubkey: "client-1", trustLevel: .full,
-            kindOverrides: [:], methodPermissions: [],
-            connectedAt: 0, lastSeen: 0, requestCount: 0
-        ))
-
-        // Pre-bootstrap sanity: no signer stamped
-        XCTAssertEqual(SharedStorage.getActivityLog().first?.signerPubkeyHex, "")
-        XCTAssertEqual(SharedStorage.getPendingRequests().first?.signerPubkeyHex, "")
-        XCTAssertEqual(SharedStorage.getClientPermissions().first?.signerPubkeyHex, "")
-
-        // Trigger bootstrap
-        let fresh = AppState()
-        fresh.loadState()
-
-        // Post-bootstrap: every legacy record has signerPubkeyHex stamped
-        XCTAssertEqual(SharedStorage.getActivityLog().first?.signerPubkeyHex, testPubkeyA,
-                       "ActivityEntry must be backfilled with the bootstrapped pubkey")
-        XCTAssertEqual(SharedStorage.getPendingRequests().first?.signerPubkeyHex, testPubkeyA,
-                       "PendingRequest must be backfilled")
-        XCTAssertEqual(SharedStorage.getClientPermissions().first?.signerPubkeyHex, testPubkeyA,
-                       "ClientPermissions must be backfilled")
-
-        // Filtered readers (Task 4) now find the records — Task 7 view
-        // reads will work post-bootstrap.
-        XCTAssertEqual(SharedStorage.getActivityLog(for: testPubkeyA).count, 1)
-        XCTAssertEqual(SharedStorage.getPendingRequests(for: testPubkeyA).count, 1)
-        XCTAssertEqual(SharedStorage.getClientPermissions(forSigner: testPubkeyA).count, 1)
-    }
-
-    // MARK: - Task 8: extended bootstrap + recovery + cross-version cleanup
-
-    func testBootstrap_migratesLegacyCachedProfile_intoAccountProfile() throws {
-        // Setup: legacy state + cached profile in UserDefaults
-        try SharedKeychain.saveNsec(testNsecA)
-        SharedConstants.sharedDefaults.set(testPubkeyA, forKey: SharedConstants.signerPubkeyHexKey)
-        SharedConstants.sharedDefaults.removeObject(forKey: SharedConstants.accountsKey)
-
-        let legacy = CachedProfile(displayName: "Old Name", pictureURL: "https://example.com/p.jpg", fetchedAt: 1000)
-        let data = try JSONEncoder().encode(legacy)
-        SharedConstants.sharedDefaults.set(data, forKey: SharedConstants.cachedProfileKey)
-
-        let fresh = AppState()
-        fresh.loadState()
-
-        XCTAssertEqual(fresh.currentAccount?.profile?.displayName, "Old Name",
-                       "Bootstrap must migrate cachedProfileKey into Account.profile")
-        XCTAssertNil(SharedConstants.sharedDefaults.data(forKey: SharedConstants.cachedProfileKey),
-                     "Legacy cachedProfileKey must be cleared after migration")
-    }
-
-    func testBootstrap_migratesLegacyBunkerSecret_intoPerSignerDict() throws {
-        try SharedKeychain.saveNsec(testNsecA)
-        SharedConstants.sharedDefaults.set(testPubkeyA, forKey: SharedConstants.signerPubkeyHexKey)
-        SharedConstants.sharedDefaults.removeObject(forKey: SharedConstants.accountsKey)
-        SharedConstants.sharedDefaults.set("legacysecret123", forKey: SharedConstants.bunkerSecretKey)
-
-        let fresh = AppState()
-        fresh.loadState()
-
-        XCTAssertEqual(SharedStorage.getBunkerSecret(for: testPubkeyA), "legacysecret123",
-                       "Per-signer dict must inherit the legacy bunker secret")
-        XCTAssertNil(SharedConstants.sharedDefaults.string(forKey: SharedConstants.bunkerSecretKey),
-                     "Legacy bunkerSecretKey must be cleared after migration")
-    }
-
-    func testBootstrap_migratesLegacyLastContactSet_intoPerSignerDict() throws {
-        try SharedKeychain.saveNsec(testNsecA)
-        SharedConstants.sharedDefaults.set(testPubkeyA, forKey: SharedConstants.signerPubkeyHexKey)
-        SharedConstants.sharedDefaults.removeObject(forKey: SharedConstants.accountsKey)
-
-        let legacyContacts = ["pub1", "pub2", "pub3"]
-        let data = try JSONEncoder().encode(legacyContacts)
-        SharedConstants.sharedDefaults.set(data, forKey: SharedConstants.lastContactSetKey)
-
-        let fresh = AppState()
-        fresh.loadState()
-
-        XCTAssertEqual(SharedStorage.getLastContactSet(for: testPubkeyA), Set(legacyContacts),
-                       "Per-signer dict must inherit the legacy contact set")
-        XCTAssertNil(SharedConstants.sharedDefaults.data(forKey: SharedConstants.lastContactSetKey),
-                     "Legacy lastContactSetKey must be cleared after migration")
-    }
-
-    func testBootstrap_migratesLegacyRegisterTimestamps() throws {
-        try SharedKeychain.saveNsec(testNsecA)
-        SharedConstants.sharedDefaults.set(testPubkeyA, forKey: SharedConstants.signerPubkeyHexKey)
-        SharedConstants.sharedDefaults.removeObject(forKey: SharedConstants.accountsKey)
-        SharedConstants.sharedDefaults.set(1234567890.0, forKey: SharedConstants.lastRegisterSucceededAtKey)
-        SharedConstants.sharedDefaults.set(1234567000.0, forKey: SharedConstants.lastRegisterFailedAtKey)
-
-        let fresh = AppState()
-        fresh.loadState()
-
-        XCTAssertEqual(SharedStorage.getLastRegisterSucceededAt(for: testPubkeyA), 1234567890.0)
-        XCTAssertEqual(SharedStorage.getLastRegisterFailedAt(for: testPubkeyA), 1234567000.0)
-        XCTAssertEqual(SharedConstants.sharedDefaults.double(forKey: SharedConstants.lastRegisterSucceededAtKey), 0.0)
-        XCTAssertEqual(SharedConstants.sharedDefaults.double(forKey: SharedConstants.lastRegisterFailedAtKey), 0.0)
-    }
-
     // MARK: - Reinstall recovery from Keychain
 
     func testReinstallRecovery_seedsAccountsFromKeychain() throws {
@@ -435,36 +268,6 @@ final class AppStateMultiAccountTests: XCTestCase {
         XCTAssertEqual(fresh.accounts.first?.petname, "Existing")
     }
 
-    // MARK: - Cross-version cleanup (Task 5 shipped without Task 8)
-
-    func testMigrateRemainingLegacyKeys_idempotentlyCleansUpAfterPriorBootstrap() throws {
-        // Simulate user who upgraded to Task 5 (which only did partial
-        // migration) and now upgrades to Task 8. Their accountsKey is
-        // populated but legacy keys still linger.
-        _ = try appState.addAccount(nsec: testNsecA, petname: nil)
-
-        // Plant legacy keys as if Task 5 had not migrated them
-        SharedConstants.sharedDefaults.set("oldsecret", forKey: SharedConstants.bunkerSecretKey)
-        let oldContacts = try JSONEncoder().encode(["x", "y"])
-        SharedConstants.sharedDefaults.set(oldContacts, forKey: SharedConstants.lastContactSetKey)
-        SharedConstants.sharedDefaults.set(99999.0, forKey: SharedConstants.lastRegisterSucceededAtKey)
-
-        // Reload — migrateRemainingLegacyKeysIfNeeded should clean them up
-        let fresh = AppState()
-        fresh.loadState()
-
-        XCTAssertNil(SharedConstants.sharedDefaults.string(forKey: SharedConstants.bunkerSecretKey),
-                     "Cross-version cleanup must remove legacy bunkerSecretKey")
-        XCTAssertNil(SharedConstants.sharedDefaults.data(forKey: SharedConstants.lastContactSetKey),
-                     "Cross-version cleanup must remove legacy lastContactSetKey")
-        XCTAssertEqual(SharedConstants.sharedDefaults.double(forKey: SharedConstants.lastRegisterSucceededAtKey), 0.0,
-                       "Cross-version cleanup must remove legacy lastRegisterSucceededAtKey")
-
-        // Verify the values were correctly migrated, not lost
-        XCTAssertEqual(SharedStorage.getBunkerSecret(for: testPubkeyA), "oldsecret")
-        XCTAssertEqual(SharedStorage.getLastContactSet(for: testPubkeyA), Set(["x", "y"]))
-        XCTAssertEqual(SharedStorage.getLastRegisterSucceededAt(for: testPubkeyA), 99999.0)
-    }
 
     func testCleanupOrphanLegacyKeychainEntry_idempotent() throws {
         // Setup: simulate the rare race where bootstrap saved the new

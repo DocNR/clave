@@ -353,44 +353,22 @@ final class AppState {
     }
 
     func loadState() {
-        // 1. One-shot bootstrap of build-31 single-account state into
-        //    multi-account format. After this runs, the legacy Keychain
-        //    entry is gone and the new pubkey-keyed entry exists. No-op
-        //    on subsequent launches.
-        bootstrapFromLegacyKeychainIfNeeded()
-
-        // 2. Hydrate the accounts list + currentAccount from UserDefaults.
+        // 1. Hydrate the accounts list + currentAccount from UserDefaults.
         loadAccounts()
 
-        // 3. Reinstall recovery: if accountsKey is STILL empty after
-        //    bootstrap (true fresh install OR a UserDefaults wipe via
-        //    iOS Storage settings) AND Keychain has pubkey-keyed
-        //    entries, reconstruct minimum Account records from
-        //    Keychain.
+        // 2. Reinstall recovery: if accountsKey is empty AND Keychain has
+        //    pubkey-keyed entries, reconstruct minimum Account records
+        //    from Keychain. Handles the rare iOS Storage-settings
+        //    UserDefaults wipe (Apple-documented) where Keychain persisted.
         recoverAccountsFromKeychainIfNeeded()
 
-        // 4. Defensive sweep — handles the rare race where bootstrap's
-        //    saveNsec(for:) succeeded but the legacy deleteNsec() failed
-        //    on a previous launch. Idempotent: usually a no-op.
+        // 3. Defensive sweep for any orphan legacy Keychain entry left
+        //    over from a build-31-era bootstrap that failed mid-flight.
+        //    Idempotent and a no-op for fresh installs and any user
+        //    already in current-format state.
         cleanupOrphanLegacyKeychainEntry()
 
-        // 5. Idempotent cleanup of any legacy UserDefaults keys that
-        //    bootstrap didn't catch (cross-version upgrade case where
-        //    Task 5 bootstrap shipped before Task 8's migration steps).
-        //    No-op when accountsKey is empty (fresh install) or when
-        //    legacy keys were already cleaned.
-        migrateRemainingLegacyKeysIfNeeded()
-
-        // 5b. Stamp any empty-signer rows with the current account's
-        //     pubkey when we're confidently in a single-account state.
-        //     Catches the build-32 bug where new ClientPermissions/
-        //     ConnectedClient/PendingRequest/PairOp rows were created
-        //     without `signerPubkeyHex` populated. Skipped when 2+
-        //     accounts exist — can't reliably guess which account a
-        //     row belongs to retroactively.
-        cleanupEmptySignerRowsIfSafe()
-
-        // 6. Load cached profile image from disk for the current account.
+        // 4. Load cached profile image from disk for the current account.
         loadCachedProfileImage()
 
         deviceToken = SharedConstants.sharedDefaults.string(forKey: SharedConstants.deviceTokenKey) ?? ""
@@ -406,170 +384,6 @@ final class AppState {
         if isKeyImported && !deviceToken.isEmpty {
             registerAllAccountsWithProxy()
         }
-    }
-
-    // MARK: - Multi-account loading + bootstrap (Task 5)
-
-    /// One-shot bootstrap: if accountsKey is empty AND a legacy
-    /// `kSecAttrAccount = "signer-nsec"` Keychain entry exists, copy the
-    /// nsec to the new pubkey-keyed entry, delete the legacy entry, and
-    /// seed accountsKey + currentSignerPubkeyHexKey. Build-31 testers
-    /// upgrade transparently with no re-import / no re-pair / no lost
-    /// nsec.
-    ///
-    /// SECURITY (audit 2026-04-30): scope-limited memory exposure of
-    /// `legacyNsec` String matches the existing importKey/loadState
-    /// pattern; not a regression. No log line interpolates `legacyNsec`
-    /// or any nsec-derived data — only the pubkey prefix.
-    private func bootstrapFromLegacyKeychainIfNeeded() {
-        let defaults = SharedConstants.sharedDefaults
-        guard defaults.data(forKey: SharedConstants.accountsKey) == nil else {
-            return  // Already in multi-account format; bootstrap not needed
-        }
-        guard let legacyNsec = SharedKeychain.loadNsec(),
-              let keys = try? Keys.parse(secretKey: legacyNsec) else {
-            return  // Fresh install; OnboardingView will show
-        }
-
-        let pubkeyHex = keys.publicKey().toHex()
-
-        // Copy to new pubkey-keyed slot BEFORE deleting legacy. If the
-        // save fails, leave legacy in place for retry on next launch
-        // (idempotent — the accountsKey guard above stays unmet).
-        do {
-            try SharedKeychain.saveNsec(legacyNsec, for: pubkeyHex)
-        } catch {
-            // Don't proceed; legacy entry preserved
-            return
-        }
-
-        // Delete legacy. Failure here means the orphan persists; the
-        // every-launch cleanup pass (cleanupOrphanLegacyKeychainEntry)
-        // catches it on next launch.
-        SharedKeychain.deleteNsec()
-
-        // Seed multi-account state. Migrate cached profile from the
-        // legacy `cachedProfileKey` (single global) into Account.profile.
-        let cachedProfile = legacyCachedProfile()
-        let account = Account(
-            pubkeyHex: pubkeyHex,
-            petname: nil,
-            addedAt: Date().timeIntervalSince1970,
-            profile: cachedProfile
-        )
-        persistAccountsList([account])
-        defaults.set(pubkeyHex, forKey: SharedConstants.currentSignerPubkeyHexKey)
-        // Keep legacy signerPubkeyHexKey in sync — still read by some
-        // callers during the transition. Cleanup is part of
-        // `migrateRemainingLegacyKeysIfNeeded` once we're confident
-        // nothing else reads it.
-        defaults.set(pubkeyHex, forKey: SharedConstants.signerPubkeyHexKey)
-
-        // Backfill signerPubkeyHex on every legacy record. Without this,
-        // post-Task-7 filtered view reads (e.g., `getActivityLog(for:
-        // signer)`) would return 0 rows for build-31 testers who upgrade
-        // — their existing records have signerPubkeyHex = "" (Task 3
-        // default for missing keys). All existing data belongs to the
-        // single migrated account, so stamp it with the migrated pubkey.
-        // Idempotent: rows with non-empty signerPubkeyHex are skipped.
-        backfillSignerPubkeyHex(for: pubkeyHex)
-
-        // Task 8: migrate the remaining legacy UserDefaults state into
-        // per-signer dicts and delete the legacy keys.
-        migrateLegacyUserDefaultsKeys(to: pubkeyHex)
-
-        // Task 8: rename the on-disk cached profile image to the
-        // per-pubkey filename so future loads find it.
-        migrateLegacyProfileImageFile(to: pubkeyHex)
-    }
-
-    /// Read the legacy `cachedProfileKey` UserDefaults value (single
-    /// global from build 31 era). Returns nil if absent. Caller is
-    /// responsible for clearing the legacy key after migration —
-    /// `migrateLegacyUserDefaultsKeys` does that.
-    private func legacyCachedProfile() -> CachedProfile? {
-        guard let data = SharedConstants.sharedDefaults.data(forKey: SharedConstants.cachedProfileKey),
-              let cached = try? JSONDecoder().decode(CachedProfile.self, from: data) else {
-            return nil
-        }
-        return cached
-    }
-
-    /// Move legacy single-global UserDefaults values into per-signer
-    /// dicts, then delete the legacy keys. Called from
-    /// `bootstrapFromLegacyKeychainIfNeeded` for the build-31-upgrade
-    /// case. Idempotent — `migrateRemainingLegacyKeysIfNeeded` handles
-    /// the cross-version upgrade case (Task 5 already shipped, Task 8
-    /// catching up).
-    private func migrateLegacyUserDefaultsKeys(to pubkeyHex: String) {
-        let defaults = SharedConstants.sharedDefaults
-
-        // bunkerSecretKey → bunkerSecretsKey[pubkey]. The
-        // getBunkerSecret(for:) helper in Task 4 has a defense-in-depth
-        // legacy-seed read; this explicit migration removes the legacy
-        // entry so subsequent reads go straight to the per-signer dict.
-        if let legacySecret = defaults.string(forKey: SharedConstants.bunkerSecretKey),
-           !legacySecret.isEmpty {
-            // Trigger a read which seeds the dict, then delete legacy.
-            _ = SharedStorage.getBunkerSecret(for: pubkeyHex)
-            defaults.removeObject(forKey: SharedConstants.bunkerSecretKey)
-        }
-
-        // lastContactSetKey → lastContactSetsKey[pubkey]. PR #19 wrote
-        // to lastContactSetKey; LightSigner Task 4 now writes to the
-        // per-signer dict via getLastContactSet(for:)/saveLastContactSet
-        // (_:for:). The legacy entry must be moved (not just deleted)
-        // because losing it would break kind:3 follow-diff summaries on
-        // the user's next sign — they'd see "Set contact list (N
-        // follows)" instead of "Followed @alice".
-        //
-        // The legacy storage shape is JSON-encoded `[String]` (sorted
-        // pubkey list). Decode inline here rather than expose a
-        // SharedStorage migration helper for one caller.
-        if let data = defaults.data(forKey: SharedConstants.lastContactSetKey),
-           let legacyContacts = try? JSONDecoder().decode([String].self, from: data) {
-            SharedStorage.saveLastContactSet(Set(legacyContacts), for: pubkeyHex)
-            defaults.removeObject(forKey: SharedConstants.lastContactSetKey)
-        }
-
-        // lastRegister*AtKey → lastRegisterTimes[pubkey][succeeded|failed]
-        let lastSuccess = defaults.double(forKey: SharedConstants.lastRegisterSucceededAtKey)
-        if lastSuccess > 0 {
-            SharedStorage.setLastRegisterSucceededAt(lastSuccess, for: pubkeyHex)
-            defaults.removeObject(forKey: SharedConstants.lastRegisterSucceededAtKey)
-        }
-        let lastFailure = defaults.double(forKey: SharedConstants.lastRegisterFailedAtKey)
-        if lastFailure > 0 {
-            SharedStorage.setLastRegisterFailedAt(lastFailure, for: pubkeyHex)
-            defaults.removeObject(forKey: SharedConstants.lastRegisterFailedAtKey)
-        }
-
-        // cachedProfileKey is consumed by `legacyCachedProfile()` above
-        // and seeded into Account.profile. Now safe to delete the
-        // legacy entry — Account.profile is the canonical source.
-        defaults.removeObject(forKey: SharedConstants.cachedProfileKey)
-
-        // pairedClientsKey is consumed by SharedStorage.migrateIfNeeded
-        // (the existing pre-V2 → ClientPermissions migration). Don't
-        // touch here — that migration runs separately.
-    }
-
-    /// Rename the on-disk cached profile image from the global
-    /// `profile_image.jpg` to the per-pubkey filename. Called from
-    /// bootstrap. Subsequent saves use `cachedImageURL(for:)` for the
-    /// per-pubkey path.
-    private func migrateLegacyProfileImageFile(to pubkeyHex: String) {
-        guard let container = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: SharedConstants.appGroup) else { return }
-        let legacyURL = container.appendingPathComponent("profile_image.jpg")
-        let perPubkeyURL = cachedImageURL(for: pubkeyHex)
-        guard FileManager.default.fileExists(atPath: legacyURL.path) else { return }
-        // If the per-pubkey file already exists, drop the legacy (already
-        // migrated by a previous launch).
-        if FileManager.default.fileExists(atPath: perPubkeyURL.path) {
-            try? FileManager.default.removeItem(at: legacyURL)
-            return
-        }
-        try? FileManager.default.moveItem(at: legacyURL, to: perPubkeyURL)
     }
 
     /// Reconstruct minimum Account records from Keychain when accountsKey
@@ -597,145 +411,6 @@ final class AppState {
         accounts = recovered
     }
 
-    /// Idempotent cleanup of legacy UserDefaults keys for the
-    /// cross-version upgrade case (Task 5 shipped without Task 8's
-    /// migration steps; this catches users who upgraded mid-stream).
-    /// Runs every launch when accountsKey is populated; no-op when
-    /// no legacy keys remain.
-    private func migrateRemainingLegacyKeysIfNeeded() {
-        guard !accounts.isEmpty,
-              let pubkey = currentAccount?.pubkeyHex else { return }
-        // Re-run the same migration helper. Each step is idempotent —
-        // missing legacy keys → no-op; present keys → migrate + delete.
-        migrateLegacyUserDefaultsKeys(to: pubkey)
-        migrateLegacyProfileImageFile(to: pubkey)
-    }
-
-    /// Stamp `signerPubkeyHex` on any empty-signer SharedStorage rows
-    /// using the current account's pubkey. Workaround for the build-32
-    /// regression where new ClientPermissions / ConnectedClient /
-    /// PendingRequest / PairOp / ActivityEntry rows were created
-    /// without `signerPubkeyHex` populated (Task 4/5/7 oversight; fixed
-    /// in build 33 by threading the signer through every construction
-    /// site).
-    ///
-    /// Skipped when 2+ accounts exist — can't reliably guess which
-    /// account an empty-signer row belongs to retroactively. Multi-
-    /// account users on build 32 will need to delete + re-pair the
-    /// affected client manually after upgrading to build 33+.
-    ///
-    /// Idempotent: rows already stamped are skipped by the underlying
-    /// `backfillSignerPubkeyHex` helper.
-    private func cleanupEmptySignerRowsIfSafe() {
-        guard accounts.count == 1, let pubkey = currentAccount?.pubkeyHex else { return }
-        backfillSignerPubkeyHex(for: pubkey)
-    }
-
-    /// Stamp `signerPubkeyHex` on every record with an empty signer field.
-    /// Called from `bootstrapFromLegacyKeychainIfNeeded` so build-31
-    /// testers' activity, pending, clients, and pair ops survive the
-    /// upgrade visible-to-the-UI. Idempotent — only writes back if any
-    /// row actually changed, avoiding spurious UserDefaults churn.
-    private func backfillSignerPubkeyHex(for pubkeyHex: String) {
-        let defaults = SharedConstants.sharedDefaults
-
-        // ActivityEntry
-        var activity = SharedStorage.getActivityLog()
-        var activityChanged = false
-        for i in activity.indices where activity[i].signerPubkeyHex.isEmpty {
-            activity[i] = ActivityEntry(
-                id: activity[i].id, method: activity[i].method,
-                eventKind: activity[i].eventKind, clientPubkey: activity[i].clientPubkey,
-                timestamp: activity[i].timestamp, status: activity[i].status,
-                errorMessage: activity[i].errorMessage,
-                signedEventId: activity[i].signedEventId,
-                signedSummary: activity[i].signedSummary,
-                signedReferencedEventId: activity[i].signedReferencedEventId,
-                signerPubkeyHex: pubkeyHex
-            )
-            activityChanged = true
-        }
-        if activityChanged, let data = try? JSONEncoder().encode(activity) {
-            defaults.set(data, forKey: SharedConstants.activityLogKey)
-        }
-
-        // PendingRequest
-        var pending = SharedStorage.getPendingRequests()
-        var pendingChanged = false
-        for i in pending.indices where pending[i].signerPubkeyHex.isEmpty {
-            pending[i] = PendingRequest(
-                id: pending[i].id, requestEventJSON: pending[i].requestEventJSON,
-                method: pending[i].method, eventKind: pending[i].eventKind,
-                clientPubkey: pending[i].clientPubkey, timestamp: pending[i].timestamp,
-                responseRelayUrl: pending[i].responseRelayUrl,
-                signerPubkeyHex: pubkeyHex
-            )
-            pendingChanged = true
-        }
-        if pendingChanged, let data = try? JSONEncoder().encode(pending) {
-            defaults.set(data, forKey: SharedConstants.pendingRequestsKey)
-        }
-
-        // ConnectedClient
-        var clients = SharedStorage.getConnectedClients()
-        var clientsChanged = false
-        for i in clients.indices where clients[i].signerPubkeyHex.isEmpty {
-            clients[i] = ConnectedClient(
-                pubkey: clients[i].pubkey, name: clients[i].name,
-                firstSeen: clients[i].firstSeen, lastSeen: clients[i].lastSeen,
-                requestCount: clients[i].requestCount,
-                relayUrls: clients[i].relayUrls,
-                signerPubkeyHex: pubkeyHex
-            )
-            clientsChanged = true
-        }
-        if clientsChanged, let data = try? JSONEncoder().encode(clients) {
-            defaults.set(data, forKey: SharedConstants.connectedClientsKey)
-        }
-
-        // ClientPermissions
-        var perms = SharedStorage.getClientPermissions()
-        var permsChanged = false
-        for i in perms.indices where perms[i].signerPubkeyHex.isEmpty {
-            perms[i] = ClientPermissions(
-                pubkey: perms[i].pubkey, trustLevel: perms[i].trustLevel,
-                kindOverrides: perms[i].kindOverrides,
-                methodPermissions: perms[i].methodPermissions,
-                name: perms[i].name, url: perms[i].url, imageURL: perms[i].imageURL,
-                connectedAt: perms[i].connectedAt, lastSeen: perms[i].lastSeen,
-                requestCount: perms[i].requestCount,
-                signerPubkeyHex: pubkeyHex
-            )
-            permsChanged = true
-        }
-        if permsChanged, let data = try? JSONEncoder().encode(perms) {
-            defaults.set(data, forKey: SharedConstants.clientPermissionsKey)
-        }
-
-        // PairOp
-        var ops = SharedStorage.getPendingPairOps()
-        var opsChanged = false
-        for i in ops.indices where ops[i].signerPubkeyHex.isEmpty {
-            ops[i] = PairOp(
-                id: ops[i].id, kind: ops[i].kind,
-                clientPubkey: ops[i].clientPubkey, relayUrls: ops[i].relayUrls,
-                createdAt: ops[i].createdAt, failCount: ops[i].failCount,
-                signerPubkeyHex: pubkeyHex
-            )
-            opsChanged = true
-        }
-        if opsChanged, let data = try? JSONEncoder().encode(ops) {
-            defaults.set(data, forKey: SharedConstants.pendingPairOpsKey)
-        }
-
-        if activityChanged || pendingChanged || clientsChanged || permsChanged || opsChanged {
-            // Don't log counts (could leak record-count side channels);
-            // just mark that backfill happened. Idempotent on next launch.
-            // Use a simple notice with no row data.
-            // (No logger.notice here — backfill is silent by design.)
-        }
-    }
-
     /// Hydrate `accounts` + `currentAccount` from UserDefaults.
     private func loadAccounts() {
         let defaults = SharedConstants.sharedDefaults
@@ -755,19 +430,23 @@ final class AppState {
     }
 
     /// Defensive: if accounts.count >= 1 AND the legacy fixed-account
-    /// Keychain entry still exists, the bootstrap's delete must have
-    /// failed previously. Retry the delete idempotently.
+    /// Keychain entry still exists, a prior build-31-era bootstrap's
+    /// delete must have failed. Retry the delete idempotently.
+    ///
+    /// Sunset candidate — the bootstrap that could create new orphans
+    /// was removed, so this only catches pre-existing orphans. Safe
+    /// to delete after a few build cycles confirm zero observed orphans
+    /// (or if telemetry shows the legacy keychain entry is consistently
+    /// absent across all installs).
     private func cleanupOrphanLegacyKeychainEntry() {
         guard !accounts.isEmpty,
               SharedKeychain.loadNsec() != nil else { return }
         SharedKeychain.deleteNsec()
     }
 
-    /// Replaces `loadCachedProfile()` — only loads the on-disk image cache
-    /// (profile metadata is now sourced from `currentAccount.profile`).
-    /// Profile image filename is per-pubkey (Task 8 will move existing
-    /// `profile_image.jpg` to per-pubkey naming); for now we read the
-    /// legacy file path which still works for the migrated single account.
+    /// Loads the on-disk image cache for the current account. Profile
+    /// metadata itself is sourced from `currentAccount.profile`. Image
+    /// filename is per-pubkey via the `cachedImageURL` computed property.
     private func loadCachedProfileImage() {
         if let imageData = try? Data(contentsOf: cachedImageURL),
            let image = UIImage(data: imageData) {
@@ -957,8 +636,8 @@ final class AppState {
         //    per-pubkey cache file. Without this, deleted accounts left
         //    `cached-profile-<pubkey>.dat` orphans on disk forever.
         try? FileManager.default.removeItem(at: cachedImageURL(for: pubkey))
-        // Legacy global file: only meaningful for users who never went through
-        // Task 8 migration. Keep the cleanup for hygiene.
+        // Defensive: also sweep any pre-multi-account `profile_image.jpg`
+        // orphan from the build-31 era. Idempotent no-op for fresh installs.
         let container = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: SharedConstants.appGroup)
         if let imageURL = container?.appendingPathComponent("profile_image.jpg") {
             try? FileManager.default.removeItem(at: imageURL)
@@ -1020,19 +699,13 @@ final class AppState {
         persistAccounts()
     }
 
-    // `loadCachedProfile()` and `saveCachedProfile(_:)` removed in Task 5.
-    // Profile metadata now lives inside `currentAccount.profile`
-    // (persisted via `persistAccounts()` → `accountsKey`). The legacy
-    // `cachedProfileKey` UserDefaults entry is no longer the source of
-    // truth; Task 8 will explicitly remove it as part of full migration.
-    // Profile image still loads from disk via `loadCachedProfileImage()`
-    // (called from loadState).
+    // Profile metadata lives inside `currentAccount.profile` (persisted
+    // via `persistAccounts()` → `accountsKey`). Profile image loads from
+    // disk via `loadCachedProfileImage()` (called from loadState).
 
     /// Per-pubkey on-disk profile image cache path. File extension is
     /// `.dat` (not `.jpg`) because we don't enforce the source
     /// content-type — the relay-fetched image could be PNG, WebP, etc.
-    /// Migrated from a single global `profile_image.jpg` in Task 8 via
-    /// `migrateLegacyProfileImageFile`.
     private func cachedImageURL(for pubkeyHex: String) -> URL {
         let container = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: SharedConstants.appGroup)!
         return container.appendingPathComponent("cached-profile-\(pubkeyHex).dat")
