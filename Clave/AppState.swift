@@ -198,6 +198,10 @@ final class AppState {
     /// switching active. Cleared after navigation fires.
     var pendingDetailPubkey: String?
 
+    // NostrConnect deeplink state. Set by handleDeeplink and consumed by
+    // handleNostrConnect — both live in `Clave/AppState+NostrConnect.swift`.
+    // These stay here because Swift forbids stored properties in extensions.
+
     /// Set when a nostrconnect:// deeplink arrives and the user has only one
     /// account (or after the user picks from DeeplinkAccountPicker). HomeView
     /// observes this to present ApprovalSheet.
@@ -472,25 +476,6 @@ final class AppState {
         // Legacy key write-through — read by ForegroundRelaySubscription.swift:354
         // until Task 6 updates that callsite.
         defaults.set(pk, forKey: SharedConstants.signerPubkeyHexKey)
-    }
-
-    // MARK: - Deeplink handling (Task 3.3)
-
-    /// Routes an incoming URL deeplink. Called from ClaveApp.onOpenURL via
-    /// a NotificationCenter post (Task 3.7 wires that up). Mutates
-    /// pendingNostrconnectURI or pendingDeeplinkAccountChoice based on
-    /// account count. clave:// and malformed URIs are silently ignored.
-    @MainActor
-    func handleDeeplink(url: URL) {
-        let outcome = DeeplinkRouter.route(url: url, accountCount: accounts.count)
-        switch outcome {
-        case .approve(let parsed):
-            pendingNostrconnectURI = parsed
-        case .pickAccount(let parsed):
-            pendingDeeplinkAccountChoice = parsed
-        case .ignore:
-            break
-        }
     }
 
     // MARK: - Multi-account methods (Task 5)
@@ -1222,155 +1207,6 @@ final class AppState {
         PendingApprovalBanner.clear(requestId: request.id)
     }
 
-    /// Perform the nostrconnect:// handshake across all relays listed in the URI.
-    /// Why multi-relay: the client (per NIP-46) subscribes on every relay in its URI;
-    /// if we publish to only one and that relay drops the ephemeral kind:24133,
-    /// the client never sees our response. Publishing to all is best-effort — we
-    /// don't fail if some relays reject or are unreachable, we just need at least one.
-    func handleNostrConnect(
-        parsedURI: NostrConnectParser.ParsedURI,
-        permissions: ClientPermissions,
-        boundAccountPubkey: String? = nil
-    ) async throws {
-        // boundAccountPubkey: when non-nil (deeplink path, user picked an account
-        // from the picker), use that account instead of currentAccount. Default nil
-        // falls back to currentAccount → signerPubkeyHex, preserving existing behavior
-        // for the ConnectSheet approval path where the user is acting on the active account.
-        let resolvedSignerPubkey = boundAccountPubkey ?? currentAccount?.pubkeyHex ?? signerPubkeyHex
-        guard !resolvedSignerPubkey.isEmpty,
-              let nsec = SharedKeychain.loadNsec(for: resolvedSignerPubkey) else {
-            throw ClaveError.noSignerKey
-        }
-        let privateKey = try Bech32.decodeNsec(nsec)
-        let signerPubkey = try LightEvent.pubkeyHex(from: privateKey)
-
-        // Save client permissions
-        SharedStorage.saveClientPermissions(permissions)
-
-        guard !parsedURI.relays.isEmpty else {
-            throw ClaveError.noRelay
-        }
-        guard let clientPubkeyData = Data(hexString: parsedURI.clientPubkey) else {
-            throw ClaveError.invalidPubkey
-        }
-
-        // Connect to every URI relay in parallel, best-effort.
-        let connectedRelays = await RelayUtils.connectToRelays(urls: parsedURI.relays, timeout: 10.0)
-        defer {
-            for relay in connectedRelays { relay.disconnect() }
-        }
-
-        // If zero relays connected, log the failure so the user sees it, then throw.
-        if connectedRelays.isEmpty {
-            let entry = ActivityEntry(
-                id: UUID().uuidString,
-                method: "connect",
-                eventKind: nil,
-                clientPubkey: parsedURI.clientPubkey,
-                timestamp: Date().timeIntervalSince1970,
-                status: "error",
-                errorMessage: "Could not connect to any relay",
-                signerPubkeyHex: signerPubkey
-            )
-            SharedStorage.logActivity(entry)
-            throw ClaveError.noRelay
-        }
-
-        // Publish connect response with retry — ephemeral events (kind 24133) aren't
-        // stored by relays, so the client must be subscribed at the moment we publish.
-        // Retry up to 3 times with 2s gaps. We keep listening for the full window so
-        // the client can finish its full RPC handshake (connect → get_public_key →
-        // switch_relays) before we disconnect.
-        var handshakeComplete = false
-        var activityLogged = false
-        var seenEventIds = Set<String>()
-
-        for _ in 1...3 {
-            // Build a fresh event each attempt (new created_at = new event ID)
-            let responseId = UUID().uuidString
-            let responseDict: [String: Any] = ["id": responseId, "result": parsedURI.secret]
-            guard let responseData = try? JSONSerialization.data(withJSONObject: responseDict),
-                  let responseJSON = String(data: responseData, encoding: .utf8) else {
-                continue
-            }
-            let freshEncrypted = try LightCrypto.nip44Encrypt(
-                privateKey: privateKey,
-                publicKey: clientPubkeyData,
-                plaintext: responseJSON
-            )
-            let connectEvent = try LightEvent.sign(
-                privateKey: privateKey,
-                kind: 24133,
-                content: freshEncrypted,
-                tags: [["p", parsedURI.clientPubkey]]
-            )
-
-            // Publish the connect response only until we see a reply. After that
-            // we keep listening without republishing — the client is already paired
-            // and we just need to service its follow-up RPCs (connect/ack,
-            // get_public_key, switch_relays). Breaking early used to disconnect
-            // before switch_relays could run, which stranded the client on the URI
-            // relays instead of migrating it to relay.powr.build.
-            if !handshakeComplete,
-               let eventData = connectEvent.toJSON().data(using: .utf8),
-               let eventDict = try? JSONSerialization.jsonObject(with: eventData) as? [String: Any] {
-                let acceptedCount = await RelayUtils.publishEventToRelays(connectedRelays, event: eventDict)
-
-                if !activityLogged {
-                    let success = acceptedCount > 0
-                    let entry = ActivityEntry(
-                        id: UUID().uuidString,
-                        method: "connect",
-                        eventKind: nil,
-                        clientPubkey: parsedURI.clientPubkey,
-                        timestamp: Date().timeIntervalSince1970,
-                        status: success ? "signed" : "error",
-                        errorMessage: success ? nil : "All relays rejected connect response",
-                        signerPubkeyHex: signerPubkey
-                    )
-                    SharedStorage.logActivity(entry)
-                    activityLogged = true
-
-                    // Tell the proxy about this pair so it opens secondary subs
-                    // on the URI relays. Best-effort — failures queue for retry
-                    // via SharedStorage.pendingPairOps.
-                    if success {
-                        pairClientWithProxy(
-                            clientPubkey: parsedURI.clientPubkey,
-                            relayUrls: parsedURI.relays,
-                            signer: signerPubkey
-                        )
-                    }
-                }
-            }
-
-            // Wait then check for client response across all connected relays.
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
-            let now = Int(Date().timeIntervalSince1970)
-            let listenFilter: [String: Any] = [
-                "kinds": [24133],
-                "#p": [signerPubkey],
-                "since": now - 10,
-                "limit": 10
-            ]
-            let events = await RelayUtils.fetchEventsFromRelays(connectedRelays, filter: listenFilter, timeout: 3.0)
-            for event in events {
-                guard let eventId = event["id"] as? String, seenEventIds.insert(eventId).inserted else { continue }
-                guard let pubkey = event["pubkey"] as? String,
-                      pubkey == parsedURI.clientPubkey else { continue }
-                let _ = try? await LightSigner.handleRequest(
-                    privateKey: privateKey,
-                    requestEvent: event,
-                    responseRelays: connectedRelays
-                )
-                handshakeComplete = true
-            }
-
-            // Do NOT break on handshakeComplete — keep listening so the client
-            // can finish its get_public_key + switch_relays RPC sequence. The
-            // retry cap (3 iterations) bounds the total wait at ~15s.
-        }
-    }
 
     /// Register the current account's pubkey/token mapping with the proxy.
     /// Thin wrapper around `registerSignerWithProxy(signer:)` for callers
