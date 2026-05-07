@@ -308,6 +308,105 @@ test("pong reply cancels pong-timeout", async () => {
   pool.shutdown();
 });
 
+test("evicts a relay that never reaches open after maxFailuresWithoutSuccess closes", async () => {
+  const factory = makeFactory();
+  const { createRelayPool } = require("../relayPool");
+  const pool = createRelayPool({
+    createSocket: factory,
+    signerPubkeysProvider: () => ["s1"],
+    reconnectInitialMs: 5,
+    reconnectMaxMs: 10,
+    maxFailuresWithoutSuccess: 3,
+  });
+  pool.addRelay("wss://dead");
+  // Three sequential closes WITHOUT any open in between — simulates a
+  // relay that returns 403/502 at the WS handshake every time.
+  factory.sockets[0].emit("close");
+  await new Promise((r) => setTimeout(r, 15));
+  factory.sockets[1].emit("close");
+  await new Promise((r) => setTimeout(r, 15));
+  factory.sockets[2].emit("close");
+  await new Promise((r) => setTimeout(r, 30));
+  const state = pool.getState("wss://dead");
+  assert.equal(state.evicted, true, "should be marked evicted");
+  assert.equal(state.failures, 3);
+  assert.equal(state.successfulOpens, 0);
+  // No further reconnect after eviction
+  const socketsAtEviction = factory.sockets.length;
+  await new Promise((r) => setTimeout(r, 30));
+  assert.equal(factory.sockets.length, socketsAtEviction, "no reconnect after eviction");
+});
+
+test("does NOT evict a relay that has reached open at least once, even with many failures", async () => {
+  const factory = makeFactory();
+  const { createRelayPool } = require("../relayPool");
+  const pool = createRelayPool({
+    createSocket: factory,
+    signerPubkeysProvider: () => ["s1"],
+    reconnectInitialMs: 5,
+    reconnectMaxMs: 10,
+    maxFailuresWithoutSuccess: 2,
+  });
+  pool.addRelay("wss://flaky");
+  factory.sockets[0]._openFromServer(); // one successful open
+  factory.sockets[0].emit("close");
+  await new Promise((r) => setTimeout(r, 15));
+  factory.sockets[1].emit("close"); // never opens
+  await new Promise((r) => setTimeout(r, 15));
+  factory.sockets[2].emit("close"); // never opens
+  await new Promise((r) => setTimeout(r, 30));
+  const state = pool.getState("wss://flaky");
+  assert.equal(state.evicted, false, "should NOT be evicted — had a successful open");
+  assert.ok(state.successfulOpens >= 1);
+});
+
+test("addRelay on evicted entry just bumps refCount, does not reopen", async () => {
+  const factory = makeFactory();
+  const { createRelayPool } = require("../relayPool");
+  const pool = createRelayPool({
+    createSocket: factory,
+    signerPubkeysProvider: () => ["s1"],
+    reconnectInitialMs: 5,
+    reconnectMaxMs: 10,
+    maxFailuresWithoutSuccess: 2,
+  });
+  pool.addRelay("wss://dead");
+  factory.sockets[0].emit("close");
+  await new Promise((r) => setTimeout(r, 15));
+  factory.sockets[1].emit("close");
+  await new Promise((r) => setTimeout(r, 30));
+  assert.equal(pool.getState("wss://dead").evicted, true);
+  const socketCountBefore = factory.sockets.length;
+  pool.addRelay("wss://dead"); // second pair tries to use same URL
+  assert.equal(pool.getState("wss://dead").refCount, 2);
+  assert.equal(factory.sockets.length, socketCountBefore, "no new socket for evicted URL");
+});
+
+test("releaseRelay on evicted entry decrements; entry is removed at refCount=0 (next addRelay retries from scratch)", async () => {
+  const factory = makeFactory();
+  const { createRelayPool } = require("../relayPool");
+  const pool = createRelayPool({
+    createSocket: factory,
+    signerPubkeysProvider: () => ["s1"],
+    reconnectInitialMs: 5,
+    reconnectMaxMs: 10,
+    maxFailuresWithoutSuccess: 2,
+  });
+  pool.addRelay("wss://dead");
+  factory.sockets[0].emit("close");
+  await new Promise((r) => setTimeout(r, 15));
+  factory.sockets[1].emit("close");
+  await new Promise((r) => setTimeout(r, 30));
+  assert.equal(pool.getState("wss://dead").evicted, true);
+  pool.releaseRelay("wss://dead");
+  assert.equal(pool.getState("wss://dead"), null, "evicted entry removed when refCount reaches 0");
+  // A fresh addRelay creates a brand-new entry that gives the relay another chance
+  pool.addRelay("wss://dead");
+  const fresh = pool.getState("wss://dead");
+  assert.equal(fresh.evicted, false, "new entry starts un-evicted");
+  assert.equal(fresh.failures, 0, "new entry starts with zero failures");
+});
+
 test("heartbeat stops on release", async () => {
   const factory = makeFactory();
   const { createRelayPool } = require("../relayPool");
