@@ -39,6 +39,16 @@ struct ConnectNostrconnectTabView: View {
     @State private var cameraAuthState: AVAuthorizationStatus = .notDetermined
     @State private var isScanning = true
     @State private var scanError: String?
+    /// Last QR code value we accepted via the scanner. The scanner auto-
+    /// resumes when ApprovalSheet dismisses (so the user can scan a
+    /// different QR after a mis-scan), but the same QR is almost always
+    /// still in frame and gets re-detected within ~1s, looping the user
+    /// back into ApprovalSheet they just dismissed. We dedup against this
+    /// value to break the loop. A different QR has a different code
+    /// (each nostrconnect URI carries a fresh secret) so legitimate
+    /// retries with a new code aren't blocked. Cleared when this view
+    /// re-mounts (i.e. ConnectSheet is reopened).
+    @State private var lastAcceptedScanCode: String?
 
     var body: some View {
         ScrollView {
@@ -240,9 +250,18 @@ struct ConnectNostrconnectTabView: View {
         // duplicate onParsed invocations.
         guard isScanning else { return }
         let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Dedup against the last accepted QR. After ApprovalSheet
+        // dismisses, parsedURI flips back to nil and the onChange above
+        // re-arms the scanner — but the QR is almost always still in
+        // frame, so without this guard the user gets bounced straight
+        // back into ApprovalSheet for the same URI they just cancelled.
+        // A new client URI has a new secret (and therefore a new code),
+        // so legitimate retries from a different source aren't blocked.
+        if trimmed == lastAcceptedScanCode { return }
         do {
             let parsed = try NostrConnectParser.parse(trimmed)
             isScanning = false
+            lastAcceptedScanCode = trimmed
             UINotificationFeedbackGenerator().notificationOccurred(.success)
             onParsed(parsed, .qrScan)
         } catch let error as NostrConnectParser.ParseError {
