@@ -1,6 +1,19 @@
 import SwiftUI
 import AVFoundation
 
+/// How a nostrconnect URI was acquired in the Connect flow. Drives the
+/// post-Approve "Connecting…" overlay copy: paste implies the client
+/// app is on the same device (user copied the URI here), so the user
+/// should switch back to it during the handshake; a QR scan implies
+/// the client is on another screen, so staying foregrounded in Clave
+/// is fine. Background: iOS suspends the client app's WebSocket
+/// subscription once it loses foreground, so a same-device user who
+/// follows "stay in Clave" advice never receives the connect-response.
+enum NostrConnectURISource {
+    case paste
+    case qrScan
+}
+
 /// Body of the "Nostrconnect" tab in ConnectSheet. Composes a live camera
 /// viewfinder + a paste field + a help link. The camera permission denial
 /// path renders an inline placeholder with an "Open Settings" link;
@@ -18,7 +31,7 @@ struct ConnectNostrconnectTabView: View {
     /// because .onAppear doesn't re-fire (the view never unmounts —
     /// the segmented control swaps body inline rather than pushing).
     let parsedURI: NostrConnectParser.ParsedURI?
-    let onParsed: (NostrConnectParser.ParsedURI) -> Void
+    let onParsed: (NostrConnectParser.ParsedURI, NostrConnectURISource) -> Void
 
     @State private var pasteText = ""
     @State private var pasteError: String?
@@ -26,6 +39,16 @@ struct ConnectNostrconnectTabView: View {
     @State private var cameraAuthState: AVAuthorizationStatus = .notDetermined
     @State private var isScanning = true
     @State private var scanError: String?
+    /// Last QR code value we accepted via the scanner. The scanner auto-
+    /// resumes when ApprovalSheet dismisses (so the user can scan a
+    /// different QR after a mis-scan), but the same QR is almost always
+    /// still in frame and gets re-detected within ~1s, looping the user
+    /// back into ApprovalSheet they just dismissed. We dedup against this
+    /// value to break the loop. A different QR has a different code
+    /// (each nostrconnect URI carries a fresh secret) so legitimate
+    /// retries with a new code aren't blocked. Cleared when this view
+    /// re-mounts (i.e. ConnectSheet is reopened).
+    @State private var lastAcceptedScanCode: String?
 
     var body: some View {
         ScrollView {
@@ -202,7 +225,7 @@ struct ConnectNostrconnectTabView: View {
         do {
             let parsed = try NostrConnectParser.parse(trimmed)
             pasteError = nil
-            onParsed(parsed)
+            onParsed(parsed, .paste)
         } catch {
             pasteError = "That doesn't look like a valid nostrconnect URI."
         }
@@ -227,11 +250,20 @@ struct ConnectNostrconnectTabView: View {
         // duplicate onParsed invocations.
         guard isScanning else { return }
         let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Dedup against the last accepted QR. After ApprovalSheet
+        // dismisses, parsedURI flips back to nil and the onChange above
+        // re-arms the scanner — but the QR is almost always still in
+        // frame, so without this guard the user gets bounced straight
+        // back into ApprovalSheet for the same URI they just cancelled.
+        // A new client URI has a new secret (and therefore a new code),
+        // so legitimate retries from a different source aren't blocked.
+        if trimmed == lastAcceptedScanCode { return }
         do {
             let parsed = try NostrConnectParser.parse(trimmed)
             isScanning = false
+            lastAcceptedScanCode = trimmed
             UINotificationFeedbackGenerator().notificationOccurred(.success)
-            onParsed(parsed)
+            onParsed(parsed, .qrScan)
         } catch let error as NostrConnectParser.ParseError {
             switch error {
             case .invalidScheme: scanError = "Not a Nostrconnect code"
