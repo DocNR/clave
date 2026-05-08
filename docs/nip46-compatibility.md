@@ -1,6 +1,6 @@
 # NIP-46 Client Compatibility (Clave)
 
-_Last updated: 2026-04-29 — statuses reflect Clave build 29 unless noted otherwise._
+_Last updated: 2026-05-07 — statuses reflect Clave build 29 unless noted otherwise. iOS same-device timing section verified on build 66._
 
 This document tracks how Nostr clients interoperate with Clave's NIP-46 signer. It is **Clave-centric**: every status row reflects what we have actually tested against Clave specifically. Other NIP-46 signers (Amber, nsec.app, etc.) may behave differently with the same client.
 
@@ -12,6 +12,70 @@ When a client doesn't work, we try to attribute the issue to one of four buckets
 - **spec-ambiguity** — the NIP-46 spec permits both behaviors and the two implementations chose differently.
 
 The triage guide below has more detail on how to tell these apart — and why "the bug isn't in our signer" is harder to prove than it sounds.
+
+Before the per-client matrix, see [iOS same-device pairing](#ios-same-device-pairing) below — for client and signer running on the same iOS device, prefer Clave's `bunker://` URI; same-device `nostrconnect://` hits a fundamental WebSocket suspension constraint.
+
+---
+
+## iOS same-device pairing
+
+**Recommendation: prefer Clave's `bunker://` URI for same-device pairing on iOS.** Same-device `nostrconnect://` hits a fundamental iOS WebSocket suspension constraint that no signer-side fix can route around — Clave's own background-task work in [PR #26](https://github.com/DocNR/clave/pull/26) (build 62) protects Clave's publish side, but the client app's receive side is its own problem and most iOS clients haven't solved it.
+
+For other configurations — cross-device pairing (Clave on iPhone; client on web, desktop, or Android), or non-iOS clients in general — `nostrconnect://` is fine and is often the better UX. The constraint below applies specifically when client and signer both run on the same iOS device.
+
+Verified on Clave build 66 against [noStrudel](https://nostrudel.ninja) and [Jumble](https://github.com/CodyTseng/jumble).
+
+### Why `bunker://` works on same-device iOS
+
+The bunker flow does not require the user to background the client app:
+
+1. User opens the client (foreground; WebSocket subscription alive).
+2. User pastes Clave's `bunker://` URI into the client (clipboard, Universal Link, or QR scan).
+3. Client publishes a `connect` RPC to `wss://relay.powr.build/` (the relay embedded in Clave's bunker URI).
+4. Clave's relay proxy catches the RPC on its primary subscription and wakes Clave's Notification Service Extension via APNs. Clave does not need to be in the foreground.
+5. Clave decrypts, prompts the user, and publishes the connect-response back to `relay.powr.build`.
+6. The client's still-foregrounded subscription receives the response.
+
+The wake-up across the system boundary is **Clave's problem**, and Clave solves it via its proxy + NSE architecture. The client app is never asked to survive being backgrounded.
+
+### Why `nostrconnect://` is brittle on same-device iOS
+
+The nostrconnect flow inverts the responsibility — wake-up becomes **the client's problem**. The user must paste the nostrconnect URI into Clave, which means switching apps mid-handshake:
+
+1. User opens client; client generates a `nostrconnect://` URI and opens a subscription on the URI's relays to await the connect-response.
+2. User copies the URI and switches to Clave (the client is now backgrounded).
+3. User pastes and approves in Clave; Clave publishes the connect-response.
+4. **The client's WebSocket subscription must be alive when the relay forwards the event** — otherwise the response is dropped.
+
+iOS does not cooperate with step 4. Within roughly 5–10 seconds of being backgrounded, an app's `URLSessionWebSocketTask` subscriptions are frozen. The app is still resident in memory but the subscription stops receiving relay traffic. APNs is bundle-ID-scoped, so Clave cannot push the client awake the way Clave is itself wakeable — there is no signer-side equivalent of the bunker flow's NSE wake.
+
+Two implementation details in `nostr-tools` (the library most iOS-relevant clients use) make the failure permanent rather than recoverable:
+
+- The handshake subscription uses `limit: 0` ([nip46.ts:201](https://github.com/nbd-wtf/nostr-tools/blob/v2.23.0/nip46.ts#L201)), telling the relay "no stored events" — only events forwarded *after* the subscription was opened are delivered. If the WebSocket is frozen during the connect-response forward and later resumes, the event is gone; the relay will not replay it.
+- If iOS terminates the WebSocket entirely (deeper background or memory pressure), the subscription's `onclose` rejects with `subscription closed before connection was established` ([nip46.ts:230-232](https://github.com/nbd-wtf/nostr-tools/blob/v2.23.0/nip46.ts#L230-L232)) — well before the library's 5-minute `maxWait` timer.
+
+End result: the user lands back in the client expecting pairing to have completed, and instead sees either a stalled spinner (up to 5 minutes) or an opaque close error.
+
+### If you must support `nostrconnect://` on iOS same-device
+
+These mitigations help but none fully closes the gap:
+
+- **Wrap your handshake subscription in `UIApplication.beginBackgroundTask(withName:expirationHandler:)`** — buys ~30 seconds of guaranteed background runtime, mirroring Clave's own publish-side fix. Addresses the fast-suspension case but not extended trips into Clave or backgrounding under memory pressure.
+- **Re-subscribe with a `since` cursor on `scenePhase` foreground transitions** rather than `limit: 0`, so the relay replays any matching event published while you were suspended. Works only if the relay retains recent events for replay — strfry-based relays do; others may not.
+- **Surface UI guidance to the user**: "Return to <client> after approving in Clave." Combined with Clave's "Stay in Clave for a few seconds" overlay (build 62+), the user understands the handshake window has two ends and either side can lose it.
+- **Test same-device pairing as a first-class scenario**, not as an edge case. Cross-device flows (Clave on iPhone, client on web/desktop) do not exhibit this constraint and won't surface it during development.
+
+---
+
+## Improving post-pair delivery reliability for Clave-paired clients
+
+Independent of the pairing-mode discussion above, and applicable to all clients regardless of platform: clients can substantially improve their wake-up reliability for Clave by including `wss://relay.powr.build/` in their `nostrconnect://` URI's `relay=` parameters.
+
+Why: Clave's relay proxy (`proxy.clave.casa`) maintains a persistent **primary subscription** on `relay.powr.build`, narrow-filtered by `#p` to paired Clave signer pubkeys. Any kind:24133 event addressed to a paired Clave signer on that relay is caught by the proxy and delivered via APNs to wake Clave's Notification Service Extension — regardless of whether Clave is in the foreground.
+
+When the client publishes a `sign_event` RPC to `relay.powr.build`, the proxy catches it on the primary subscription immediately. No dependency on the proxy's secondary-relay pool being warmed up for whichever relay the client picked; no waiting on Clave's own foreground subscription. Clave's `bunker://` URIs already embed `relay.powr.build` for exactly this reason — and the proxy primary-sub catch is part of why bunker pairings tend to be more reliable than nostrconnect, not just on iOS.
+
+Note: this benefits the **client → Clave** direction (delivery to Clave). It does not change the **Clave → client** direction (delivery of signed responses back to the client), which is still subject to whatever the client's own subscription does. In particular, it does not mitigate the iOS handshake-window issue described above — that's a different problem on the other side of the channel.
 
 ---
 
@@ -269,6 +333,7 @@ Open a PR that:
 
 | Date | Change |
 |---|---|
+| 2026-05-07 | Added "iOS same-device pairing" section (recommends `bunker://` for same-device iOS, explains the nostrconnect WebSocket suspension constraint). Added "Improving post-pair delivery reliability for Clave-paired clients" section (recommends `wss://relay.powr.build/` in nostrconnect URI relay sets for client→Clave wake-up). Clave-side handshake protection in [PR #26](https://github.com/DocNR/clave/pull/26) / build 62; verified on build 66 against [noStrudel](https://nostrudel.ninja) and [Jumble](https://github.com/CodyTseng/jumble). |
 | 2026-04-29 | Initial publication. Build 29. |
 
 ---

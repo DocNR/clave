@@ -19,6 +19,11 @@ struct ConnectSheet: View {
 
     @State private var selectedTab: Tab = .bunker
     @State private var parsedURI: NostrConnectParser.ParsedURI?
+    /// Source of the most recent parsed URI. Drives the "Connecting…"
+    /// overlay copy — paste implies same-device pairing (switch back to
+    /// the client app), QR implies cross-device (stay in Clave). Default
+    /// is overwritten by handleParsed before isConnecting ever flips.
+    @State private var lastParsedSource: NostrConnectURISource = .paste
     @State private var isConnecting = false
     @State private var connectionError: String?
 
@@ -76,7 +81,20 @@ struct ConnectSheet: View {
     }
 
     private var connectingOverlay: some View {
-        ZStack {
+        // Same-device (paste): the client app is on this device but iOS
+        // suspends its WebSocket subscription as soon as it loses
+        // foreground, so the user must switch back to it for the client
+        // to receive Clave's connect-response. UIBackgroundTask in
+        // submitApproval keeps Clave running for the ~15s handshake
+        // window. Cross-device (QR): there's no client app to return to
+        // on this device, so the original "stay in Clave" copy applies.
+        let subtitle: String = switch lastParsedSource {
+        case .paste:
+            "Switch back to your client app to finish connecting. Clave keeps running in the background."
+        case .qrScan:
+            "Stay in Clave for a few seconds"
+        }
+        return ZStack {
             Color.black.opacity(0.4).ignoresSafeArea()
             VStack(spacing: 16) {
                 ProgressView().controlSize(.large)
@@ -84,7 +102,7 @@ struct ConnectSheet: View {
                     Text("Connecting...")
                         .font(.headline)
                         .foregroundStyle(.white)
-                    Text("Stay in Clave for a few seconds")
+                    Text(subtitle)
                         .font(.subheadline)
                         .foregroundStyle(.white.opacity(0.85))
                         .multilineTextAlignment(.center)
@@ -95,8 +113,9 @@ struct ConnectSheet: View {
         }
     }
 
-    private func handleParsed(_ uri: NostrConnectParser.ParsedURI) {
+    private func handleParsed(_ uri: NostrConnectParser.ParsedURI, source: NostrConnectURISource) {
         parsedURI = uri
+        lastParsedSource = source
     }
 
     private func submitApproval(uri: NostrConnectParser.ParsedURI,

@@ -1,6 +1,19 @@
 import SwiftUI
 import AVFoundation
 
+/// How a nostrconnect URI was acquired in the Connect flow. Drives the
+/// post-Approve "Connecting…" overlay copy: paste implies the client
+/// app is on the same device (user copied the URI here), so the user
+/// should switch back to it during the handshake; a QR scan implies
+/// the client is on another screen, so staying foregrounded in Clave
+/// is fine. Background: iOS suspends the client app's WebSocket
+/// subscription once it loses foreground, so a same-device user who
+/// follows "stay in Clave" advice never receives the connect-response.
+enum NostrConnectURISource {
+    case paste
+    case qrScan
+}
+
 /// Body of the "Nostrconnect" tab in ConnectSheet. Composes a live camera
 /// viewfinder + a paste field + a help link. The camera permission denial
 /// path renders an inline placeholder with an "Open Settings" link;
@@ -18,7 +31,7 @@ struct ConnectNostrconnectTabView: View {
     /// because .onAppear doesn't re-fire (the view never unmounts —
     /// the segmented control swaps body inline rather than pushing).
     let parsedURI: NostrConnectParser.ParsedURI?
-    let onParsed: (NostrConnectParser.ParsedURI) -> Void
+    let onParsed: (NostrConnectParser.ParsedURI, NostrConnectURISource) -> Void
 
     @State private var pasteText = ""
     @State private var pasteError: String?
@@ -202,7 +215,7 @@ struct ConnectNostrconnectTabView: View {
         do {
             let parsed = try NostrConnectParser.parse(trimmed)
             pasteError = nil
-            onParsed(parsed)
+            onParsed(parsed, .paste)
         } catch {
             pasteError = "That doesn't look like a valid nostrconnect URI."
         }
@@ -231,7 +244,7 @@ struct ConnectNostrconnectTabView: View {
             let parsed = try NostrConnectParser.parse(trimmed)
             isScanning = false
             UINotificationFeedbackGenerator().notificationOccurred(.success)
-            onParsed(parsed)
+            onParsed(parsed, .qrScan)
         } catch let error as NostrConnectParser.ParseError {
             switch error {
             case .invalidScheme: scanError = "Not a Nostrconnect code"
