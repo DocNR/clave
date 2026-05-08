@@ -56,6 +56,8 @@ Two implementation details in `nostr-tools` (the library most iOS-relevant clien
 
 End result: the user lands back in the client expecting pairing to have completed, and instead sees either a stalled spinner (up to 5 minutes) or an opaque close error.
 
+Routing the URI through Clave's Universal Link form (`https://clave.casa/connect/?uri=...`) does not change this. iOS backgrounds the source app of a Universal Link tap the same way it backgrounds any app-switch — no extra runtime is granted to the listener. The Universal Link form is worth supporting for UX and to avoid `nostrconnect://` scheme-squatting from other apps that register the scheme, but it does not extend the listener's WebSocket lifetime.
+
 ### If you must support `nostrconnect://` on iOS same-device
 
 These mitigations help but none fully closes the gap:
