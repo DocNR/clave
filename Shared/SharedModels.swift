@@ -284,16 +284,11 @@ struct CachedProfile: Codable, Equatable {
 struct Account: Codable, Identifiable, Equatable {
     var id: String { pubkeyHex }
 
-    /// Hex-encoded 32-byte secp256k1 public key. Stable across petname
-    /// renames + profile refreshes; used as the kSecAttrAccount for the
-    /// account's Keychain entry, and as the foreign key on every
-    /// per-account SharedStorage record.
+    /// Hex-encoded 32-byte secp256k1 public key. Stable across profile
+    /// refreshes; used as the kSecAttrAccount for the account's Keychain
+    /// entry, and as the foreign key on every per-account SharedStorage
+    /// record.
     let pubkeyHex: String
-
-    /// User-supplied label, optional. Preferred display name when set.
-    /// Sanitized at write time (trimmed, newlines stripped, capped at 64
-    /// chars) — see `AppState.renamePetname` (Task 5).
-    var petname: String?
 
     /// `Date.timeIntervalSince1970` of when this account was added on
     /// this device. Used for "Added on …" rows in account detail views.
@@ -307,12 +302,10 @@ struct Account: Codable, Identifiable, Equatable {
 
     init(
         pubkeyHex: String,
-        petname: String? = nil,
         addedAt: Double,
         profile: CachedProfile? = nil
     ) {
         self.pubkeyHex = pubkeyHex
-        self.petname = petname
         self.addedAt = addedAt
         self.profile = profile
     }
@@ -320,10 +313,6 @@ struct Account: Codable, Identifiable, Equatable {
 
 extension Account {
     /// Resolution order: kind:0 displayName → kind:0 name → 8-char npub prefix.
-    /// Petname (legacy editable nickname) is intentionally NOT consulted —
-    /// kind:0 is now the source of truth for account identity. The
-    /// `petname` field on Account remains for on-disk backward compat
-    /// but UI ignores it as of build 46.
     var displayLabel: String {
         if let d = profile?.displayName, !d.isEmpty { return d }
         if let n = profile?.name, !n.isEmpty { return n }

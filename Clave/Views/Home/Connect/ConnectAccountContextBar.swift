@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// Small "Connecting to @petname" bar shown at the top of each focused
+/// Small "Connecting to @<account>" bar shown at the top of each focused
 /// connect view (Show QR / Scan / Paste). Mini themed dot matches the
-/// active account's AccountTheme; reads displayLabel for the petname.
+/// active account's AccountTheme; reads displayLabel for the label.
 ///
 /// Per design-system.md treatment C — sits in the identity zone with
 /// theme-derived accent. Never tappable.

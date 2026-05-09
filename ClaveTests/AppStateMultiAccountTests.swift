@@ -6,13 +6,11 @@ import XCTest
 /// Verifies:
 /// - `accounts` + `currentAccount` published state
 /// - Derived `signerPubkeyHex` and `profile` from currentAccount
-/// - `switchToAccount`, `addAccount`, `generateAccount`, `deleteAccount`,
-///   `renamePetname`
+/// - `switchToAccount`, `addAccount`, `generateAccount`, `deleteAccount`
 /// - `recoverAccountsFromKeychainIfNeeded` (reinstall recovery from
 ///   iOS Storage settings UserDefaults wipe)
 /// - `cleanupOrphanLegacyKeychainEntry` (defensive every-launch sweep
 ///   for build-31-era bootstrap orphans; sunset candidate)
-/// - Petname sanitization (audit 2026-04-30 finding A3)
 /// - `deleteAccount` ordering (audit finding A2)
 ///
 /// These tests focus on local state transitions (UserDefaults +
@@ -87,22 +85,21 @@ final class AppStateMultiAccountTests: XCTestCase {
         XCTAssertEqual(appState.signerPubkeyHex, "")
         XCTAssertFalse(appState.isKeyImported)
 
-        _ = try appState.addAccount(nsec: testNsecA, petname: nil)
+        _ = try appState.addAccount(nsec: testNsecA)
         XCTAssertEqual(appState.signerPubkeyHex, testPubkeyA)
         XCTAssertTrue(appState.isKeyImported)
     }
 
     func testProfile_derivedFromCurrentAccount() throws {
-        _ = try appState.addAccount(nsec: testNsecA, petname: nil)
+        _ = try appState.addAccount(nsec: testNsecA)
         XCTAssertNil(appState.profile)  // No fetch yet
     }
 
     // MARK: - addAccount
 
     func testAddAccount_appendsToList_andSetsAsCurrent() throws {
-        let result = try appState.addAccount(nsec: testNsecA, petname: "Work")
+        let result = try appState.addAccount(nsec: testNsecA)
         XCTAssertEqual(result.pubkeyHex, testPubkeyA)
-        XCTAssertEqual(result.petname, "Work")
         XCTAssertEqual(appState.accounts.count, 1)
         XCTAssertEqual(appState.currentAccount?.pubkeyHex, testPubkeyA)
         // Keychain entry written
@@ -110,15 +107,15 @@ final class AppStateMultiAccountTests: XCTestCase {
     }
 
     func testAddAccount_duplicateNsec_switchesToExisting() throws {
-        _ = try appState.addAccount(nsec: testNsecA, petname: "First")
-        _ = try appState.addAccount(nsec: testNsecB, petname: "Second")
+        let firstAddedAt = try appState.addAccount(nsec: testNsecA).addedAt
+        _ = try appState.addAccount(nsec: testNsecB)
         // currentAccount is now testPubkeyB
         XCTAssertEqual(appState.currentAccount?.pubkeyHex, testPubkeyB)
 
         // Re-add the first nsec — should switch back, not duplicate
-        let result = try appState.addAccount(nsec: testNsecA, petname: "Should be ignored")
+        let result = try appState.addAccount(nsec: testNsecA)
         XCTAssertEqual(result.pubkeyHex, testPubkeyA)
-        XCTAssertEqual(result.petname, "First", "Existing petname must not be overwritten by re-add")
+        XCTAssertEqual(result.addedAt, firstAddedAt, "Re-add must return the existing row, not a fresh one")
         XCTAssertEqual(appState.accounts.count, 2, "Re-add must not duplicate the row")
         XCTAssertEqual(appState.currentAccount?.pubkeyHex, testPubkeyA, "Re-add must switch to existing")
     }
@@ -199,34 +196,6 @@ final class AppStateMultiAccountTests: XCTestCase {
         XCTAssertEqual(appState.accounts.count, 0)
     }
 
-    // MARK: - renamePetname (audit A3 sanitization)
-
-    func testRenamePetname_persistsAndUpdatesCurrent() throws {
-        _ = try appState.addAccount(nsec: testNsecA, petname: "Old")
-        appState.renamePetname(for: testPubkeyA, to: "New")
-        XCTAssertEqual(appState.currentAccount?.petname, "New")
-        XCTAssertEqual(appState.accounts.first?.petname, "New")
-    }
-
-    func testRenamePetname_sanitizesInput_audit_A3() throws {
-        _ = try appState.addAccount(nsec: testNsecA)
-        // Whitespace + newlines + super long
-        let dirty = "  \n  Hello\nWorld\(String(repeating: "X", count: 200))\n  "
-        appState.renamePetname(for: testPubkeyA, to: dirty)
-        let result = appState.currentAccount?.petname
-        XCTAssertNotNil(result)
-        XCTAssertFalse(result!.contains("\n"), "Newlines must be stripped")
-        XCTAssertFalse(result!.hasPrefix(" "), "Leading whitespace must be trimmed")
-        XCTAssertFalse(result!.hasSuffix(" "), "Trailing whitespace must be trimmed")
-        XCTAssertLessThanOrEqual(result!.count, 64, "Length must be capped at 64 chars")
-    }
-
-    func testRenamePetname_emptyAfterSanitization_setsNilNotEmptyString() throws {
-        _ = try appState.addAccount(nsec: testNsecA, petname: "Initial")
-        appState.renamePetname(for: testPubkeyA, to: "   \n\n   ")
-        XCTAssertNil(appState.currentAccount?.petname,
-                     "All-whitespace input should clear the petname, not leave empty string")
-    }
 
     // MARK: - Reinstall recovery from Keychain
 
@@ -254,7 +223,7 @@ final class AppStateMultiAccountTests: XCTestCase {
 
     func testReinstallRecovery_doesNotRunWhenAccountsKeyAlreadyPopulated() throws {
         // Setup: normal state with accountsKey already set (no recovery needed)
-        _ = try appState.addAccount(nsec: testNsecA, petname: "Existing")
+        _ = try appState.addAccount(nsec: testNsecA)
 
         // Now plant a Keychain entry that's NOT in accountsKey — recovery
         // would pick it up if it ran. Verify recovery doesn't run.
@@ -265,7 +234,7 @@ final class AppStateMultiAccountTests: XCTestCase {
 
         // Only the original account is in the list — recovery did NOT run
         XCTAssertEqual(fresh.accounts.count, 1, "Recovery must skip when accountsKey is already populated")
-        XCTAssertEqual(fresh.accounts.first?.petname, "Existing")
+        XCTAssertEqual(fresh.accounts.first?.pubkeyHex, testPubkeyA, "Original account preserved; recovery did not add testPubkeyB")
     }
 
 
