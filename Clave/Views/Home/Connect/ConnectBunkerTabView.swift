@@ -16,6 +16,7 @@ struct ConnectBunkerTabView: View {
     @Environment(AppState.self) private var appState
     @State private var showQR = false
     @State private var copiedBunker = false
+    @State private var showCapAlert = false
 
 
     private func copyBunkerURI() {
@@ -26,6 +27,19 @@ struct ConnectBunkerTabView: View {
         copiedBunker = true
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { copiedBunker = false }
+    }
+
+    /// Live count of paired clients for the current signer. HomeView already
+    /// gates ConnectSheet from opening at cap; this in-sheet check covers the
+    /// case where the user enters the sheet under cap, then rotates "New
+    /// Secret" past it during a single session — the @State `clients` array
+    /// on HomeView is captured at sheet-open and won't refresh until dismiss,
+    /// so a cap-aware decision needs a live SharedStorage read here.
+    /// `bunkerSecretsTick` observation forces re-evaluation after each rotate.
+    private var isAtPairingCap: Bool {
+        let _ = appState.bunkerSecretsTick
+        let signer = appState.currentAccount?.pubkeyHex ?? ""
+        return SharedStorage.getConnectedClients(for: signer).count >= Account.maxClientsPerAccount
     }
 
     var body: some View {
@@ -63,6 +77,11 @@ struct ConnectBunkerTabView: View {
             }
             .sheet(isPresented: $showQR) {
                 QRCodeView(content: appState.bunkerURI)
+            }
+            .alert("Connection limit reached", isPresented: $showCapAlert) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("You've reached the \(Account.maxClientsPerAccount)-client cap on this account. Unpair a client in Settings → Clients to pair a new one.")
             }
         }
     }
@@ -135,8 +154,13 @@ struct ConnectBunkerTabView: View {
             .tint(copiedBunker ? .green : theme.accent)
 
             Button {
-                appState.rotateBunkerSecret()
-                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                if isAtPairingCap {
+                    showCapAlert = true
+                    UINotificationFeedbackGenerator().notificationOccurred(.warning)
+                } else {
+                    appState.rotateBunkerSecret()
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                }
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "arrow.clockwise")
