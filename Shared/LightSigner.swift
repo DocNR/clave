@@ -207,7 +207,26 @@ enum LightSigner {
                         signerPubkeyHex: signerPubkey
                     )
                     SharedStorage.saveClientPermissions(perms)
-                    logger.notice("[LightSigner] New client paired with valid secret")
+                    // Sprint 5a fix: also create the ConnectedClient row at
+                    // pair-time so the next bunker connect's cap-check at
+                    // line 175-176 sees this client. Pre-fix, the row was
+                    // created lazily by SharedStorage.updateClient on the
+                    // first signing request, so multiple bunker pairs could
+                    // land between connect and first sign without any of
+                    // them counting toward the 5-cap (field-tested 7-pair
+                    // bypass on build 63).
+                    //
+                    // Mirrors AppState.bunkerURI(for:) — bunker URI is
+                    // currently single-relay (SharedConstants.relayURL).
+                    // When multi-relay bunker URIs land (BACKLOG: "Multi-
+                    // relay bunker URI"), update this to match the URI
+                    // generator's relay set.
+                    SharedStorage.setClientRelayUrls(
+                        pubkey: senderPubkey,
+                        relayUrls: [SharedConstants.relayURL],
+                        signer: signerPubkey
+                    )
+                    logger.notice("[LightSigner] New client paired with valid secret (row created, relay=\(SharedConstants.relayURL, privacy: .public))")
                 } else {
                     logger.notice("[LightSigner] Existing client re-paired with valid secret")
                 }
