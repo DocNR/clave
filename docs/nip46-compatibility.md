@@ -1,6 +1,6 @@
 # NIP-46 Client Compatibility (Clave)
 
-_Last updated: 2026-05-07 — statuses reflect Clave build 29 unless noted otherwise. iOS same-device timing section verified on build 66._
+_Last updated: 2026-05-09 — added stacker.news + the NDK 2.x/3.x bunker:// connect handshake findings. Statuses reflect Clave build 29 unless noted otherwise. iOS same-device timing section verified on build 66._
 
 This document tracks how Nostr clients interoperate with Clave's NIP-46 signer. It is **Clave-centric**: every status row reflects what we have actually tested against Clave specifically. Other NIP-46 signers (Amber, nsec.app, etc.) may behave differently with the same client.
 
@@ -92,6 +92,7 @@ Note: this benefits the **client → Clave** direction (delivery to Clave). It d
 | [zap.cooking](https://zap.cooking) | Web | custom wrapper over NDK | bunker | ⚠️ Partial — see [notes](#zapcooking) | client-side |
 | [plebs vs. zombies](https://plebsvszombies.cc) | Web | nostr-tools (old, ~2.17) | bunker | ⚠️ Partial — see [notes](#plebs-vs-zombies) | library-shared (old nostr-tools) |
 | [YakiHonne](https://yakihonne.com) | Web (+ mobile?) | NDK | bunker, nostrconnect | ⚠️ Partial — see [notes](#yakihonne) | unknown |
+| [stacker.news](https://stacker.news) | Web | NDK 2.12.2 | bunker, NIP-05 | ⚠️ Partial — see [notes](#stackernews) | library-shared (NDK) |
 | [Primal](https://primal.net) | Web / iOS / Android | nostr-tools (recent, inferred) | bunker, nostrconnect | ❓ Untested end-to-end | — |
 | [Snort](https://snort.social) | Web | nostr-tools (inferred) | bunker, nostrconnect | ❓ Untested end-to-end | — |
 | [Amethyst](https://github.com/vitorpamplona/amethyst) | Android | (Amber-shaped, inferred) | bunker | ❓ Untested with Clave | — |
@@ -172,15 +173,43 @@ There's also a separate concern: the wrapper swallows decrypt failures silently 
 
 ---
 
+### stacker.news
+
+**Symptom:** NIP-46 bunker login hangs forever on the "Waiting for authorization" spinner when paired with a Clave bunker URI. The browser console shows a `TypeError: Cannot read properties of undefined (reading 'message')` originating from `setError(e)` after `blockUntilReady` rejects with `undefined`.
+
+**Investigation:** stacker.news pins `@nostr-dev-kit/ndk@2.12.2`. NDK 2.x's `NDKNip46Signer.blockUntilReady` only accepts `response.result === "ack"` and rejects the spec-allowed alternative (the URI secret echoed back) with `response.error` — which is `undefined` when the bunker returned a successful-shaped response. Clave's `LightSigner` returns the secret-echo form per spec. See the NDK `bunker://` path entry in the library-family notes below for the broader pattern (same bug class as rust-nostr ≤ 0.44.2).
+
+**Fix:** [stackernews/stacker.news#2947](https://github.com/stackernews/stacker.news/pull/2947) — extends stackernews's existing `NDKNip46SignerURLPatch` workaround with an overridden `blockUntilReady` that accepts both response forms. Until this PR merges, the bunker login is broken for Clave (and any other signer that returns the secret-echo form). The NIP-05 login path is unaffected.
+
+**Attribution:** library-shared (NDK), with a stacker.news-side override as the immediate fix and an upstream NDK fix at [nostr-dev-kit/ndk#390](https://github.com/nostr-dev-kit/ndk/pull/390).
+
+---
+
 ## Library family notes
 
 Cross-cutting patterns observed during compatibility testing. Useful for predicting behavior of an untested client based on its underlying library.
 
-### NDK (`@nostr-dev-kit/ndk`)
+### NDK (`@nostr-dev-kit/ndk`) — `nostrconnect://` path
 
 - Subscribes to the URI's relays on `connect`, calls `switch_relays` after pairing, honors the response cleanly (updates `relayUrls`, restarts subscription on the new set).
 - Handles a `null` return from `switch_relays` correctly (interprets as "stay on current relays").
-- Most NDK-based clients work end-to-end with Clave on both bunker and nostrconnect paths.
+- Most NDK-based clients using nostrconnect work end-to-end with Clave.
+- See the separate `bunker://` path entry below — it's a different code path with different bugs.
+
+### NDK (`@nostr-dev-kit/ndk`) — `bunker://` path
+
+**Affected versions:** every released NDK from 2.x through 3.0.3.
+
+`NDKNip46Signer.blockUntilReady` violates NIP-46 in two ways on the `bunker://` path:
+
+1. Sends `connect([userPubkey ?? "", secret])`. For `bunker://` URIs without `?pubkey=` (the typical single-user signer case — Clave, etc.) `userPubkey` is null, so an empty string lands as the first `connect` parameter. Per [NIP-46](https://github.com/nostr-protocol/nips/blob/master/46.md) the first parameter is the remote-signer-pubkey.
+2. Only accepts `response.result === "ack"`, rejecting the spec-allowed alternative (the URI secret echoed back) with `response.error` — which is `undefined` when the bunker returned a successful-shaped response. Same bug class as the rust-nostr entry below.
+
+**Real-world failure:** stacker.news's NIP-46 bunker login hangs forever when paired with a Clave bunker URI ([per-client notes](#stackernews) above).
+
+**Why `nostrconnect://` works but `bunker://` doesn't:** NDK 3.0.3 added a separate `blockUntilReadyNostrConnect` for the nostrconnect flow that *does* match `response.result === this.nostrConnectSecret` correctly (`core/src/signers/nip46/index.ts:287`). The bunker path was not updated alongside it.
+
+**Upstream fix:** [nostr-dev-kit/ndk#390](https://github.com/nostr-dev-kit/ndk/pull/390). Until that lands, clients can override `blockUntilReady` in a subclass — the [stacker.news PR](https://github.com/stackernews/stacker.news/pull/2947) demonstrates the pattern.
 
 ### nostr-tools (recent)
 
@@ -273,6 +302,8 @@ Public list of issues filed against client/library repos for NIP-46 bugs surface
 | Issue | Library / Client | Status | Filed |
 |---|---|---|---|
 | Bunker `connect` parser strictly requires `"ack"`, rejects spec-allowed echoed-secret response | rust-nostr | Open / partial fix on master as of 2026-04-22 | _not yet filed by us — bug confirmed via independent NIP-46 probe testing_ |
+| Bunker `connect` handshake violates NIP-46 (empty first param + ack-only response) | NDK (`@nostr-dev-kit/ndk` 2.x–3.x) | PR open: [nostr-dev-kit/ndk#390](https://github.com/nostr-dev-kit/ndk/pull/390) | 2026-05-09 |
+| Bunker login hangs against signers that echo URI secret | stacker.news | PR open: [stackernews/stacker.news#2947](https://github.com/stackernews/stacker.news/pull/2947) | 2026-05-09 |
 | `applesauce-signers` + `relay.nsec.app` connect-ack stall | noStrudel / applesauce | Not yet filed | — |
 | welshman treats non-null `switch_relays` as migration trigger | Coracle / welshman | Not yet filed | — |
 | Custom authManager bypasses NDK pairing flow + decrypt-swallow | zap.cooking | Not yet filed | — |
@@ -335,6 +366,7 @@ Open a PR that:
 
 | Date | Change |
 |---|---|
+| 2026-05-09 | Added [stacker.news](#stackernews) row (⚠️ Partial pre-merge) and an explicit [NDK `bunker://` path](#nostr-dev-kitndk-bunker-path) library-family entry covering NDK 2.x–3.0.3. The bunker `connect` handshake violates NIP-46 in two ways (empty first param + ack-only response) — same bug class as rust-nostr ≤ 0.44.2. Filed [stackernews/stacker.news#2947](https://github.com/stackernews/stacker.news/pull/2947) (override) and [nostr-dev-kit/ndk#390](https://github.com/nostr-dev-kit/ndk/pull/390) (upstream fix). |
 | 2026-05-07 | Added "iOS same-device pairing" section (recommends `bunker://` for same-device iOS, explains the nostrconnect WebSocket suspension constraint). Added "Improving post-pair delivery reliability for Clave-paired clients" section (recommends `wss://relay.powr.build/` in nostrconnect URI relay sets for client→Clave wake-up). Clave-side handshake protection in [PR #26](https://github.com/DocNR/clave/pull/26) / build 62; verified on build 66 against [noStrudel](https://nostrudel.ninja) and [Jumble](https://github.com/CodyTseng/jumble). |
 | 2026-04-29 | Initial publication. Build 29. |
 
