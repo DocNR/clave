@@ -29,7 +29,6 @@ extension AppState {
               let idx = accounts.firstIndex(where: { $0.pubkeyHex == pk }) else { return }
         accounts[idx] = Account(
             pubkeyHex: accounts[idx].pubkeyHex,
-            petname: accounts[idx].petname,
             addedAt: accounts[idx].addedAt,
             profile: profile
         )
@@ -141,7 +140,6 @@ extension AppState {
                 // Non-current account: update the accounts array in-place.
                 self.accounts[idx] = Account(
                     pubkeyHex: self.accounts[idx].pubkeyHex,
-                    petname: self.accounts[idx].petname,
                     addedAt: self.accounts[idx].addedAt,
                     profile: cached
                 )

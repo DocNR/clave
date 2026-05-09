@@ -5,8 +5,7 @@ import SwiftUI
 /// account when multi-account is active.
 ///
 /// Looks up the account from a pubkey hex (typically request.signerPubkeyHex);
-/// falls back to a truncated pubkey when no Account / petname / displayName
-/// is available.
+/// falls back to a truncated pubkey when no Account / displayName is available.
 struct SigningAsHeader: View {
     @Environment(AppState.self) private var appState
     let signerPubkeyHex: String

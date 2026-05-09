@@ -32,7 +32,7 @@ final class AppState {
 
     /// All accounts owned by this device. Populated by `loadAccounts()` from
     /// `accountsKey` UserDefaults; mutated by `addAccount` /
-    /// `generateAccount` / `deleteAccount` / `renamePetname`.
+    /// `generateAccount` / `deleteAccount`.
     var accounts: [Account] = []
 
     /// The current account scope for the UI. Stays synchronized with
@@ -407,7 +407,7 @@ final class AppState {
 
         let now = Date().timeIntervalSince1970
         let recovered = pubkeys.map {
-            Account(pubkeyHex: $0, petname: nil, addedAt: now, profile: nil)
+            Account(pubkeyHex: $0, addedAt: now, profile: nil)
         }
         persistAccountsList(recovered)
         // First pubkey becomes current. User can switch via UI later.
@@ -496,7 +496,7 @@ final class AppState {
     /// is added twice, switches to the existing account and returns it
     /// (matches noauth's silent dedupe; Phase 2 UI surfaces a toast).
     @discardableResult
-    func addAccount(nsec: String, petname: String? = nil) throws -> Account {
+    func addAccount(nsec: String) throws -> Account {
         let trimmed = nsec.trimmingCharacters(in: .whitespacesAndNewlines)
         let keys = try Keys.parse(secretKey: trimmed)
         let bech32 = try keys.secretKey().toBech32()
@@ -519,10 +519,8 @@ final class AppState {
         // get written.
         try SharedKeychain.saveNsec(bech32, for: pubkeyHex)
 
-        let sanitizedPetname = sanitizePetname(petname)
         let account = Account(
             pubkeyHex: pubkeyHex,
-            petname: sanitizedPetname,
             addedAt: Date().timeIntervalSince1970,
             profile: nil
         )
@@ -549,10 +547,10 @@ final class AppState {
 
     /// Generate a fresh keypair as a new account.
     @discardableResult
-    func generateAccount(petname: String? = nil) throws -> Account {
+    func generateAccount() throws -> Account {
         let keys = Keys.generate()
         let bech32 = try keys.secretKey().toBech32()
-        return try addAccount(nsec: bech32, petname: petname)
+        return try addAccount(nsec: bech32)
     }
 
     /// Delete an account from this device. Audit 2026-04-30 finding A2:
@@ -636,33 +634,6 @@ final class AppState {
         }
     }
 
-    /// Edit the petname for an account. Audit 2026-04-30 finding A3:
-    /// trim whitespace + strip newlines + cap at 64 chars to prevent
-    /// control-char injection into log lines / notification bodies and
-    /// DoS via huge strings.
-    func renamePetname(for pubkey: String, to petname: String?) {
-        guard let idx = accounts.firstIndex(where: { $0.pubkeyHex == pubkey }) else { return }
-        accounts[idx] = Account(
-            pubkeyHex: accounts[idx].pubkeyHex,
-            petname: sanitizePetname(petname),
-            addedAt: accounts[idx].addedAt,
-            profile: accounts[idx].profile
-        )
-        persistAccounts()
-        if currentAccount?.pubkeyHex == pubkey {
-            currentAccount = accounts[idx]
-        }
-    }
-
-    private func sanitizePetname(_ petname: String?) -> String? {
-        guard let petname else { return nil }
-        let normalized = petname
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .filter { !$0.isNewline }
-        let capped = String(normalized.prefix(64))
-        return capped.isEmpty ? nil : capped
-    }
-
     func rotateBunkerSecret() {
         guard !signerPubkeyHex.isEmpty else { return }
         _ = SharedStorage.rotateBunkerSecret(for: signerPubkeyHex)
@@ -674,11 +645,11 @@ final class AppState {
     // directly.
 
     func importKey(nsec: String) throws {
-        _ = try addAccount(nsec: nsec, petname: nil)
+        _ = try addAccount(nsec: nsec)
     }
 
     func generateKey() throws {
-        _ = try generateAccount(petname: nil)
+        _ = try generateAccount()
     }
 
     func deleteKey() {

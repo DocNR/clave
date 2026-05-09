@@ -12,7 +12,6 @@ final class AccountModelTests: XCTestCase {
     func testAccount_codableRoundtrip_preservesAllFields() throws {
         let original = Account(
             pubkeyHex: "55127fc9e1c03c6b459a3bab72fdb99def1644c5f239bdd09f3e5fb401ed9b21",
-            petname: "POWR Test",
             addedAt: 1714500000.0,
             profile: CachedProfile(
                 displayName: "TestUser",
@@ -23,7 +22,6 @@ final class AccountModelTests: XCTestCase {
         let data = try JSONEncoder().encode(original)
         let decoded = try JSONDecoder().decode(Account.self, from: data)
         XCTAssertEqual(decoded.pubkeyHex, original.pubkeyHex)
-        XCTAssertEqual(decoded.petname, original.petname)
         XCTAssertEqual(decoded.addedAt, original.addedAt)
         XCTAssertEqual(decoded.profile?.displayName, original.profile?.displayName)
         XCTAssertEqual(decoded.profile?.pictureURL, original.profile?.pictureURL)
@@ -33,28 +31,27 @@ final class AccountModelTests: XCTestCase {
     func testAccount_decodesWithoutOptionalFields() throws {
         // Minimum-shape JSON — only required fields. Used by reinstall
         // recovery (which seeds Account records from listAllPubkeys() with
-        // no petname or profile cache).
+        // no profile cache).
         let json = #"{"pubkeyHex":"abc123","addedAt":1714500000.0}"#
         let data = json.data(using: .utf8)!
         let decoded = try JSONDecoder().decode(Account.self, from: data)
         XCTAssertEqual(decoded.pubkeyHex, "abc123")
         XCTAssertEqual(decoded.addedAt, 1714500000.0)
-        XCTAssertNil(decoded.petname)
         XCTAssertNil(decoded.profile)
     }
 
     func testAccount_idMatchesPubkeyHex() {
         // Identifiable conformance — id is used by SwiftUI ForEach/List
         // identity. Must equal pubkey so picker rows have stable identity
-        // across petname/profile mutations.
-        let acc = Account(pubkeyHex: "abc", petname: nil, addedAt: 0, profile: nil)
+        // across profile mutations.
+        let acc = Account(pubkeyHex: "abc", addedAt: 0, profile: nil)
         XCTAssertEqual(acc.id, "abc")
     }
 
     func testAccount_equatable_isContentBased() {
-        let a1 = Account(pubkeyHex: "abc", petname: "X", addedAt: 1, profile: nil)
-        let a2 = Account(pubkeyHex: "abc", petname: "X", addedAt: 1, profile: nil)
-        let a3 = Account(pubkeyHex: "abc", petname: "Y", addedAt: 1, profile: nil)
+        let a1 = Account(pubkeyHex: "abc", addedAt: 1, profile: nil)
+        let a2 = Account(pubkeyHex: "abc", addedAt: 1, profile: nil)
+        let a3 = Account(pubkeyHex: "abc", addedAt: 2, profile: nil)
         XCTAssertEqual(a1, a2)
         XCTAssertNotEqual(a1, a3)
     }
@@ -199,48 +196,22 @@ final class AccountModelTests: XCTestCase {
         XCTAssertNil(decoded.name)
     }
 
-    // MARK: - Account.displayLabel (build 46 chain: displayName → name → prefix)
-
-    func testAccount_displayLabel_prefersDisplayNameOverPetname() throws {
-        // Build 46: petname is intentionally ignored even when set.
-        // displayName from kind:0 takes precedence.
-        let acc = Account(
-            pubkeyHex: "abc123def456abc123def456abc123def456abc123def456abc123def456abcd",
-            petname: "Legacy Petname",
-            addedAt: 1714500000.0,
-            profile: CachedProfile(displayName: "Display Name", fetchedAt: 1714500000.0)
-        )
-        XCTAssertEqual(acc.displayLabel, "Display Name")
-    }
+    // MARK: - Account.displayLabel (chain: displayName → name → prefix)
 
     func testAccount_displayLabel_fallsBackToNameWhenNoDisplayName() throws {
         // displayName missing → falls back to kind:0 short name (handle).
         let acc = Account(
             pubkeyHex: "abc123def456abc123def456abc123def456abc123def456abc123def456abcd",
-            petname: nil,
             addedAt: 1714500000.0,
             profile: CachedProfile(name: "shorthandle", fetchedAt: 1714500000.0)
         )
         XCTAssertEqual(acc.displayLabel, "shorthandle")
     }
 
-    func testAccount_displayLabel_ignoresPetname_usesPubkeyPrefixWhenNoProfile() throws {
-        // No profile cached at all — falls through to npub prefix.
-        // Petname is set but should be ignored.
-        let acc = Account(
-            pubkeyHex: "abc123def456abc123def456abc123def456abc123def456abc123def456abcd",
-            petname: "ShouldBeIgnored",
-            addedAt: 1714500000.0,
-            profile: nil
-        )
-        XCTAssertEqual(acc.displayLabel, "abc123de")
-    }
-
     func testAccount_displayLabel_prefersDisplayNameOverName() throws {
         // When both displayName and name are set, displayName wins.
         let acc = Account(
             pubkeyHex: "abc123def456abc123def456abc123def456abc123def456abc123def456abcd",
-            petname: nil,
             addedAt: 1714500000.0,
             profile: CachedProfile(
                 displayName: "Alice Smith",
@@ -256,7 +227,6 @@ final class AccountModelTests: XCTestCase {
         // to 8-char pubkey prefix.
         let acc = Account(
             pubkeyHex: "abc123def456abc123def456abc123def456abc123def456abc123def456abcd",
-            petname: nil,
             addedAt: 1714500000.0,
             profile: CachedProfile(fetchedAt: 1714500000.0)
         )

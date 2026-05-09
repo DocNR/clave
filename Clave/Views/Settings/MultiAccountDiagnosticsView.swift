@@ -70,7 +70,6 @@ struct MultiAccountDiagnosticsView: View {
         Section("Current account") {
             if let current = appState.currentAccount {
                 labeled("pubkey", value: truncated(current.pubkeyHex))
-                labeled("petname", value: current.petname ?? "—")
                 labeled("profile name", value: current.profile?.displayName ?? "—")
                 labeled("added at", value: dateString(current.addedAt))
                 Button {
@@ -114,7 +113,7 @@ struct MultiAccountDiagnosticsView: View {
                         .foregroundStyle(.green)
                         .font(.caption)
                 }
-                Text(account.petname ?? account.profile?.displayName ?? truncated(account.pubkeyHex))
+                Text(account.profile?.displayName ?? truncated(account.pubkeyHex))
                     .font(.footnote.bold())
                 Spacer()
             }
@@ -174,11 +173,8 @@ struct MultiAccountDiagnosticsView: View {
     }
 
     private func generateTestAccount() {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm:ss"
-        let petname = "Test \(formatter.string(from: Date()))"
         do {
-            _ = try appState.generateAccount(petname: petname)
+            _ = try appState.generateAccount()
             refreshTick += 1
             UINotificationFeedbackGenerator().notificationOccurred(.success)
         } catch {

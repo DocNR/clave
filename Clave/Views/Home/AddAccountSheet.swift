@@ -103,9 +103,9 @@ struct AddAccountSheet: View {
         do {
             switch mode {
             case .generate:
-                _ = try appState.generateAccount(petname: nil)
+                _ = try appState.generateAccount()
             case .paste:
-                _ = try appState.addAccount(nsec: trimmedNsec, petname: nil)
+                _ = try appState.addAccount(nsec: trimmedNsec)
             }
             UINotificationFeedbackGenerator().notificationOccurred(.success)
             dismiss()

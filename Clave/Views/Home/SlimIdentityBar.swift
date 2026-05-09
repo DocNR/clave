@@ -2,9 +2,9 @@ import SwiftUI
 
 /// Themed mini-banner identity row below AccountStripView. Solid gradient
 /// background (matches AccountDetailView's full-bleed banner in miniature),
-/// mini avatar, @petname, npub, copy button, chevron. Tap anywhere on the row
-/// pushes AccountDetailView for the current account — same path the active-pill
-/// tap uses, via `appState.pendingDetailPubkey`.
+/// mini avatar, displayLabel, npub, copy button, chevron. Tap anywhere on the
+/// row pushes AccountDetailView for the current account — same path the
+/// active-pill tap uses, via `appState.pendingDetailPubkey`.
 ///
 /// 2026-05-02 redesign: replaces the build-38 wash + accent-stroke treatment
 /// with a solid theme gradient for visual continuity with the detail view.
