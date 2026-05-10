@@ -27,6 +27,7 @@ const PONG_TIMEOUT = 10000; // 10 seconds to respond
 const { parseAuthHeader, verifyNip98, sha256Hex } = require("./nip98");
 const { createStorage } = require("./storage");
 const { createClientsStorage } = require("./clients");
+const { createEntitlementsStorage } = require("./entitlements");
 const { createRelayPool } = require("./relayPool");
 const { createApnsClient, shouldPruneToken, parseReason } = require("./apnsClient");
 
@@ -36,6 +37,8 @@ const PUBLIC_PROXY_URL = process.env.PUBLIC_PROXY_URL || "https://proxy.clave.ca
 const storage = createStorage(TOKEN_FILE);
 const CLIENTS_FILE = "./clients.json";
 const clientsStorage = createClientsStorage(CLIENTS_FILE);
+const ENTITLEMENTS_FILE = "./entitlements.json";
+const entitlementsStorage = createEntitlementsStorage(ENTITLEMENTS_FILE);
 let relayPool = null; // initialized in server.listen after all deps are in scope
 const migrationResult = storage.migrateIfLegacy();
 if (migrationResult.migrated) {
@@ -350,9 +353,15 @@ const server = http.createServer((req, res) => {
         const alreadyPaired = clientsStorage.loadAll()
           .some((p) => p.signerPubkey === signerPubkey && p.clientPubkey === client_pubkey);
         const projectedCount = alreadyPaired ? existingCount : existingCount + 1;
-        if (projectedCount > 5) {
+        // Tier-aware cap: free → 5, premium → 30. Default is "free" for any
+        // signer without an entitlement record. Error code stays "pairing_limit"
+        // for backwards compat with iOS handlers; new fields `tier` + dynamic
+        // `limit` carry the additional info iOS PR 5 will read.
+        const tier = entitlementsStorage.tierForPubkey(signerPubkey);
+        const cap = entitlementsStorage.maxClientsForTier(tier);
+        if (projectedCount > cap) {
           res.writeHead(409, { "Content-Type": "application/json" });
-          return res.end(JSON.stringify({ error: "pairing_limit", limit: 5, used: existingCount }));
+          return res.end(JSON.stringify({ error: "pairing_limit", limit: cap, used: existingCount, tier }));
         }
 
         const novel = clientsStorage.novelRelayCount(signerPubkey, relay_urls);
@@ -448,6 +457,94 @@ const server = http.createServer((req, res) => {
         res.end(JSON.stringify({ error: "Internal error" }));
       }
     });
+  } else if (req.method === "GET" && req.url && req.url.startsWith("/entitlement")) {
+    // GET /entitlement?pubkey=<hex>
+    // Auth: NIP-98 (any signer — entitlement state is roughly public; we just
+    //       want the caller to be a real Clave client, not a scraper).
+    // Optional header X-APNs-Token-Prefix (8 hex chars): if present AND the
+    //       queried pubkey has a non-free entitlement, we record this device
+    //       in `devices_seen` for the abuse-tripwire audit. Used by iOS at
+    //       launch + on add-account.
+    //
+    // Wrapped in async IIFE because the outer http.createServer callback is
+    // sync; same pattern other endpoints use via `req.on("end", async () => …)`
+    // for their POST bodies. GET has no body to await, so we await directly.
+    (async () => {
+      try {
+        const authHeader = req.headers["x-clave-auth"];
+        if (!authHeader) {
+          console.log(`[HTTP] /entitlement 401: Missing X-Clave-Auth header`);
+          res.writeHead(401, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: "Missing X-Clave-Auth header" }));
+        }
+        let authEvent;
+        try {
+          authEvent = parseAuthHeader(authHeader);
+        } catch (e) {
+          console.log(`[HTTP] /entitlement 401: ${e.message}`);
+          res.writeHead(401, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: e.message }));
+        }
+        // For GET, NIP-98 spec says the URL is the full request URL including
+        // query string; bodyHash is empty (no body).
+        const fullUrl = `${PUBLIC_PROXY_URL}${req.url}`;
+        const result = await verifyNip98(authEvent, fullUrl, "GET", null);
+        if (!result.valid) {
+          console.log(`[HTTP] /entitlement auth failed: ${result.error}`);
+          res.writeHead(401, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: result.error }));
+        }
+
+        let queriedPubkey;
+        try {
+          const u = new URL(req.url, PUBLIC_PROXY_URL);
+          queriedPubkey = u.searchParams.get("pubkey");
+        } catch {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: "invalid_url" }));
+        }
+        if (typeof queriedPubkey !== "string" || !/^[0-9a-f]{64}$/.test(queriedPubkey)) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: "invalid_pubkey" }));
+        }
+
+        const entry = entitlementsStorage.getByPubkey(queriedPubkey);
+        const tier = entitlementsStorage.tierForPubkey(queriedPubkey);
+
+        // Device-tripwire side effect: record this device's APNs token prefix
+        // against the queried pubkey, but only if the entry exists AND is
+        // currently non-free. We don't auto-create entries from queries —
+        // free-tier pubkeys shouldn't accumulate device-tracking data.
+        const tokenPrefix = req.headers["x-apns-token-prefix"];
+        if (entry && tier !== "free" && typeof tokenPrefix === "string" && /^[0-9a-f]{8}$/.test(tokenPrefix)) {
+          entitlementsStorage.recordDevice(queriedPubkey, tokenPrefix);
+        }
+
+        const response = {
+          pubkey: queriedPubkey,
+          tier,
+          max_accounts: entitlementsStorage.maxAccountsForTier(tier),
+          max_clients: entitlementsStorage.maxClientsForTier(tier),
+        };
+        if (entry) {
+          response.granted_at = entry.granted_at;
+          response.expires_at = entry.expires_at;
+          if (entry.granted_by) response.granted_by = entry.granted_by;
+        }
+
+        console.log(
+          `[HTTP] /entitlement pubkey=${queriedPubkey.slice(0, 8)}... tier=${tier}` +
+            (tokenPrefix ? ` device=${tokenPrefix}` : "")
+        );
+
+        res.writeHead(200, { "Content-Type": "application/json" });
+        return res.end(JSON.stringify(response));
+      } catch (e) {
+        console.error("[HTTP] /entitlement error:", e.message);
+        res.writeHead(500, { "Content-Type": "application/json" });
+        return res.end(JSON.stringify({ error: "Internal error" }));
+      }
+    })();
   } else if (req.method === "GET" && req.url === "/health") {
     const allTokens = storage.loadTokens();
     const pubkeys = new Set(allTokens.map((t) => t.pubkey));
