@@ -7,7 +7,6 @@ struct HomeView: View {
     @State private var clientToUnpair: ClientPermissions?
     @State private var showAddAccountSheet = false
     @State private var showAccountCapAlert = false
-    @State private var showConnectionCapAlert = false
     @State private var showInboxSheet = false
     @State private var navigationPath = NavigationPath()
     @State private var deeplinkApprovalURI: NostrConnectParser.ParsedURI?
@@ -226,11 +225,6 @@ struct HomeView: View {
                 Button("OK", role: .cancel) {}
             } message: {
                 Text(AccountError.accountCapReached.errorDescription ?? "")
-            }
-            .alert("Connection limit reached", isPresented: $showConnectionCapAlert) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                Text(AccountError.connectionCapReached.errorDescription ?? "")
             }
             .alert(swipeUnpairAlertTitle, isPresented: Binding(
                 get: { clientToUnpair != nil },
