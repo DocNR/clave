@@ -175,7 +175,7 @@ struct HomeView: View {
             }
             .sheet(item: $deeplinkAccountChoiceURI) { uri in
                 ConnectAccountPicker(mode: .single, parsedURI: uri) { pubkeys in
-                    let pubkey = pubkeys[0]  // .single mode always 1-element
+                    guard let pubkey = pubkeys.first else { return }
                     appState.deeplinkBoundAccount = pubkey
                     let captured = uri
                     deeplinkAccountChoiceURI = nil  // dismiss picker first
