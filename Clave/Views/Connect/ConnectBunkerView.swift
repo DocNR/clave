@@ -16,6 +16,7 @@ struct ConnectBunkerView: View {
 
     @State private var pickedSignerPubkey: String?
     @State private var showPicker = false
+    @State private var didInvokePickerOrAutoSkip = false
 
     var body: some View {
         Group {
@@ -39,6 +40,8 @@ struct ConnectBunkerView: View {
     // MARK: - Private
 
     private func presentOrAutoSkip() {
+        guard !didInvokePickerOrAutoSkip else { return }
+        didInvokePickerOrAutoSkip = true
         if ConnectAccountPicker.shouldAutoSkip(accountCount: appState.accounts.count),
            let only = appState.accounts.first {
             pickedSignerPubkey = only.pubkeyHex

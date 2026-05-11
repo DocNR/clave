@@ -281,9 +281,7 @@ extension AppState {
     }
 
     func rotateBunkerSecret() {
-        guard !signerPubkeyHex.isEmpty else { return }
-        _ = SharedStorage.rotateBunkerSecret(for: signerPubkeyHex)
-        bunkerSecretsTick &+= 1
+        rotateBunkerSecret(for: signerPubkeyHex)
     }
 
     /// Per-signer variant of `rotateBunkerSecret()`. Rotates the bunker
