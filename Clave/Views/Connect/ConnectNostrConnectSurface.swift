@@ -1,6 +1,19 @@
 import SwiftUI
 import AVFoundation
 
+/// How a nostrconnect URI was acquired in the Connect flow. Drives the
+/// post-Approve "Connecting…" overlay copy: paste implies the client
+/// app is on the same device (user copied the URI here), so the user
+/// should switch back to it during the handshake; a QR scan implies
+/// the client is on another screen, so staying foregrounded in Clave
+/// is fine. Background: iOS suspends the client app's WebSocket
+/// subscription once it loses foreground, so a same-device user who
+/// follows "stay in Clave" advice never receives the connect-response.
+enum NostrConnectURISource {
+    case paste
+    case qrScan
+}
+
 /// The primary surface inside the Connect tab. Hosts:
 ///   - QR scanner viewfinder (when camera authorized)
 ///   - Paste-from-clipboard button + URI text field
