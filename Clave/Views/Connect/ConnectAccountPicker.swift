@@ -1,18 +1,27 @@
 import SwiftUI
 
-/// Sheet presented when a nostrconnect:// deeplink arrives and the user
-/// has 2+ accounts. Lists accounts with their themed avatars; user taps
-/// one to bind the in-flight URI to that account. ApprovalSheet then
-/// presents with boundAccountPubkey set.
+/// Unified account picker for all connect-time consent. Used by:
+///   1. Phase 1 in-app NostrConnect flow (after URI parse, before ApprovalSheet)
+///   2. Phase 1 in-app bunker flow (before URI render)
+///   3. External nostrconnect:// deeplink flow (after URL routes in)
 ///
-/// Cancel discards the deeplink — user must re-tap the source link to
-/// retry.
-struct DeeplinkAccountPicker: View {
+/// Mode `.single` is the only mode in Phase 1. Mode `.multi` lands in Phase 2
+/// for multi-account NostrConnect. Auto-skips entirely when
+/// `appState.accounts.count == 1` — the single account is auto-bound and the
+/// picker never renders.
+struct ConnectAccountPicker: View {
+
+    enum Mode {
+        case single   // bunker, single-NostrConnect, deeplink
+        case multi    // Phase 2: NostrConnect with accounts=multi
+    }
+
     @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
 
-    let parsedURI: NostrConnectParser.ParsedURI
-    let onPick: (String) -> Void
+    let mode: Mode
+    let parsedURI: NostrConnectParser.ParsedURI?  // nil for bunker (no URI yet)
+    let onPick: (_ pubkeys: [String]) -> Void
 
     var body: some View {
         NavigationStack {
@@ -29,7 +38,7 @@ struct DeeplinkAccountPicker: View {
                     .padding(.horizontal)
                 }
             }
-            .navigationTitle("Connect with which account?")
+            .navigationTitle(navigationTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -42,22 +51,50 @@ struct DeeplinkAccountPicker: View {
         .snapshotProtected()
     }
 
+    private var navigationTitle: String {
+        switch mode {
+        case .single: return "Connect with which account?"
+        case .multi: return "Connect with which accounts?"
+        }
+    }
+
     private var headerBlock: some View {
-        Text("Choose the identity to use for **\(clientLabel)**.")
+        Text(headerText)
             .font(.system(size: 14))
             .foregroundStyle(.secondary)
     }
 
+    private var headerText: AttributedString {
+        switch mode {
+        case .single:
+            // Phase 1 single-mode header — matches the original DeeplinkAccountPicker.
+            var s = AttributedString("Choose the identity to use for ")
+            var bold = AttributedString(clientLabel)
+            bold.font = .system(size: 14, weight: .semibold)
+            s.append(bold)
+            s.append(AttributedString("."))
+            return s
+        case .multi:
+            // Phase 2 multi-mode header.
+            return AttributedString("\(clientLabel) wants to connect to multiple accounts.")
+        }
+    }
+
     private var clientLabel: String {
-        parsedURI.name ?? "this connection"
+        parsedURI?.name ?? "this connection"
     }
 
     private func accountRow(for account: Account) -> some View {
+        // Single-mode: tap-to-pick (radio behavior).
+        // Multi-mode rendering lands in Phase 2 (a future task). For now, .multi
+        // falls back to the same tap-to-pick row so the Mode enum compiles
+        // without Phase 2 changes.
         let theme = AccountTheme.forAccount(pubkeyHex: account.pubkeyHex)
         let isCurrent = account.pubkeyHex == appState.currentAccount?.pubkeyHex
         return Button {
-            onPick(account.pubkeyHex)
+            onPick([account.pubkeyHex])
             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            dismiss()
         } label: {
             HStack(spacing: 14) {
                 ZStack {

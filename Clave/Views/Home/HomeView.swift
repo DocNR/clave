@@ -174,8 +174,9 @@ struct HomeView: View {
                 InboxView()
             }
             .sheet(item: $deeplinkAccountChoiceURI) { uri in
-                DeeplinkAccountPicker(parsedURI: uri) { pickedPubkey in
-                    appState.deeplinkBoundAccount = pickedPubkey
+                ConnectAccountPicker(mode: .single, parsedURI: uri) { pubkeys in
+                    let pubkey = pubkeys[0]  // .single mode always 1-element
+                    appState.deeplinkBoundAccount = pubkey
                     let captured = uri
                     deeplinkAccountChoiceURI = nil  // dismiss picker first
                     DispatchQueue.main.async {

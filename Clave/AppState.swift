@@ -177,15 +177,15 @@ final class AppState {
     // These stay here because Swift forbids stored properties in extensions.
 
     /// Set when a nostrconnect:// deeplink arrives and the user has only one
-    /// account (or after the user picks from DeeplinkAccountPicker). HomeView
+    /// account (or after the user picks from ConnectAccountPicker). HomeView
     /// observes this to present ApprovalSheet.
     var pendingNostrconnectURI: NostrConnectParser.ParsedURI?
 
     /// Set when a nostrconnect:// deeplink arrives and the user has 2+
-    /// accounts. HomeView observes this to present DeeplinkAccountPicker.
+    /// accounts. HomeView observes this to present ConnectAccountPicker.
     var pendingDeeplinkAccountChoice: NostrConnectParser.ParsedURI?
 
-    /// Pubkey of the account chosen by DeeplinkAccountPicker. Threaded
+    /// Pubkey of the account chosen by ConnectAccountPicker. Threaded
     /// through to ApprovalSheet via boundAccountPubkey. Cleared after
     /// the connect completes or the user cancels.
     var deeplinkBoundAccount: String?
