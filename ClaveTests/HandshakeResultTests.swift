@@ -8,7 +8,7 @@ final class HandshakeResultTests: XCTestCase {
         XCTAssertEqual(r.succeeded.count, 0)
         XCTAssertEqual(r.failed.count, 0)
         XCTAssertFalse(r.isPartialFailure)
-        XCTAssertTrue(r.isAllSuccess)
+        XCTAssertFalse(r.isAllSuccess)
         XCTAssertFalse(r.isAllFailure)
     }
 

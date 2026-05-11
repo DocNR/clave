@@ -16,7 +16,7 @@ struct HandshakeResult: Equatable {
     let succeeded: [String]   // signer pubkeys that paired successfully
     let failed: [FailedSigner]
 
-    var isAllSuccess: Bool { failed.isEmpty }
+    var isAllSuccess: Bool { !succeeded.isEmpty && failed.isEmpty }
     var isAllFailure: Bool { succeeded.isEmpty && !failed.isEmpty }
     var isPartialFailure: Bool { !succeeded.isEmpty && !failed.isEmpty }
 }
