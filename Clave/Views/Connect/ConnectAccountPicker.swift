@@ -16,6 +16,19 @@ struct ConnectAccountPicker: View {
         case multi    // Phase 2: NostrConnect with accounts=multi
     }
 
+    /// Whether the picker should be entirely skipped given the user's account
+    /// count. Caller pattern: check this BEFORE presenting the picker; if true,
+    /// call onPick directly with the sole account's pubkey instead of rendering
+    /// the picker UI.
+    ///
+    /// Skip when exactly 1 account exists (the single-account case where
+    /// the picker would be a degenerate one-row sheet). Do NOT skip when 0
+    /// accounts exist — the caller should route to onboarding rather than
+    /// auto-binding to a non-existent account.
+    static func shouldAutoSkip(accountCount: Int) -> Bool {
+        accountCount == 1
+    }
+
     @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
 
