@@ -15,6 +15,11 @@ struct MainTabView: View {
                     Label("Home", systemImage: "house.fill")
                 }
 
+            ConnectTabView()
+                .tabItem {
+                    Label("Connect", systemImage: "link.circle.fill")
+                }
+
             ActivityView()
                 .tabItem {
                     Label("Activity", systemImage: "list.bullet")
