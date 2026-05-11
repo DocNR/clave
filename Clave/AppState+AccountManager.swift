@@ -286,6 +286,16 @@ extension AppState {
         bunkerSecretsTick &+= 1
     }
 
+    /// Per-signer variant of `rotateBunkerSecret()`. Rotates the bunker
+    /// secret for an explicit signer rather than the current account.
+    /// No-ops silently when the pubkey doesn't correspond to a known account.
+    func rotateBunkerSecret(for pubkey: String) {
+        guard !pubkey.isEmpty,
+              accounts.contains(where: { $0.pubkeyHex == pubkey }) else { return }
+        _ = SharedStorage.rotateBunkerSecret(for: pubkey)
+        bunkerSecretsTick &+= 1
+    }
+
     // Legacy wrappers — preserved for OnboardingView and SettingsView call
     // sites. Phase 2 UI will call addAccount/generateAccount/deleteAccount
     // directly.
