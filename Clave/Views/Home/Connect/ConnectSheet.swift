@@ -138,7 +138,12 @@ struct ConnectSheet: View {
                 }
             }
             do {
-                try await appState.handleNostrConnect(parsedURI: captured, permissions: capturedPerms)
+                let signerPubkeys = [appState.currentAccount?.pubkeyHex ?? ""]
+                _ = try await appState.handleNostrConnect(
+                    parsedURI: captured,
+                    signerPubkeys: signerPubkeys,
+                    permissions: capturedPerms
+                )
                 isConnecting = false
                 dismiss()
             } catch {

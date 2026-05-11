@@ -28,21 +28,56 @@ extension AppState {
         }
     }
 
-    /// Perform the nostrconnect:// handshake across all relays listed in the URI.
-    /// Why multi-relay: the client (per NIP-46) subscribes on every relay in its URI;
-    /// if we publish to only one and that relay drops the ephemeral kind:24133,
-    /// the client never sees our response. Publishing to all is best-effort — we
-    /// don't fail if some relays reject or are unreachable, we just need at least one.
+    /// Perform the nostrconnect:// handshake for each signer in `signerPubkeys`.
+    /// In Phase 1 this is always 1-element. Phase 2 enables N > 1 for the
+    /// multi-account flow — each iteration runs the same handshake with a
+    /// different signer's nsec.
+    ///
+    /// Why multi-relay per iteration: the client (per NIP-46) subscribes on
+    /// every relay in its URI; if we publish to only one and that relay drops
+    /// the ephemeral kind:24133, the client never sees our response. Publishing
+    /// to all is best-effort — we don't fail if some relays reject or are
+    /// unreachable, we just need at least one.
+    @discardableResult
     func handleNostrConnect(
         parsedURI: NostrConnectParser.ParsedURI,
-        permissions: ClientPermissions,
-        boundAccountPubkey: String? = nil
+        signerPubkeys: [String],
+        permissions: ClientPermissions
+    ) async throws -> HandshakeResult {
+        guard !signerPubkeys.isEmpty else {
+            throw ClaveError.noSignerKey
+        }
+
+        var succeeded: [String] = []
+        var failed: [HandshakeResult.FailedSigner] = []
+
+        for signerPubkey in signerPubkeys {
+            do {
+                try await runSingleConnect(
+                    parsedURI: parsedURI,
+                    signerPubkey: signerPubkey,
+                    permissions: permissions
+                )
+                succeeded.append(signerPubkey)
+            } catch {
+                failed.append(HandshakeResult.FailedSigner(
+                    signerPubkey: signerPubkey,
+                    errorMessage: error.localizedDescription
+                ))
+            }
+        }
+
+        return HandshakeResult(succeeded: succeeded, failed: failed)
+    }
+
+    /// One signer's handshake — body is the pre-refactor handleNostrConnect
+    /// with `boundAccountPubkey` replaced by the explicit `signerPubkey`
+    /// argument. Phase 2 calls this inside a loop; Phase 1 calls it once.
+    private func runSingleConnect(
+        parsedURI: NostrConnectParser.ParsedURI,
+        signerPubkey resolvedSignerPubkey: String,
+        permissions: ClientPermissions
     ) async throws {
-        // boundAccountPubkey: when non-nil (deeplink path, user picked an account
-        // from the picker), use that account instead of currentAccount. Default nil
-        // falls back to currentAccount → signerPubkeyHex, preserving existing behavior
-        // for the ConnectSheet approval path where the user is acting on the active account.
-        let resolvedSignerPubkey = boundAccountPubkey ?? currentAccount?.pubkeyHex ?? signerPubkeyHex
         guard !resolvedSignerPubkey.isEmpty,
               let nsec = SharedKeychain.loadNsec(for: resolvedSignerPubkey) else {
             throw ClaveError.noSignerKey
@@ -146,6 +181,8 @@ extension AppState {
                             relayUrls: parsedURI.relays,
                             signer: signerPubkey
                         )
+                    } else {
+                        throw ClaveError.noRelay
                     }
                 }
             }

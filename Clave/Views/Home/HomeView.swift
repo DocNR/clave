@@ -197,11 +197,20 @@ struct HomeView: View {
                     appState.deeplinkBoundAccount = nil
                     Task {
                         do {
-                            try await appState.handleNostrConnect(
+                            let signerPubkeys = [bound ?? appState.currentAccount?.pubkeyHex ?? ""]
+                            let result = try await appState.handleNostrConnect(
                                 parsedURI: captured,
-                                permissions: permissions,
-                                boundAccountPubkey: bound
+                                signerPubkeys: signerPubkeys,
+                                permissions: permissions
                             )
+                            // Single-account flow: result.succeeded.count is 1 on
+                            // success; isAllFailure on failure.
+                            if result.isAllFailure,
+                               let first = result.failed.first {
+                                await MainActor.run {
+                                    deeplinkError = first.errorMessage
+                                }
+                            }
                         } catch {
                             await MainActor.run {
                                 deeplinkError = error.localizedDescription
