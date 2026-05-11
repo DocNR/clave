@@ -139,6 +139,7 @@ Tapping the secondary affordance pushes a child route showing the bunker URI/QR 
 
 Why γ over a symmetric segmented control:
 
+- **Supersedes the symmetric segmented control shipped in the 2026-05-04 ConnectSheet redesign** — same single-sheet primitive, but the multi-account flow benefits from asymmetric primary/secondary surfacing rather than equal-weight method tabs. The 2026-05-04 design optimized for "make the binary obvious"; this design optimizes for "make the novice path obvious," with the binary still legible via the secondary affordance.
 - A novice's first encounter with Clave is overwhelmingly "I tapped Sign in with Clave in some app and got a code — now what?" The primary surface answers exactly that.
 - Bunker requires the user to already understand they need to give a code to another app. Anyone who understands that can find a clearly-labeled secondary affordance.
 - Asymmetric framing matches asymmetric usage frequency.
@@ -165,6 +166,28 @@ The picker fires *first* in this flow because there's no URI to parse — the us
 
 The picker fires *between* parse and approval — same position as today's deeplink path. The URI's metadata (name, image) is shown in the picker header so the user knows which client they're authorizing.
 
+### `handleNostrConnect` signature adoption
+
+Phase 1 also lands the call-shape change that Phase 2 will need. Adopting the array shape now keeps Phase 2's PR focused on "wire up `N > 1` semantics + multi-select picker mode" rather than reshaping the API across all call sites.
+
+```swift
+// Before (today):
+func handleNostrConnect(parsedURI: NostrConnectParser.ParsedURI,
+                        permissions: ClientPermissions) async throws
+
+// After Phase 1 (always 1-element array; Phase 2 enables N > 1):
+func handleNostrConnect(parsedURI: NostrConnectParser.ParsedURI,
+                        signerPubkeys: [String],
+                        permissions: ClientPermissions) async throws -> HandshakeResult
+
+struct HandshakeResult {
+    let succeeded: [String]
+    let failed: [(signerPubkey: String, error: Error)]
+}
+```
+
+Phase 1 callers (the in-app Connect tab path and the deeplink path) always pass a one-element `signerPubkeys` array — the single chosen pubkey from the picker. `HandshakeResult.succeeded` always has exactly 1 element; `failed` has 0 or 1. Behaviorally identical to today's signature. The shape change is mechanical, no new logic.
+
 ### What gets removed or repurposed
 
 - **`HomeView`'s "Connect a Client" button** (HomeView.swift:165 sheet trigger): removed. The empty-state CTA on Home for a user who has no connected clients can either point to the Connect tab ("Tap Connect to pair your first app") or be removed entirely; UX call.
@@ -186,7 +209,7 @@ The `nostrconnect://` URI gains one optional parameter, `accounts=multi`:
 nostrconnect://{client_pk}?relay=wss://...&secret={secret}&accounts=multi&perms=...&name=...
 ```
 
-When Clave parses a URI with this flag set, it presents `ConnectAccountPicker(mode: .multi(min: 1, max: nil), parsedURI: parsed)`. The user selects N ≥ 1 accounts. For each selected account, Clave runs the existing handshake once with that account's nsec — sequentially, all under one `UIBackgroundTask` window. Each iteration emits one kind:24133 `connect` ack tagged `#p:client_pk`, encrypted from that signer's nsec, and POSTs `pair-client` to the proxy NIP-98-signed by that nsec.
+When Clave parses a URI with this flag set, it presents `ConnectAccountPicker(mode: .multi, parsedURI: parsed)`. The user selects N ≥ 1 accounts. For each selected account, Clave runs the existing handshake once with that account's nsec — sequentially, all under one `UIBackgroundTask` window. Each iteration emits one kind:24133 `connect` ack tagged `#p:client_pk`, encrypted from that signer's nsec, and POSTs `pair-client` to the proxy NIP-98-signed by that nsec.
 
 The client receives N kind:24133 events tagged with its own pubkey. Each event's `pubkey` field identifies a distinct signer. The client builds its accounts list from the set of `pubkey`s observed within a listening window (see Tableau client-side requirements below).
 
@@ -224,12 +247,27 @@ let isMultiAccount: Bool  // true iff accounts=multi was present
 
 The parser sets this from the URI's query parameters. All existing call sites continue to work; they just see `false` for the field.
 
+### NostrConnect flow in multi mode
+
+Parallel to Phase 1's single-mode NostrConnect flow, with multi-select at the picker step and the same two-step picker → approval shape:
+
+1. User pastes URI or scans QR
+2. `NostrConnectParser.parse` validates; `isMultiAccount: true` is set on `ParsedURI`
+3. `ConnectAccountPicker(mode: .multi, parsedURI: parsed)` presents with checkbox rows (auto-skipped if `appState.accounts.count == 1` — collapses to a one-element flow)
+4. User selects ≥ 1 accounts (defaults + cap rules per the picker section below), taps Continue
+5. `ApprovalSheet` presents in multi mode, showing the selected accounts + shared permissions block + "Approve N accounts" button
+6. On approve, `handleNostrConnect(parsedURI:, signerPubkeys: [pk_1, ..., pk_N], permissions:)` runs the sequential loop inside one `UIBackgroundTask`
+7. Progress UI on the same `ApprovalSheet` during the loop (see "Progress UI during the loop" below)
+8. Partial-failure summary or auto-dismiss on success (see "Partial-failure UX" below)
+
+**Two sheets, not one.** Picker stays focused on "which accounts"; `ApprovalSheet` stays focused on "what permissions + commit." Same shape as Phase 1's NostrConnect flow and today's deeplink-route flow — single mode and multi mode differ only in picker selection semantics, not in flow structure.
+
 ### `ConnectAccountPicker` — multi-select mode
 
 In `.multi` mode:
 
 - Each row gains a checkbox (or trailing checkmark) instead of being a tap-to-pick button
-- Approve button reads "Approve N accounts" with N = selected count
+- **Continue button** reads "Continue with N accounts" with N = selected count — picker selects accounts; the next sheet (`ApprovalSheet`) confirms permissions and runs the actual approval. Two-step picker → approval flow stays consistent with Phase 1 and the deeplink path.
 - Default selection: all accounts checked when `appState.accounts.count <= 5`; none checked when > 5 (avoids accidental bulk-pair on power users with many accounts)
 - Rows that have hit the cap on the proxy (5 distinct paired clients per signer, enforced by `pair-client`) are rendered disabled with a "5/5 clients" badge inline, pre-flighted before the picker presents (see "Cap pre-flight" below)
 - The header line updates: "Tableau wants to connect to multiple accounts." (vs the single-mode "Choose the identity to use for **Tableau**.")
@@ -247,25 +285,7 @@ Per-account permission asymmetry is fine-tunable in `ClientDetailView` post-pair
 
 ### `handleNostrConnect` — N-up handshake loop
 
-`AppState+NostrConnect.handleNostrConnect` signature changes:
-
-```swift
-// Before:
-func handleNostrConnect(parsedURI: NostrConnectParser.ParsedURI,
-                        permissions: ClientPermissions) async throws
-
-// After:
-func handleNostrConnect(parsedURI: NostrConnectParser.ParsedURI,
-                        signerPubkeys: [String],
-                        permissions: ClientPermissions) async throws -> HandshakeResult
-
-struct HandshakeResult {
-    let succeeded: [String]   // signer pubkeys that paired successfully
-    let failed: [(signerPubkey: String, error: Error)]
-}
-```
-
-Single-account callers pass `[appState.currentAccount!.pubkeyHex]` (or the picker's single chosen pubkey).
+The function signature was already adopted in Phase 1 (see "`handleNostrConnect` signature adoption" above) — it accepts `signerPubkeys: [String]` and returns `HandshakeResult`. Phase 2 wires up the `N > 1` path on the same signature; no API reshape, no new call-site changes outside this function.
 
 Loop structure:
 
@@ -283,6 +303,8 @@ for signerPubkey in signerPubkeys {
 ```
 
 Sequential, not concurrent: each handshake is ~1–2s; `UIBackgroundTask` covers ~30s; sequential makes partial-failure semantics legible; all acks go to the same relay set so concurrency wins nothing. Each iteration internally wraps the existing flow (encrypt → publish → POST `pair-client` → write `ClientPermissions` + `ConnectedClient` rows + ActivityEntry) which already accepts a `signer:` parameter from the Phase 1 multi-account sprint.
+
+In multi mode this means **N `ClientPermissions` rows are written, one per `(signer_pubkey_i, client_pubkey)` composite key** — all N carry the same `perms` value copied verbatim from the URI. Per-account permission customization is post-pair via `ClientDetailView` (already correctly keyed by composite). Same shape for `ConnectedClient` rows and `ActivityEntry` writes — N records, one per signer.
 
 `UIBackgroundTask` is started at the *outer* call site (the Connect-tab submit handler — same role as today's `ConnectSheet.submitApproval`, just relocated to the Phase 1 tab view) and wraps the full N-iteration loop. If the budget is approached (~25s in, system warning fires), the `expirationHandler` records remaining iterations to `pendingPairOps` so a future foreground/wake can finish. Mitigation, not common-case behavior.
 
@@ -348,7 +370,9 @@ Tableau (the multi-column reader) is the motivating client. To opt in:
 4. **Show progress during the window**: "1 connected, listening for more (53s)…" with the Done button. This is the user-visible counterpart to Clave's "Pairing 2 of 4…" progress.
 5. **Per-signer session state**: subsequent `sign_event` RPCs are NIP-44/04-encrypted to the specific signer pubkey, exactly as in single-account NIP-46. Tableau already needs per-signer session keys regardless of multi-account.
 
-Tableau's NIP-46 stack is not NDK (per user confirmation), so the recent NDK bunker-handshake bug is not a blocker. If Tableau ever switches to NDK, the same `subscribe + accumulate` pattern needs to be implemented on top of NDK's `nostrconnect://` path; NDK's current `blockUntilReadyNostrConnect` (bunker:// fix landed in DocNR/ndk#390) returns on first ack and would need a parallel multi-account variant.
+Tableau's NIP-46 stack is `nostr-tools` (verified via `nostr-tools_nip46` in its Vite deps cache), not NDK, so the recent NDK bunker-handshake bug is not a blocker. But the "first ack → complete" anti-pattern is the default in single-account `nostr-tools` flows too — Tableau-side has **real code work** to override that default, not just a library audit.
+
+**Tableau-side plan location.** The Tableau implementation work for opt-in URI emission, listening-window UI, Done button, and the unsubscribe-on-first-ack override lives in the Tableau repo at `/Users/danielwyler/tableau/docs/superpowers/plans/` as its own slice (likely Slice D or later in their numbering — current slices are A1, B, C, and the in-flight Slice CV "account-isolation" design). That brainstorm is deferred until this Clave-side spec's Phase 2 is close to merge, so the Tableau plan tracks the actual landed shape rather than a forecast. Integration target: Tableau's existing `client.signers` Map (referenced in `tableau/docs/superpowers/specs/2026-05-10-tableau-account-isolation-design.md`) — the new slice adds the connect-time flow that populates the Map with N entries from one Clave pairing.
 
 ## Documentation + ecosystem
 
@@ -395,3 +419,4 @@ Implementation plan to be drafted via `superpowers:writing-plans` after this spe
 - Backwards-compat matrix verified: old single-account URI through new Clave behaves as today (smoke test).
 - End-to-end with Tableau: paste multi URI in Clave, select 2+ accounts, approve, observe Tableau receive N acks within listening window and surface N accounts (integration smoke).
 - Manual probe of relay tolerance for rapid N kind:24133 events on `#p:client_pk` against the target relay set.
+- **Scope boundary:** Tableau-side acceptance (URI emission, listening-window UI, Done button, override of `nostr-tools` unsubscribe-on-first-ack default) is verified against a separately-drafted plan in `/Users/danielwyler/tableau/docs/superpowers/plans/`. The end-to-end smoke test in this branch validates Clave's side of the wire (N acks emitted, N `pair-client` POSTs succeed). Tableau's side of the wire is validated in Tableau's own plan cycle.
