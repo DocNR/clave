@@ -14,15 +14,18 @@ enum NostrConnectURISource {
     case qrScan
 }
 
-/// The primary surface inside the Connect tab. Hosts:
+/// The primary surface inside the Connect tab. Hosts (top to bottom):
 ///   - QR scanner viewfinder (when camera authorized)
 ///   - Paste-from-clipboard button + URI text field
-///   - "What's a nostrconnect URI?" help link
-///   - "Or share a code from Clave →" secondary affordance pushing to bunker view
+///   - "Share a code from Clave" action card (pushes to bunker view)
+///   - "What's the difference between Nostrconnect and Bunker?" help link
 ///
-/// Direct lift from the pre-existing ConnectNostrconnectTabView (which Task 11
-/// will delete). Camera permission handling, scan deduplication, and paste
-/// validation are unchanged — verbatim copy. The bunker affordance is new.
+/// Camera permission handling, scan deduplication, and paste validation
+/// originated from the deleted ConnectNostrconnectTabView. The bunker action
+/// card and the educational help-link copy were added during Phase 1 smoke
+/// fixes — the card moved up from a buried secondary position to right
+/// below the paste field, and the help sheet now explains both methods
+/// (nostrconnect vs bunker) plus the same-device pairing gotcha.
 struct ConnectNostrConnectSurface: View {
 
     /// Bound by parent (ConnectTabView, future Task 7). Triggers presentation
@@ -53,10 +56,8 @@ struct ConnectNostrConnectSurface: View {
             VStack(spacing: 16) {
                 cameraSection
                 pasteSection
+                bunkerActionCard
                 helpLink
-                Divider()
-                    .padding(.vertical, 8)
-                bunkerSecondaryAffordance
             }
             .padding(.top, 12)
             .padding(.horizontal, 16)
@@ -214,9 +215,10 @@ struct ConnectNostrConnectSurface: View {
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: "info.circle")
-                Text("What's a nostrconnect URI?")
+                Text("What's the difference between Nostrconnect and Bunker?")
+                    .multilineTextAlignment(.leading)
             }
-            .font(.subheadline)
+            .font(.footnote)
             .fontWeight(.medium)
         }
         .buttonStyle(.plain)
@@ -224,28 +226,42 @@ struct ConnectNostrConnectSurface: View {
         .padding(.top, 4)
     }
 
-    // MARK: - Bunker secondary affordance (NEW in this task)
+    // MARK: - Bunker action card
 
-    private var bunkerSecondaryAffordance: some View {
+    /// Promoted from a small "secondary affordance" at the bottom of the
+    /// surface to a more prominent action card right after the paste field.
+    /// Same destination (the bunker child route) — better discoverability for
+    /// users who arrived here via the Connect tab rather than via a client app
+    /// presenting them a `nostrconnect://` URI to paste.
+    private var bunkerActionCard: some View {
         Button {
             onShowBunker()
         } label: {
-            HStack(spacing: 8) {
+            HStack(spacing: 12) {
+                Image(systemName: "qrcode")
+                    .font(.title2)
+                    .foregroundStyle(.tint)
+                    .frame(width: 32, height: 32)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Or share a code from Clave")
-                        .font(.subheadline.weight(.medium))
+                    Text("Share a code from Clave")
+                        .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.primary)
-                    Text("Use Clave as your signer in another app")
+                    Text("Generate a bunker URI for another app to use")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.leading)
                 }
                 Spacer()
                 Image(systemName: "chevron.right")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.tertiary)
             }
-            .padding(12)
+            .padding(14)
             .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(Color.accentColor.opacity(0.25), lineWidth: 1)
+            )
         }
         .buttonStyle(.plain)
     }
