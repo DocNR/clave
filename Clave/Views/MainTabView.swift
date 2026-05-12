@@ -22,7 +22,7 @@ struct MainTabView: View {
 
             ConnectTabView()
                 .tabItem {
-                    Label("Connect", systemImage: "link.circle.fill")
+                    Label("Connect", systemImage: "bolt.fill")
                 }
 
             DiscoverView()
