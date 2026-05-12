@@ -19,7 +19,8 @@ struct ConnectTabView: View {
     @State private var pickedSignerPubkey: String?
     @State private var isConnecting = false
     @State private var connectionError: String?
-    @State private var pushBunker = false
+    @State private var bunkerSignerPubkey: String?
+    @State private var showBunkerPicker = false
     @State private var approvalContext: ApprovalContext?
 
     private struct ApprovalContext: Identifiable {
@@ -33,12 +34,25 @@ struct ConnectTabView: View {
             ConnectNostrConnectSurface(
                 parsedURI: parsedURI,
                 onParsed: handleParsed,
-                onShowBunker: { pushBunker = true }
+                onShowBunker: handleShowBunker
             )
             .navigationTitle("Connect")
             .navigationBarTitleDisplayMode(.inline)
-            .navigationDestination(isPresented: $pushBunker) {
-                ConnectBunkerView()
+            .navigationDestination(item: $bunkerSignerPubkey) { signerPubkey in
+                BunkerURIRender(signerPubkey: signerPubkey)
+                    .navigationTitle("Share Bunker Code")
+                    .navigationBarTitleDisplayMode(.inline)
+            }
+            .sheet(isPresented: $showBunkerPicker) {
+                ConnectAccountPicker(mode: .single, parsedURI: nil) { pubkeys in
+                    showBunkerPicker = false
+                    if let picked = pubkeys.first {
+                        // Defer setting nav state so picker sheet finishes dismissing first
+                        DispatchQueue.main.async {
+                            bunkerSignerPubkey = picked
+                        }
+                    }
+                }
             }
             .sheet(isPresented: $showPicker) {
                 if let parsed = parsedURI {
@@ -72,6 +86,15 @@ struct ConnectTabView: View {
     }
 
     // MARK: - State machine
+
+    private func handleShowBunker() {
+        if ConnectAccountPicker.shouldAutoSkip(accountCount: appState.accounts.count),
+           let only = appState.accounts.first {
+            bunkerSignerPubkey = only.pubkeyHex
+        } else {
+            showBunkerPicker = true
+        }
+    }
 
     private func handleParsed(_ uri: NostrConnectParser.ParsedURI, source: NostrConnectURISource) {
         parsedURI = uri

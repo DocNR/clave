@@ -6,7 +6,8 @@ import SwiftUI
 /// `currentAccount`. This makes it safe to show a different account's bunker
 /// URI without switching the active account.
 ///
-/// Used by `ConnectBunkerView` after the account picker resolves the signer.
+/// Used by `ConnectTabView` as a navigation destination after the account picker
+/// resolves the signer (or auto-skips for single-account users).
 struct BunkerURIRender: View {
 
     @Environment(AppState.self) private var appState

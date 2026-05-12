@@ -59,7 +59,7 @@ struct ConnectAccountPicker: View {
                 }
             }
         }
-        .presentationDetents([.medium])
+        .presentationDetents([.medium, .large])
         .presentationBackground(Color(.systemGroupedBackground))
         .snapshotProtected()
     }
