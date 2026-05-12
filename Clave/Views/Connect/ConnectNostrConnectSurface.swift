@@ -14,24 +14,25 @@ enum NostrConnectURISource {
     case qrScan
 }
 
-/// Body of the "Nostrconnect" tab in ConnectSheet. Composes a live camera
-/// viewfinder + a paste field + a help link. The camera permission denial
-/// path renders an inline placeholder with an "Open Settings" link;
-/// the paste field stays functional regardless of camera state.
+/// The primary surface inside the Connect tab. Hosts (top to bottom):
+///   - QR scanner viewfinder (when camera authorized)
+///   - Paste-from-clipboard button + URI text field
+///   - "Share a code from Clave" action card (pushes to bunker view)
+///   - "What's the difference between Nostrconnect and Bunker?" help link
 ///
-/// Replaces both ConnectScanQRView and ConnectPasteView from the old
-/// 3-card flow. The user no longer has to choose between scan and paste —
-/// both inputs are visible on the same screen.
-struct ConnectNostrconnectTabView: View {
-    /// Bound to ConnectSheet's parsedURI. When this transitions back to
-    /// nil (e.g. ApprovalSheet was cancelled without completing),
-    /// the view resets isScanning + clears any scanError so the camera
-    /// resumes. Without this, a successful scan permanently sets
-    /// isScanning = false and the viewfinder freezes after cancel
-    /// because .onAppear doesn't re-fire (the view never unmounts —
-    /// the segmented control swaps body inline rather than pushing).
+/// Camera permission handling, scan deduplication, and paste validation
+/// originated from the deleted ConnectNostrconnectTabView. The bunker action
+/// card and the educational help-link copy were added during Phase 1 smoke
+/// fixes — the card moved up from a buried secondary position to right
+/// below the paste field, and the help sheet now explains both methods
+/// (nostrconnect vs bunker) plus the same-device pairing gotcha.
+struct ConnectNostrConnectSurface: View {
+
+    /// Bound by parent (ConnectTabView, future Task 7). Triggers presentation
+    /// of ConnectAccountPicker → ApprovalSheet.
     let parsedURI: NostrConnectParser.ParsedURI?
     let onParsed: (NostrConnectParser.ParsedURI, NostrConnectURISource) -> Void
+    let onShowBunker: () -> Void
 
     @State private var pasteText = ""
     @State private var pasteError: String?
@@ -55,6 +56,7 @@ struct ConnectNostrconnectTabView: View {
             VStack(spacing: 16) {
                 cameraSection
                 pasteSection
+                bunkerActionCard
                 helpLink
             }
             .padding(.top, 12)
@@ -88,6 +90,8 @@ struct ConnectNostrconnectTabView: View {
             }
         }
     }
+
+    // MARK: - Camera section
 
     @ViewBuilder
     private var cameraSection: some View {
@@ -162,6 +166,8 @@ struct ConnectNostrconnectTabView: View {
         .background(Color(.tertiarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
     }
 
+    // MARK: - Paste section
+
     private var pasteSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Or paste a URI")
@@ -209,15 +215,58 @@ struct ConnectNostrconnectTabView: View {
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: "info.circle")
-                Text("What's a nostrconnect URI?")
+                Text("What's the difference between Nostrconnect and Bunker?")
+                    .multilineTextAlignment(.leading)
             }
-            .font(.subheadline)
+            .font(.footnote)
             .fontWeight(.medium)
         }
         .buttonStyle(.plain)
         .foregroundStyle(.tint)
         .padding(.top, 4)
     }
+
+    // MARK: - Bunker action card
+
+    /// Promoted from a small "secondary affordance" at the bottom of the
+    /// surface to a more prominent action card right after the paste field.
+    /// Same destination (the bunker child route) — better discoverability for
+    /// users who arrived here via the Connect tab rather than via a client app
+    /// presenting them a `nostrconnect://` URI to paste.
+    private var bunkerActionCard: some View {
+        Button {
+            onShowBunker()
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "qrcode")
+                    .font(.title2)
+                    .foregroundStyle(.tint)
+                    .frame(width: 32, height: 32)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Share a code from Clave")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                    Text("Generate a bunker URI for another app to use")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.leading)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(14)
+            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(Color.accentColor.opacity(0.25), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Validation + scan handling
 
     private func validateAndSubmit() {
         let trimmed = pasteText.trimmingCharacters(in: .whitespacesAndNewlines)

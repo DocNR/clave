@@ -4,11 +4,9 @@ struct HomeView: View {
     @Environment(AppState.self) private var appState
     @State private var clients: [ClientPermissions] = []
     @State private var activityLog: [ActivityEntry] = []
-    @State private var showConnectSheet = false
     @State private var clientToUnpair: ClientPermissions?
     @State private var showAddAccountSheet = false
     @State private var showAccountCapAlert = false
-    @State private var showConnectionCapAlert = false
     @State private var showInboxSheet = false
     @State private var navigationPath = NavigationPath()
     @State private var deeplinkApprovalURI: NostrConnectParser.ParsedURI?
@@ -162,11 +160,6 @@ struct HomeView: View {
                     AccountDetailView(pubkeyHex: pubkey)
                 }
             }
-            .sheet(isPresented: $showConnectSheet, onDismiss: {
-                refreshData()
-            }) {
-                ConnectSheet()
-            }
             .sheet(isPresented: $showAddAccountSheet) {
                 AddAccountSheet()
             }
@@ -174,8 +167,9 @@ struct HomeView: View {
                 InboxView()
             }
             .sheet(item: $deeplinkAccountChoiceURI) { uri in
-                DeeplinkAccountPicker(parsedURI: uri) { pickedPubkey in
-                    appState.deeplinkBoundAccount = pickedPubkey
+                ConnectAccountPicker(mode: .single, parsedURI: uri) { pubkeys in
+                    guard let pubkey = pubkeys.first else { return }
+                    appState.deeplinkBoundAccount = pubkey
                     let captured = uri
                     deeplinkAccountChoiceURI = nil  // dismiss picker first
                     DispatchQueue.main.async {
@@ -197,11 +191,20 @@ struct HomeView: View {
                     appState.deeplinkBoundAccount = nil
                     Task {
                         do {
-                            try await appState.handleNostrConnect(
+                            let signerPubkeys = [bound ?? appState.currentAccount?.pubkeyHex ?? ""]
+                            let result = try await appState.handleNostrConnect(
                                 parsedURI: captured,
-                                permissions: permissions,
-                                boundAccountPubkey: bound
+                                signerPubkeys: signerPubkeys,
+                                permissions: permissions
                             )
+                            // Single-account flow: result.succeeded.count is 1 on
+                            // success; isAllFailure on failure.
+                            if result.isAllFailure,
+                               let first = result.failed.first {
+                                await MainActor.run {
+                                    deeplinkError = first.errorMessage
+                                }
+                            }
                         } catch {
                             await MainActor.run {
                                 deeplinkError = error.localizedDescription
@@ -222,11 +225,6 @@ struct HomeView: View {
                 Button("OK", role: .cancel) {}
             } message: {
                 Text(AccountError.accountCapReached.errorDescription ?? "")
-            }
-            .alert("Connection limit reached", isPresented: $showConnectionCapAlert) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                Text(AccountError.connectionCapReached.errorDescription ?? "")
             }
             .alert(swipeUnpairAlertTitle, isPresented: Binding(
                 get: { clientToUnpair != nil },
@@ -268,19 +266,6 @@ struct HomeView: View {
             UINotificationFeedbackGenerator().notificationOccurred(.warning)
         } else {
             showAddAccountSheet = true
-        }
-    }
-
-    /// Pre-check connection cap before opening ConnectSheet so the user
-    /// hits the alert at the entry point, not after a NIP-46 connect
-    /// request lands in ApprovalSheet (where ApprovalSheet's own check
-    /// stays as defense-in-depth for cross-device pair attempts).
-    private func handlePairNewConnectionTap() {
-        if clients.count >= Account.maxClientsPerAccount {
-            showConnectionCapAlert = true
-            UINotificationFeedbackGenerator().notificationOccurred(.warning)
-        } else {
-            showConnectSheet = true
         }
     }
 
@@ -355,33 +340,18 @@ struct HomeView: View {
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
     }
 
-    // MARK: - Primary CTA
+    // MARK: - Connect Tab Hint
 
-    /// Always-visible primary CTA for the "connect a Nostr client" flow.
-    /// Sits above stats / below the mini bar. Replaces the previous
-    /// in-list `pairNewConnectionRow` (small themed row inside the Connected
-    /// Clients section) and the in-list empty-state large button — there is
-    /// now ONE surface for this action regardless of whether clients exist.
-    /// Uses theme.accent so the tint matches the active account's gradient
-    /// identity (consistent with the account strip, ConnectBunkerTabView's
-    /// Copy URI button, and other per-account chrome).
+    /// Text hint that replaces the old "Connect a Client" primary CTA button.
+    /// Connect is now its own top-level tab — the button is gone. This hint
+    /// sits in the same slot (above stats / below the mini bar) and directs
+    /// users to the correct entry point.
     private var connectClientButton: some View {
-        let theme = AccountTheme.forAccount(pubkeyHex: appState.currentAccount?.pubkeyHex ?? "")
-        return Button {
-            handlePairNewConnectionTap()
-        } label: {
-            // Use simple `plus` glyph (not `plus.circle.fill`) — the filled
-            // variant has a negative-space plus that renders invisibly
-            // against the borderedProminent fill. See Task 7 commit for
-            // backstory.
-            Label("Connect a Client", systemImage: "plus")
-                .font(.body.bold())
-                .foregroundStyle(.white)
-                .frame(maxWidth: .infinity)
-        }
-        .buttonStyle(.borderedProminent)
-        .tint(theme.accent)
-        .padding(.horizontal, 16)
+        Text("Tap **Connect** in the tab bar to pair your first app.")
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            .multilineTextAlignment(.center)
+            .padding()
     }
 
     // MARK: - Connected Clients
@@ -398,7 +368,7 @@ struct HomeView: View {
             Text("No clients connected yet")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
-            Text("Tap **Connect a Client** above to get started.")
+            Text("Tap **Connect** in the tab bar to get started.")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
                 .multilineTextAlignment(.center)

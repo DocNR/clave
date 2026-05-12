@@ -20,6 +20,16 @@ struct MainTabView: View {
                     Label("Activity", systemImage: "list.bullet")
                 }
 
+            ConnectTabView()
+                .tabItem {
+                    Label("Connect", systemImage: "bolt.fill")
+                }
+
+            DiscoverView()
+                .tabItem {
+                    Label("Discover", systemImage: "safari")
+                }
+
             SettingsView()
                 .tabItem {
                     Label("Settings", systemImage: "gearshape.fill")

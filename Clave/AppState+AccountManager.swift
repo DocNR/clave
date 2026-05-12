@@ -281,8 +281,16 @@ extension AppState {
     }
 
     func rotateBunkerSecret() {
-        guard !signerPubkeyHex.isEmpty else { return }
-        _ = SharedStorage.rotateBunkerSecret(for: signerPubkeyHex)
+        rotateBunkerSecret(for: signerPubkeyHex)
+    }
+
+    /// Per-signer variant of `rotateBunkerSecret()`. Rotates the bunker
+    /// secret for an explicit signer rather than the current account.
+    /// No-ops silently when the pubkey doesn't correspond to a known account.
+    func rotateBunkerSecret(for pubkey: String) {
+        guard !pubkey.isEmpty,
+              accounts.contains(where: { $0.pubkeyHex == pubkey }) else { return }
+        _ = SharedStorage.rotateBunkerSecret(for: pubkey)
         bunkerSecretsTick &+= 1
     }
 

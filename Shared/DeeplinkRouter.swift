@@ -8,7 +8,7 @@ enum DeeplinkRouter {
     enum Outcome: Equatable {
         /// Single-account: route directly to ApprovalSheet.
         case approve(NostrConnectParser.ParsedURI)
-        /// Multi-account: route to DeeplinkAccountPicker first.
+        /// Multi-account: route to ConnectAccountPicker first.
         case pickAccount(NostrConnectParser.ParsedURI)
         /// No-op (clave:// reserved, malformed URIs, unsupported schemes,
         /// or zero-account defensive case).
