@@ -54,6 +54,7 @@ struct BunkerURIRender: View {
         } else {
             ScrollView {
                 VStack(spacing: 16) {
+                    accountHeader
                     qrCard
                     uriCard
                     actionRow
@@ -74,6 +75,62 @@ struct BunkerURIRender: View {
     }
 
     // MARK: - Subviews
+
+    /// Visual reminder of which account this bunker URI signs for. Helps
+    /// when the user navigates here from the picker — the URI itself is
+    /// opaque hex, so a labelled avatar makes the binding obvious.
+    @ViewBuilder
+    private var accountHeader: some View {
+        if let account = appState.accounts.first(where: { $0.pubkeyHex == signerPubkey }) {
+            HStack(spacing: 14) {
+                accountAvatar(for: account, size: 48)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Sharing as @\(account.displayLabel)")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(.primary)
+                    Text(truncatedNpub(account.pubkeyHex))
+                        .font(.system(.caption2, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            .padding(12)
+            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
+        }
+    }
+
+    /// Account avatar with kind:0 profile-picture fetched via `AsyncImage`,
+    /// falling back to `AvatarView`'s initials+gradient. Matches the pattern
+    /// in `ConnectAccountPicker.accountAvatar` and `HomeView.clientRow`.
+    @ViewBuilder
+    private func accountAvatar(for account: Account, size: CGFloat) -> some View {
+        if let pictureURL = account.profile?.pictureURL,
+           let url = URL(string: pictureURL) {
+            AsyncImage(url: url) { image in
+                image.resizable().scaledToFill()
+            } placeholder: {
+                AvatarView(pubkeyHex: account.pubkeyHex,
+                           name: account.displayLabel,
+                           size: size)
+            }
+            .frame(width: size, height: size)
+            .clipShape(Circle())
+        } else {
+            AvatarView(pubkeyHex: account.pubkeyHex,
+                       name: account.displayLabel,
+                       size: size)
+        }
+    }
+
+    /// Bech32-encoded npub for the account, truncated for compact display.
+    /// Same shape as `ConnectAccountPicker.truncatedNpub`.
+    private func truncatedNpub(_ pubkeyHex: String) -> String {
+        guard let npub = try? Nip19.encodeNpub(pubkeyHex: pubkeyHex),
+              npub.count > 16 else {
+            return String(pubkeyHex.prefix(12)) + "…"
+        }
+        return "\(npub.prefix(12))…\(npub.suffix(4))"
+    }
 
     private var qrCard: some View {
         VStack(spacing: 8) {
