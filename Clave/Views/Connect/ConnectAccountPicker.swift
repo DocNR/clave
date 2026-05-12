@@ -59,7 +59,6 @@ struct ConnectAccountPicker: View {
                 }
             }
         }
-        .presentationDetents([.medium, .large])
         .presentationBackground(Color(.systemGroupedBackground))
         .snapshotProtected()
     }
@@ -118,15 +117,13 @@ struct ConnectAccountPicker: View {
                                                  endPoint: .bottomTrailing))
                             .frame(width: 68, height: 68)
                     }
-                    AvatarView(pubkeyHex: account.pubkeyHex,
-                               name: account.displayLabel,
-                               size: 60)
+                    accountAvatar(for: account)
                 }
                 VStack(alignment: .leading, spacing: 3) {
                     Text("@\(account.displayLabel)")
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(.primary)
-                    Text(String(account.pubkeyHex.prefix(12)) + "…")
+                    Text(truncatedNpub(account.pubkeyHex))
                         .font(.system(.caption2, design: .monospaced))
                         .foregroundStyle(.secondary)
                 }
@@ -144,5 +141,41 @@ struct ConnectAccountPicker: View {
             .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
         }
         .buttonStyle(.plain)
+    }
+
+    /// Account avatar with kind:0 profile-picture fetched via `AsyncImage`,
+    /// falling back to `AvatarView`'s initials+gradient when the URL is
+    /// nil/loading/failed. Matches the pattern used in `HomeView.clientRow`
+    /// and `ApprovalSheet`.
+    @ViewBuilder
+    private func accountAvatar(for account: Account) -> some View {
+        let size: CGFloat = 60
+        if let pictureURL = account.profile?.pictureURL,
+           let url = URL(string: pictureURL) {
+            AsyncImage(url: url) { image in
+                image.resizable().scaledToFill()
+            } placeholder: {
+                AvatarView(pubkeyHex: account.pubkeyHex,
+                           name: account.displayLabel,
+                           size: size)
+            }
+            .frame(width: size, height: size)
+            .clipShape(Circle())
+        } else {
+            AvatarView(pubkeyHex: account.pubkeyHex,
+                       name: account.displayLabel,
+                       size: size)
+        }
+    }
+
+    /// User-facing truncated npub for the picker subtitle. Falls back to
+    /// the raw hex prefix only if encoding fails (shouldn't happen for a
+    /// known account; defensive).
+    private func truncatedNpub(_ pubkeyHex: String) -> String {
+        guard let npub = try? Nip19.encodeNpub(pubkeyHex: pubkeyHex),
+              npub.count > 16 else {
+            return String(pubkeyHex.prefix(12)) + "…"
+        }
+        return "\(npub.prefix(12))…\(npub.suffix(4))"
     }
 }

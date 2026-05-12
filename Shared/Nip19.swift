@@ -30,6 +30,16 @@ enum Nip19 {
         return try Bech32.encode(hrp: "note", data: data)
     }
 
+    /// Bech32-encode a 32-byte pubkey with HRP `npub`. Simplest form, no TLV
+    /// — just the raw 32 bytes. Used wherever the UI needs the user-facing
+    /// npub1… form instead of raw hex (account pickers, identity rows, etc.).
+    static func encodeNpub(pubkeyHex: String) throws -> String {
+        guard pubkeyHex.count == 64, let data = Data(hexString: pubkeyHex), data.count == 32 else {
+            throw EncodeError.invalidHexLength
+        }
+        return try Bech32.encode(hrp: "npub", data: data)
+    }
+
     /// Bech32-encode a `nevent` TLV reference with optional relay hints,
     /// author, and kind. Relay hints help njump (and other clients) find
     /// the event faster — pass the connection's known relays, capped at 2.
