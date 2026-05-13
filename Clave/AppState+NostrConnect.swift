@@ -48,6 +48,12 @@ extension AppState {
             throw ClaveError.noSignerKey
         }
 
+        // The picker's selected-count is the authoritative `total` per the
+        // multi-account spec. Computed once at the top of the loop so every
+        // ack in the batch carries the same value (clients use it to know
+        // when they've received all expected acks).
+        let total = signerPubkeys.count
+
         var succeeded: [String] = []
         var failed: [HandshakeResult.FailedSigner] = []
 
@@ -56,7 +62,8 @@ extension AppState {
                 try await runSingleConnect(
                     parsedURI: parsedURI,
                     signerPubkey: signerPubkey,
-                    permissions: permissions
+                    permissions: permissions,
+                    total: total
                 )
                 succeeded.append(signerPubkey)
             } catch {
@@ -76,7 +83,8 @@ extension AppState {
     private func runSingleConnect(
         parsedURI: NostrConnectParser.ParsedURI,
         signerPubkey resolvedSignerPubkey: String,
-        permissions: ClientPermissions
+        permissions: ClientPermissions,
+        total: Int
     ) async throws {
         guard !resolvedSignerPubkey.isEmpty,
               let nsec = SharedKeychain.loadNsec(for: resolvedSignerPubkey) else {
@@ -129,7 +137,18 @@ extension AppState {
         for _ in 1...3 {
             // Build a fresh event each attempt (new created_at = new event ID)
             let responseId = UUID().uuidString
-            let responseDict: [String: Any] = ["id": responseId, "result": parsedURI.secret]
+            // Resolve account profile for enriched JSON ack (multi only).
+            // Single-account flow falls back to bare-secret string inside
+            // LightSigner.connectAckResult.
+            let account = accounts.first(where: { $0.pubkeyHex == signerPubkey })
+            let resultField = LightSigner.connectAckResult(
+                isMultiAccount: parsedURI.isMultiAccount,
+                echoedSecret: parsedURI.secret,
+                accountName: account?.profile?.displayName,
+                accountPicture: account?.profile?.pictureURL,
+                total: total
+            )
+            let responseDict: [String: Any] = ["id": responseId, "result": resultField]
             guard let responseData = try? JSONSerialization.data(withJSONObject: responseDict),
                   let responseJSON = String(data: responseData, encoding: .utf8) else {
                 continue
