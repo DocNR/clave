@@ -15,8 +15,9 @@ struct ConnectTabView: View {
 
     @State private var parsedURI: NostrConnectParser.ParsedURI?
     @State private var lastParsedSource: NostrConnectURISource = .paste
-    @State private var showPicker = false
-    @State private var pickedSignerPubkey: String?
+    @State private var showPicker = false           // single-mode picker
+    @State private var showMultiPicker = false      // multi-mode picker
+    @State private var pickedSignerPubkeys: [String] = []
     @State private var isConnecting = false
     @State private var connectionError: String?
     @State private var bunkerSignerPubkey: String?
@@ -24,9 +25,9 @@ struct ConnectTabView: View {
     @State private var approvalContext: ApprovalContext?
 
     private struct ApprovalContext: Identifiable {
-        let id: String   // composite of URI id + signer pubkey
+        let id: String   // composite of URI id + joined signer pubkeys
         let parsedURI: NostrConnectParser.ParsedURI
-        let signerPubkey: String
+        let signerPubkeys: [String]
     }
 
     var body: some View {
@@ -57,17 +58,29 @@ struct ConnectTabView: View {
             .sheet(isPresented: $showPicker) {
                 if let parsed = parsedURI {
                     ConnectAccountPicker(mode: .single, parsedURI: parsed) { pubkeys in
-                        pickedSignerPubkey = pubkeys.first
+                        // .single always yields a 1-element array
+                        pickedSignerPubkeys = pubkeys
                         showPicker = false
                         presentApproval()
                     }
                 }
             }
+            .sheet(isPresented: $showMultiPicker) {
+                if let parsed = parsedURI {
+                    ConnectAccountPicker(mode: .multi, parsedURI: parsed) { pubkeys in
+                        pickedSignerPubkeys = pubkeys
+                        showMultiPicker = false
+                        if !pubkeys.isEmpty {
+                            presentApproval()
+                        }
+                    }
+                }
+            }
             .sheet(item: $approvalContext) { ctx in
                 ApprovalSheet(parsedURI: ctx.parsedURI,
-                              boundAccountPubkeys: [ctx.signerPubkey]) { permissions in
+                              boundAccountPubkeys: ctx.signerPubkeys) { permissions in
                     submitApproval(uri: ctx.parsedURI,
-                                   signerPubkey: ctx.signerPubkey,
+                                   signerPubkeys: ctx.signerPubkeys,
                                    permissions: permissions)
                 }
             }
@@ -100,33 +113,38 @@ struct ConnectTabView: View {
         parsedURI = uri
         lastParsedSource = source
 
-        // Auto-skip picker when only 1 account exists.
+        // Auto-skip picker when only 1 account exists — even multi-aware URIs
+        // collapse to a one-element flow when N=1.
         if ConnectAccountPicker.shouldAutoSkip(accountCount: appState.accounts.count),
            let only = appState.accounts.first {
-            pickedSignerPubkey = only.pubkeyHex
+            pickedSignerPubkeys = [only.pubkeyHex]
             presentApproval()
+        } else if uri.isMultiAccount {
+            // Multi-account picker (Phase 2)
+            showMultiPicker = true
         } else {
+            // Single-account picker (Phase 1 path)
             showPicker = true
         }
     }
 
     private func presentApproval() {
-        guard let uri = parsedURI, let signer = pickedSignerPubkey else { return }
+        guard let uri = parsedURI, !pickedSignerPubkeys.isEmpty else { return }
         approvalContext = ApprovalContext(
-            id: uri.id + ":" + signer,
+            id: uri.id + ":" + pickedSignerPubkeys.joined(separator: ","),
             parsedURI: uri,
-            signerPubkey: signer
+            signerPubkeys: pickedSignerPubkeys
         )
     }
 
     private func submitApproval(uri: NostrConnectParser.ParsedURI,
-                                signerPubkey: String,
+                                signerPubkeys: [String],
                                 permissions: ClientPermissions) {
         isConnecting = true
         connectionError = nil
         approvalContext = nil
         parsedURI = nil
-        pickedSignerPubkey = nil
+        pickedSignerPubkeys = []
 
         Task { @MainActor in
             // Extend foreground execution so the handshake survives the user
@@ -144,15 +162,10 @@ struct ConnectTabView: View {
             do {
                 let result = try await appState.handleNostrConnect(
                     parsedURI: uri,
-                    signerPubkeys: [signerPubkey],
+                    signerPubkeys: signerPubkeys,
                     permissions: permissions
                 )
-                isConnecting = false
-                if result.isAllFailure {
-                    connectionError = result.failed.first?.errorMessage ?? "Unknown error"
-                }
-                // Success-only and partial cases dismiss naturally for single-mode
-                // (partial-failure UX lands in Phase 2 with multi-mode).
+                handleHandshakeResult(result)
             } catch {
                 connectionError = error.localizedDescription
                 isConnecting = false
@@ -162,6 +175,16 @@ struct ConnectTabView: View {
                 bgTaskID = .invalid
             }
         }
+    }
+
+    private func handleHandshakeResult(_ result: HandshakeResult) {
+        isConnecting = false
+        if result.isAllFailure {
+            connectionError = result.failed.first?.errorMessage ?? "Unknown error"
+        }
+        // All-success: sheet was already dismissed in submitApproval (approvalContext = nil).
+        // Partial-failure: Task 11 will route this case back through ApprovalSheet's
+        // result view; for Phase 2 / Task 9, we just don't surface an error alert.
     }
 
     // MARK: - Connecting overlay (lifted from the deleted ConnectSheet)
