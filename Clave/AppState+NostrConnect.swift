@@ -42,7 +42,8 @@ extension AppState {
     func handleNostrConnect(
         parsedURI: NostrConnectParser.ParsedURI,
         signerPubkeys: [String],
-        permissions: ClientPermissions
+        permissions: ClientPermissions,
+        progress: ((_ currentIndex: Int, _ total: Int, _ currentSigner: String) -> Void)? = nil
     ) async throws -> HandshakeResult {
         guard !signerPubkeys.isEmpty else {
             throw ClaveError.noSignerKey
@@ -57,7 +58,21 @@ extension AppState {
         var succeeded: [String] = []
         var failed: [HandshakeResult.FailedSigner] = []
 
-        for signerPubkey in signerPubkeys {
+        for (index, signerPubkey) in signerPubkeys.enumerated() {
+            // Fire the progress callback BEFORE each iteration so the UI can
+            // mark THIS signer as "currently pairing" while the handshake
+            // runs. Phase 1 single-mode callers pass nil — behavior unchanged.
+            //
+            // The callback only reports forward motion: "we're about to pair
+            // signer at index N". It deliberately does NOT carry the prior
+            // signer's outcome — the cumulative HandshakeResult arrives at
+            // the end. UIs that want incremental status during the loop
+            // (e.g., ApprovalSheet's progressRow) can speculatively assume
+            // success for prior signers and reconcile against the final
+            // result; speculative-success matches the common case (rare
+            // failures) and is corrected at result time by Task 11's
+            // partial-failure view.
+            progress?(index, total, signerPubkey)
             do {
                 try await runSingleConnect(
                     parsedURI: parsedURI,

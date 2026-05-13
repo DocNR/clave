@@ -181,35 +181,29 @@ struct HomeView: View {
                 }
             }
             .sheet(item: $deeplinkApprovalURI) { uri in
+                // Resolve the bound signer for the deeplink path. Auto-skip
+                // (1 account) leaves deeplinkBoundAccount nil; fall back to
+                // the current account so ApprovalSheet's in-sheet handshake
+                // has a non-empty signer set. If both are nil
+                // (zero-account device — shouldn't reach this sheet) the
+                // empty array propagates and handleNostrConnect throws
+                // ClaveError.noSignerKey, which the in-sheet runHandshake
+                // converts to an all-failure result.
+                let bound = appState.deeplinkBoundAccount
+                    ?? appState.currentAccount?.pubkeyHex
                 ApprovalSheet(
                     parsedURI: uri,
-                    boundAccountPubkeys: appState.deeplinkBoundAccount.map { [$0] } ?? []
-                ) { permissions in
-                    let captured = uri
-                    let bound = appState.deeplinkBoundAccount
+                    boundAccountPubkeys: bound.map { [$0] } ?? []
+                ) { result in
+                    // Task 10 contract: ApprovalSheet now runs the handshake
+                    // internally. Parent just routes the outcome. Deeplink
+                    // flow is always single-mode (one bound account), so
+                    // isPartialFailure is impossible — only isAllSuccess /
+                    // isAllFailure.
                     deeplinkApprovalURI = nil
                     appState.deeplinkBoundAccount = nil
-                    Task {
-                        do {
-                            let signerPubkeys = [bound ?? appState.currentAccount?.pubkeyHex ?? ""]
-                            let result = try await appState.handleNostrConnect(
-                                parsedURI: captured,
-                                signerPubkeys: signerPubkeys,
-                                permissions: permissions
-                            )
-                            // Single-account flow: result.succeeded.count is 1 on
-                            // success; isAllFailure on failure.
-                            if result.isAllFailure,
-                               let first = result.failed.first {
-                                await MainActor.run {
-                                    deeplinkError = first.errorMessage
-                                }
-                            }
-                        } catch {
-                            await MainActor.run {
-                                deeplinkError = error.localizedDescription
-                            }
-                        }
+                    if result.isAllFailure {
+                        deeplinkError = result.failed.first?.errorMessage ?? "Unknown error"
                     }
                 }
             }

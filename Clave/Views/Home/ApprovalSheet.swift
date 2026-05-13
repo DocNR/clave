@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct ApprovalSheet: View {
     let parsedURI: NostrConnectParser.ParsedURI
@@ -7,7 +8,11 @@ struct ApprovalSheet: View {
     /// user selected multiple. Single-mode (count == 1) preserves Phase 1 UX.
     /// May be empty in degenerate paths; downstream guards treat empty as no-op.
     let boundAccountPubkeys: [String]
-    let onApprove: (ClientPermissions) -> Void
+    /// Called when the handshake completes (success, partial, or all-failure).
+    /// Phase 2 contract change (Task 10): sheet now runs the handshake itself
+    /// so progress state can live where it's rendered. Parent decides dismiss
+    /// based on result.{isAllSuccess, isAllFailure, isPartialFailure}.
+    let onCompletion: (HandshakeResult) -> Void
     @Environment(\.dismiss) private var dismiss
     @Environment(AppState.self) private var appState
 
@@ -16,14 +21,29 @@ struct ApprovalSheet: View {
     @State private var showPermissions = false
     @State private var showConnectionCapAlert = false
 
+    // Progress state (Task 10) — populated while handleNostrConnect runs.
+    // Phase 1 single-mode renders only `isConnecting`; multi-mode renders
+    // the per-row overlay built from progressIndex/progressTotal/
+    // currentlyPairing/succeededSoFar.
+    @State private var isConnecting: Bool = false
+    @State private var progressIndex: Int = 0
+    @State private var progressTotal: Int = 0
+    @State private var currentlyPairing: String? = nil
+    @State private var succeededSoFar: Set<String> = []
+    /// Latched once the loop finishes (success or partial). Keeps the
+    /// non-action UI in place so the user can't re-tap Approve while the
+    /// parent decides whether to dismiss (all-success / all-failure) or
+    /// hand control to the partial-failure result view (Task 11).
+    @State private var handshakeCompleted: Bool = false
+
     private let protectedKinds: Set<Int> = SharedStorage.getProtectedKinds()
 
     init(parsedURI: NostrConnectParser.ParsedURI,
          boundAccountPubkeys: [String] = [],
-         onApprove: @escaping (ClientPermissions) -> Void) {
+         onCompletion: @escaping (HandshakeResult) -> Void) {
         self.parsedURI = parsedURI
         self.boundAccountPubkeys = boundAccountPubkeys
-        self.onApprove = onApprove
+        self.onCompletion = onCompletion
         _selectedTrust = State(initialValue: parsedURI.suggestedTrustLevel)
     }
 
@@ -43,14 +63,27 @@ struct ApprovalSheet: View {
                         .padding(.horizontal)
                         .padding(.top, 12)
                     clientHeader
-                    trustLevelCards
-                    permissionsSection
-                    actionButtons
+                    if isConnecting {
+                        progressBlock
+                    } else if handshakeCompleted {
+                        // Latched post-loop. For all-success / all-failure
+                        // the parent's onCompletion dismisses the sheet
+                        // before this branch is visible for more than a
+                        // frame. For partial-failure the sheet stays here
+                        // until Task 11 replaces this placeholder with the
+                        // per-row result view + Done button.
+                        completedPlaceholder
+                    } else {
+                        trustLevelCards
+                        permissionsSection
+                        actionButtons
+                    }
                 }
                 .padding()
             }
             .navigationTitle("Approve Connection")
             .navigationBarTitleDisplayMode(.inline)
+            .interactiveDismissDisabled(isConnecting)
             .alert("Connection limit reached", isPresented: $showConnectionCapAlert) {
                 Button("OK", role: .cancel) { }
             } message: {
@@ -287,6 +320,108 @@ struct ApprovalSheet: View {
         }
     }
 
+    // MARK: - Progress UI (Task 10)
+
+    /// While the handshake loop runs, the trust/permissions/buttons block is
+    /// replaced with a connecting indicator. Single-mode shows a generic
+    /// spinner + copy (matches the deleted ConnectTabView overlay); multi-mode
+    /// shows per-row state.
+    @ViewBuilder
+    private var progressBlock: some View {
+        if isMulti {
+            multiProgressOverlay
+        } else {
+            singleProgressOverlay
+        }
+    }
+
+    private var singleProgressOverlay: some View {
+        VStack(spacing: 16) {
+            ProgressView().controlSize(.large)
+            VStack(spacing: 6) {
+                Text("Connecting...")
+                    .font(.headline)
+                Text("Switch back to your client app to finish connecting. Clave keeps running in the background.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+        }
+        .padding(.vertical, 24)
+    }
+
+    private var multiProgressOverlay: some View {
+        VStack(spacing: 12) {
+            // Clamp the displayed counter to `total` — `progressIndex` is
+            // 0-based and ticks ahead of completion, so `index + 1` is the
+            // human-readable "currently on", capped at total in the final
+            // dwell before isConnecting flips off.
+            Text("Pairing \(min(progressIndex + 1, max(progressTotal, 1))) of \(progressTotal)…")
+                .font(.headline)
+                .foregroundStyle(.secondary)
+            ForEach(boundAccountPubkeys, id: \.self) { pubkey in
+                progressRow(for: pubkey)
+            }
+        }
+        .padding(.vertical, 12)
+    }
+
+    /// Empty-but-non-empty placeholder while the parent decides what to do
+    /// with the completed result. Task 11 replaces this with the partial-
+    /// failure result view (per-row state + retry/done buttons).
+    private var completedPlaceholder: some View {
+        VStack(spacing: 12) {
+            if isMulti {
+                ForEach(boundAccountPubkeys, id: \.self) { pubkey in
+                    progressRow(for: pubkey)
+                }
+            } else {
+                ProgressView().controlSize(.small)
+                Text("Finishing up…")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 12)
+    }
+
+    private func progressRow(for pubkey: String) -> some View {
+        let isCurrent = currentlyPairing == pubkey
+        let isDone = succeededSoFar.contains(pubkey)
+        let isQueued = !isCurrent && !isDone
+        let account = appState.accounts.first(where: { $0.pubkeyHex == pubkey })
+        let label = account?.displayLabel ?? String(pubkey.prefix(8))
+
+        return HStack(spacing: 10) {
+            ZStack {
+                if isDone {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                        .font(.title3)
+                } else if isCurrent {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: "circle.dotted")
+                        .foregroundStyle(.secondary)
+                        .font(.title3)
+                }
+            }
+            .frame(width: 24, height: 24)
+            AvatarView(pubkeyHex: pubkey, name: account?.displayLabel, size: 28)
+            Text(label)
+                .font(.subheadline)
+                .foregroundStyle(isQueued ? .secondary : .primary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(Color(.secondarySystemGroupedBackground),
+                    in: RoundedRectangle(cornerRadius: 10))
+        .opacity(isQueued ? 0.55 : 1.0)
+    }
+
     // MARK: - Helpers
 
     private var signingAsDisplayLabel: String {
@@ -376,8 +511,87 @@ struct ApprovalSheet: View {
             requestCount: 0,
             signerPubkeyHex: signerForCheck
         )
-        onApprove(permissions)
-        // Don't call dismiss() here — ConnectSheet handles dismissal
-        // by setting parsedURI = nil on the .sheet(item:) binding.
+        runHandshake(permissions: permissions)
+    }
+
+    /// Runs the handshake loop in-sheet so the progress UI has a host.
+    /// Wraps the per-pair Task in a UIBackgroundTask so the ~2-3s
+    /// connect→ack window survives the user swiping back to their client
+    /// app mid-flight (build-62 bg-task pattern, previously lived in
+    /// ConnectTabView.submitApproval).
+    private func runHandshake(permissions: ClientPermissions) {
+        // Seed progress state on the main actor before the Task spawns so
+        // the UI swap happens synchronously with the button tap (no flash
+        // of action-buttons before the spinner appears).
+        let signers = boundAccountPubkeys
+        isConnecting = true
+        progressTotal = signers.count
+        progressIndex = 0
+        currentlyPairing = signers.first
+        succeededSoFar = []
+
+        Task { @MainActor in
+            var bgTaskID: UIBackgroundTaskIdentifier = .invalid
+            bgTaskID = UIApplication.shared.beginBackgroundTask(withName: "nostrconnect-pair") {
+                if bgTaskID != .invalid {
+                    UIApplication.shared.endBackgroundTask(bgTaskID)
+                    bgTaskID = .invalid
+                }
+            }
+            do {
+                let result = try await appState.handleNostrConnect(
+                    parsedURI: parsedURI,
+                    signerPubkeys: signers,
+                    permissions: permissions,
+                    progress: { idx, total, signer in
+                        // handleNostrConnect doesn't carry @MainActor — be
+                        // explicit about dispatching SwiftUI state writes
+                        // back to the main actor regardless of future
+                        // isolation changes upstream.
+                        //
+                        // Speculative-success: when idx advances to k, the
+                        // signer at k-1 has just FINISHED (success or
+                        // failure — we don't know which until the final
+                        // HandshakeResult). We optimistically mark it as
+                        // succeeded so the row shows a green checkmark
+                        // instead of regressing to the dotted-circle
+                        // "queued" state. Mispredicts (rare) are corrected
+                        // at loop end when `succeededSoFar = Set(result.
+                        // succeeded)`; Task 11's partial-failure view
+                        // surfaces the authoritative per-row status.
+                        Task { @MainActor in
+                            if idx > 0, idx <= signers.count {
+                                succeededSoFar.insert(signers[idx - 1])
+                            }
+                            progressIndex = idx
+                            progressTotal = total
+                            currentlyPairing = signer
+                        }
+                    }
+                )
+                // On the main actor by virtue of Task { @MainActor in ... }.
+                succeededSoFar = Set(result.succeeded)
+                currentlyPairing = nil
+                isConnecting = false
+                handshakeCompleted = true
+                onCompletion(result)
+            } catch {
+                // Boundary error (e.g., empty signers) — synthesize an
+                // all-failure result so the parent treats it uniformly.
+                isConnecting = false
+                handshakeCompleted = true
+                let failed = signers.map {
+                    HandshakeResult.FailedSigner(
+                        signerPubkey: $0,
+                        errorMessage: error.localizedDescription
+                    )
+                }
+                onCompletion(HandshakeResult(succeeded: [], failed: failed))
+            }
+            if bgTaskID != .invalid {
+                UIApplication.shared.endBackgroundTask(bgTaskID)
+                bgTaskID = .invalid
+            }
+        }
     }
 }

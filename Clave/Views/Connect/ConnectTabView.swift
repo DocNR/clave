@@ -1,5 +1,4 @@
 import SwiftUI
-import UIKit
 
 /// Root view for the Connect tab — Phase 1 of multi-account NostrConnect.
 /// Replaces the previous ConnectSheet (deleted in Task 11) and the
@@ -14,11 +13,9 @@ struct ConnectTabView: View {
     @Environment(AppState.self) private var appState
 
     @State private var parsedURI: NostrConnectParser.ParsedURI?
-    @State private var lastParsedSource: NostrConnectURISource = .paste
     @State private var showPicker = false           // single-mode picker
     @State private var showMultiPicker = false      // multi-mode picker
     @State private var pickedSignerPubkeys: [String] = []
-    @State private var isConnecting = false
     @State private var connectionError: String?
     @State private var bunkerSignerPubkey: String?
     @State private var showBunkerPicker = false
@@ -78,14 +75,9 @@ struct ConnectTabView: View {
             }
             .sheet(item: $approvalContext) { ctx in
                 ApprovalSheet(parsedURI: ctx.parsedURI,
-                              boundAccountPubkeys: ctx.signerPubkeys) { permissions in
-                    submitApproval(uri: ctx.parsedURI,
-                                   signerPubkeys: ctx.signerPubkeys,
-                                   permissions: permissions)
+                              boundAccountPubkeys: ctx.signerPubkeys) { result in
+                    handleHandshakeCompletion(result, context: ctx)
                 }
-            }
-            .overlay {
-                if isConnecting { connectingOverlay }
             }
             .alert("Connection Failed", isPresented: .init(
                 get: { connectionError != nil },
@@ -109,9 +101,13 @@ struct ConnectTabView: View {
         }
     }
 
-    private func handleParsed(_ uri: NostrConnectParser.ParsedURI, source: NostrConnectURISource) {
+    private func handleParsed(_ uri: NostrConnectParser.ParsedURI,
+                              source _: NostrConnectURISource) {
+        // `source` (paste/qrScan) used to drive copy in the now-removed
+        // ConnectTabView.connectingOverlay. Connect progress now renders
+        // inside ApprovalSheet (Task 10), which uses a single copy variant
+        // independent of how the URI arrived.
         parsedURI = uri
-        lastParsedSource = source
 
         // Auto-skip picker when only 1 account exists — even multi-aware URIs
         // collapse to a one-element flow when N=1.
@@ -137,88 +133,32 @@ struct ConnectTabView: View {
         )
     }
 
-    private func submitApproval(uri: NostrConnectParser.ParsedURI,
-                                signerPubkeys: [String],
-                                permissions: ClientPermissions) {
-        isConnecting = true
-        connectionError = nil
-        approvalContext = nil
-        parsedURI = nil
-        pickedSignerPubkeys = []
-
-        Task { @MainActor in
-            // Extend foreground execution so the handshake survives the user
-            // swiping to the client app mid-flight (build-62 bg-task pattern).
-            // Critical window is the initial connect→ack→pair-client (~2-3s);
-            // after that NSE can service follow-up RPCs via the proxy's
-            // secondary subscription.
-            var bgTaskID: UIBackgroundTaskIdentifier = .invalid
-            bgTaskID = UIApplication.shared.beginBackgroundTask(withName: "nostrconnect-handshake") {
-                if bgTaskID != .invalid {
-                    UIApplication.shared.endBackgroundTask(bgTaskID)
-                    bgTaskID = .invalid
-                }
-            }
-            do {
-                let result = try await appState.handleNostrConnect(
-                    parsedURI: uri,
-                    signerPubkeys: signerPubkeys,
-                    permissions: permissions
-                )
-                handleHandshakeResult(result)
-            } catch {
-                connectionError = error.localizedDescription
-                isConnecting = false
-            }
-            if bgTaskID != .invalid {
-                UIApplication.shared.endBackgroundTask(bgTaskID)
-                bgTaskID = .invalid
-            }
-        }
-    }
-
-    private func handleHandshakeResult(_ result: HandshakeResult) {
-        isConnecting = false
-        if result.isAllFailure {
+    /// Routes the handshake outcome reported by ApprovalSheet's
+    /// `onCompletion`. The sheet now runs the handshake itself (Task 10
+    /// contract change), so the parent's job is reduced to deciding
+    /// dismiss + error surfacing.
+    ///
+    /// - all-success: dismiss sheet, clear staged state.
+    /// - all-failure: dismiss sheet, surface error via alert.
+    /// - partial: leave sheet open so Task 11 can render the result view.
+    ///   For Task 10 (this commit) the sheet just sits in its current
+    ///   isConnecting=false post-loop state with a placeholder; Task 11
+    ///   layers in the per-row final state + Done button.
+    private func handleHandshakeCompletion(_ result: HandshakeResult,
+                                           context: ApprovalContext) {
+        if result.isAllSuccess {
+            approvalContext = nil
+            parsedURI = nil
+            pickedSignerPubkeys = []
+        } else if result.isAllFailure {
+            approvalContext = nil
+            parsedURI = nil
+            pickedSignerPubkeys = []
             connectionError = result.failed.first?.errorMessage ?? "Unknown error"
         }
-        // All-success: sheet was already dismissed in submitApproval (approvalContext = nil).
-        // Partial-failure: Task 11 will route this case back through ApprovalSheet's
-        // result view; for Phase 2 / Task 9, we just don't surface an error alert.
-    }
-
-    // MARK: - Connecting overlay (lifted from the deleted ConnectSheet)
-
-    private var connectingOverlay: some View {
-        // Same-device (paste): the client app is on this device but iOS
-        // suspends its WebSocket subscription as soon as it loses
-        // foreground, so the user must switch back to it for the client
-        // to receive Clave's connect-response. UIBackgroundTask in
-        // submitApproval keeps Clave running for the ~15s handshake
-        // window. Cross-device (QR): there's no client app to return to
-        // on this device, so the original "stay in Clave" copy applies.
-        let subtitle: String = switch lastParsedSource {
-        case .paste:
-            "Switch back to your client app to finish connecting. Clave keeps running in the background."
-        case .qrScan:
-            "Stay in Clave for a few seconds"
-        }
-        return ZStack {
-            Color.black.opacity(0.4).ignoresSafeArea()
-            VStack(spacing: 16) {
-                ProgressView().controlSize(.large)
-                VStack(spacing: 6) {
-                    Text("Connecting...")
-                        .font(.headline)
-                        .foregroundStyle(.white)
-                    Text(subtitle)
-                        .font(.subheadline)
-                        .foregroundStyle(.white.opacity(0.85))
-                        .multilineTextAlignment(.center)
-                }
-            }
-            .padding(32)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
-        }
+        // Partial-failure: keep approvalContext set. ApprovalSheet's
+        // handshakeCompleted latch holds the post-loop placeholder UI in
+        // place (per-row state, no Approve button) until Task 11 layers
+        // in the full result view + Done button.
     }
 }
