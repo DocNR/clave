@@ -344,10 +344,12 @@ struct ApprovalSheet: View {
         //
         // Phase 2 multi-account: this sheet only inspects the *first*
         // bound account for the cap check + ClientPermissions template.
-        // The full per-account cap check + per-signer permission row
-        // creation happens in handleNostrConnect (orchestrator), which
-        // copies this template and rewrites signerPubkeyHex per signer
-        // before persisting. Task 8 scope intentionally keeps the sheet
+        // The per-signer permission row creation happens in
+        // runSingleConnect (AppState+NostrConnect.swift), which clones
+        // this template via `permissions.with(signerPubkeyHex:)` per
+        // iteration so N distinct rows land in SharedStorage — one per
+        // (signer_pubkey_i, client_pubkey) composite key (spec §
+        // "handleNostrConnect — N-up handshake loop"). The sheet stays
         // single-permission-block per spec §"ApprovalSheet — multi-mode
         // shared permissions"; Task 10/11 add multi-progress/partial-
         // failure UX layered on top.

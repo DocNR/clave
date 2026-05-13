@@ -134,6 +134,32 @@ struct ClientPermissions: Codable, Identifiable {
         }
         return "Custom"
     }
+
+    /// Return a copy of these permissions with `signerPubkeyHex` rewritten.
+    /// Used by the multi-account nostrconnect handshake loop to produce N
+    /// distinct rows from a single template — one per `(signer_i, client)`
+    /// composite key, all carrying the same trust/kind/method values
+    /// (spec §"handleNostrConnect — N-up handshake loop").
+    ///
+    /// Pure function so it can be unit-tested without touching SharedStorage
+    /// or the live network handshake. `signerPubkeyHex` is declared `let`
+    /// to enforce row-scope immutability everywhere else; this is the one
+    /// well-defined point at which a template is cloned for a new signer.
+    func with(signerPubkeyHex newSignerPubkeyHex: String) -> ClientPermissions {
+        ClientPermissions(
+            pubkey: pubkey,
+            trustLevel: trustLevel,
+            kindOverrides: kindOverrides,
+            methodPermissions: methodPermissions,
+            name: name,
+            url: url,
+            imageURL: imageURL,
+            connectedAt: connectedAt,
+            lastSeen: lastSeen,
+            requestCount: requestCount,
+            signerPubkeyHex: newSignerPubkeyHex
+        )
+    }
 }
 
 enum KnownKinds {

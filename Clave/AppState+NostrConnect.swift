@@ -93,8 +93,18 @@ extension AppState {
         let privateKey = try Bech32.decodeNsec(nsec)
         let signerPubkey = try LightEvent.pubkeyHex(from: privateKey)
 
-        // Save client permissions
-        SharedStorage.saveClientPermissions(permissions)
+        // Save client permissions. CRITICAL: the `permissions` arg arrives
+        // with `signerPubkeyHex` set to the FIRST bound account's pubkey
+        // (ApprovalSheet.buildAndApprove only inspects boundAccountPubkeys[0]
+        // when building the template). For multi-account pairs we must
+        // rewrite signerPubkeyHex to *this* iteration's signer before save,
+        // otherwise all N iterations overwrite the same row and signers
+        // 2…N end up with no ClientPermissions entry — LightSigner then
+        // rejects their requests on lookup. Spec §"handleNostrConnect —
+        // N-up handshake loop" calls for N distinct rows keyed by
+        // (signer_pubkey_i, client_pubkey).
+        let perSignerPermissions = permissions.with(signerPubkeyHex: signerPubkey)
+        SharedStorage.saveClientPermissions(perSignerPermissions)
 
         guard !parsedURI.relays.isEmpty else {
             throw ClaveError.noRelay
