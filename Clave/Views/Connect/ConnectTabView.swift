@@ -65,7 +65,7 @@ struct ConnectTabView: View {
             }
             .sheet(item: $approvalContext) { ctx in
                 ApprovalSheet(parsedURI: ctx.parsedURI,
-                              boundAccountPubkey: ctx.signerPubkey) { permissions in
+                              boundAccountPubkeys: [ctx.signerPubkey]) { permissions in
                     submitApproval(uri: ctx.parsedURI,
                                    signerPubkey: ctx.signerPubkey,
                                    permissions: permissions)

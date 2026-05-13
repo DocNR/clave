@@ -183,7 +183,7 @@ struct HomeView: View {
             .sheet(item: $deeplinkApprovalURI) { uri in
                 ApprovalSheet(
                     parsedURI: uri,
-                    boundAccountPubkey: appState.deeplinkBoundAccount
+                    boundAccountPubkeys: appState.deeplinkBoundAccount.map { [$0] } ?? []
                 ) { permissions in
                     let captured = uri
                     let bound = appState.deeplinkBoundAccount

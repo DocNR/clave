@@ -2,7 +2,11 @@ import SwiftUI
 
 struct ApprovalSheet: View {
     let parsedURI: NostrConnectParser.ParsedURI
-    let boundAccountPubkey: String?
+    /// Account(s) the user picked in ConnectAccountPicker. Phase 2 multi-account:
+    /// may contain 2+ pubkeys when the client requested `accounts=multi` and the
+    /// user selected multiple. Single-mode (count == 1) preserves Phase 1 UX.
+    /// May be empty in degenerate paths; downstream guards treat empty as no-op.
+    let boundAccountPubkeys: [String]
     let onApprove: (ClientPermissions) -> Void
     @Environment(\.dismiss) private var dismiss
     @Environment(AppState.self) private var appState
@@ -15,19 +19,27 @@ struct ApprovalSheet: View {
     private let protectedKinds: Set<Int> = SharedStorage.getProtectedKinds()
 
     init(parsedURI: NostrConnectParser.ParsedURI,
-         boundAccountPubkey: String? = nil,
+         boundAccountPubkeys: [String] = [],
          onApprove: @escaping (ClientPermissions) -> Void) {
         self.parsedURI = parsedURI
-        self.boundAccountPubkey = boundAccountPubkey
+        self.boundAccountPubkeys = boundAccountPubkeys
         self.onApprove = onApprove
         _selectedTrust = State(initialValue: parsedURI.suggestedTrustLevel)
+    }
+
+    private var isMulti: Bool { boundAccountPubkeys.count > 1 }
+
+    /// Primary signer for single-mode rendering + cap check. Falls back to the
+    /// current account when the bound list is empty (legacy/degenerate path).
+    private var primarySignerPubkey: String {
+        boundAccountPubkeys.first ?? appState.signerPubkeyHex
     }
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 24) {
-                    SigningAsHeader(signerPubkeyHex: boundAccountPubkey ?? appState.signerPubkeyHex)
+                    headerBlock
                         .padding(.horizontal)
                         .padding(.top, 12)
                     clientHeader
@@ -46,6 +58,60 @@ struct ApprovalSheet: View {
             }
         }
         .snapshotProtected()
+    }
+
+    // MARK: - Signing-As Header (single / multi)
+
+    @ViewBuilder
+    private var headerBlock: some View {
+        if isMulti {
+            multiHeader
+        } else {
+            singleHeader
+        }
+    }
+
+    private var singleHeader: some View {
+        SigningAsHeader(signerPubkeyHex: primarySignerPubkey)
+    }
+
+    private var multiHeader: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("\(clientDisplayName) is requesting to sign for \(boundAccountPubkeys.count) accounts")
+                .font(.title3.weight(.semibold))
+                .frame(maxWidth: .infinity, alignment: .leading)
+            selectedAccountsInlineList
+        }
+    }
+
+    private var selectedAccountsInlineList: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 12) {
+                ForEach(boundAccountPubkeys, id: \.self) { pubkey in
+                    accountChip(pubkey: pubkey)
+                }
+            }
+            .padding(.vertical, 2)
+        }
+    }
+
+    private func accountChip(pubkey: String) -> some View {
+        let account = appState.accounts.first(where: { $0.pubkeyHex == pubkey })
+        let label = account?.displayLabel ?? String(pubkey.prefix(8))
+        return HStack(spacing: 6) {
+            AvatarView(pubkeyHex: pubkey, name: account?.displayLabel, size: 28)
+            Text(label)
+                .font(.caption.weight(.medium))
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(Color(.tertiarySystemGroupedBackground), in: Capsule())
+    }
+
+    private var clientDisplayName: String {
+        parsedURI.name ?? "This app"
     }
 
     // MARK: - Client Identity Header
@@ -200,7 +266,7 @@ struct ApprovalSheet: View {
             Button {
                 buildAndApprove()
             } label: {
-                Text("Connect as @\(signingAsDisplayLabel)")
+                Text(approveButtonLabel)
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .minimumScaleFactor(0.7)
@@ -213,10 +279,18 @@ struct ApprovalSheet: View {
         .padding(.top, 8)
     }
 
+    private var approveButtonLabel: String {
+        if isMulti {
+            return "Approve \(boundAccountPubkeys.count) accounts"
+        } else {
+            return "Connect as @\(signingAsDisplayLabel)"
+        }
+    }
+
     // MARK: - Helpers
 
     private var signingAsDisplayLabel: String {
-        let pk = boundAccountPubkey ?? appState.signerPubkeyHex
+        let pk = primarySignerPubkey
         return appState.accounts.first(where: { $0.pubkeyHex == pk })?.displayLabel
             ?? String(pk.prefix(8))
     }
@@ -267,7 +341,17 @@ struct ApprovalSheet: View {
         // pairings). Counts SharedStorage.connectedClients scoped to
         // the current signer. Re-pairing an existing client (same
         // pubkey) isn't blocked since no new row is added.
-        let signerForCheck = boundAccountPubkey ?? SharedConstants.sharedDefaults.string(
+        //
+        // Phase 2 multi-account: this sheet only inspects the *first*
+        // bound account for the cap check + ClientPermissions template.
+        // The full per-account cap check + per-signer permission row
+        // creation happens in handleNostrConnect (orchestrator), which
+        // copies this template and rewrites signerPubkeyHex per signer
+        // before persisting. Task 8 scope intentionally keeps the sheet
+        // single-permission-block per spec §"ApprovalSheet — multi-mode
+        // shared permissions"; Task 10/11 add multi-progress/partial-
+        // failure UX layered on top.
+        let signerForCheck = boundAccountPubkeys.first ?? SharedConstants.sharedDefaults.string(
             forKey: SharedConstants.currentSignerPubkeyHexKey
         ) ?? ""
         let connected = SharedStorage.getConnectedClients(for: signerForCheck)
