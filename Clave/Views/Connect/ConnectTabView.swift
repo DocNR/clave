@@ -52,7 +52,7 @@ struct ConnectTabView: View {
                     }
                 }
             }
-            .sheet(isPresented: $showPicker) {
+            .sheet(isPresented: $showPicker, onDismiss: pickerDidDismiss) {
                 if let parsed = parsedURI {
                     ConnectAccountPicker(mode: .single, parsedURI: parsed) { pubkeys in
                         // .single always yields a 1-element array
@@ -62,7 +62,7 @@ struct ConnectTabView: View {
                     }
                 }
             }
-            .sheet(isPresented: $showMultiPicker) {
+            .sheet(isPresented: $showMultiPicker, onDismiss: pickerDidDismiss) {
                 if let parsed = parsedURI {
                     ConnectAccountPicker(mode: .multi, parsedURI: parsed) { pubkeys in
                         pickedSignerPubkeys = pubkeys
@@ -73,7 +73,7 @@ struct ConnectTabView: View {
                     }
                 }
             }
-            .sheet(item: $approvalContext) { ctx in
+            .sheet(item: $approvalContext, onDismiss: approvalDidDismiss) { ctx in
                 ApprovalSheet(parsedURI: ctx.parsedURI,
                               boundAccountPubkeys: ctx.signerPubkeys) { result in
                     handleHandshakeCompletion(result, context: ctx)
@@ -131,6 +131,32 @@ struct ConnectTabView: View {
             parsedURI: uri,
             signerPubkeys: pickedSignerPubkeys
         )
+    }
+
+    /// Called when either picker sheet dismisses (cancel button, swipe-down,
+    /// or successful pick). On a successful pick `approvalContext` is set
+    /// synchronously before dismissal, so we can detect "did the picker
+    /// progress the flow?" by checking if an approval is pending. If it
+    /// is, the URI is now owned by `ApprovalContext` and we leave the
+    /// staging state alone. If it isn't (user cancelled), we clear
+    /// `parsedURI` so the QR scanner in `ConnectNostrConnectSurface`
+    /// re-arms via its `onChange(of: parsedURI?.id)` watcher — fixes the
+    /// "camera viewfinder frozen on last frame after picker cancel"
+    /// regression.
+    private func pickerDidDismiss() {
+        guard approvalContext == nil else { return }
+        parsedURI = nil
+        pickedSignerPubkeys = []
+    }
+
+    /// Called when the approval sheet dismisses (success / failure /
+    /// cancel). Always clears the staging state — by the time the sheet
+    /// goes away the flow has either completed (state already cleared in
+    /// `handleHandshakeCompletion`) or the user cancelled mid-handshake.
+    /// Either way, parsedURI being nil re-arms the QR scanner.
+    private func approvalDidDismiss() {
+        parsedURI = nil
+        pickedSignerPubkeys = []
     }
 
     /// Routes the handshake outcome reported by ApprovalSheet's

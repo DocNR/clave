@@ -44,6 +44,21 @@ struct ApprovalSheet: View {
     /// per-signer handshake re-runs. Prevents double-tap from launching
     /// two simultaneous handshakes for the same signer.
     @State private var retryingSigners: Set<String> = []
+    /// In-flight handshake Task reference. Captured by `runHandshake` so
+    /// `cancelHandshake()` can interrupt it — the URLSession + relay
+    /// connect calls inside `runSingleConnect` respond cooperatively to
+    /// Task cancellation by throwing `CancellationError`, and the loop
+    /// inside `handleNostrConnect` checks `Task.isCancelled` between
+    /// iterations to break early. Without this, a hung handshake (relay
+    /// dead, client-side timed out) leaves the user stuck — the only
+    /// recovery was force-quitting the app.
+    @State private var handshakeTask: Task<Void, Never>? = nil
+    /// Set true when the user explicitly cancels mid-handshake. Guards
+    /// the post-handshake MainActor block so a late-arriving
+    /// `HandshakeResult` from the in-flight Task (after the user is back
+    /// in the Connect tab) doesn't fire `onCompletion` and surface a
+    /// spurious "Pairing failed" alert or partial-failure result view.
+    @State private var userCancelled: Bool = false
 
     private let protectedKinds: Set<Int> = SharedStorage.getProtectedKinds()
 
@@ -366,6 +381,7 @@ struct ApprovalSheet: View {
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
             }
+            cancelHandshakeButton
         }
         .padding(.vertical, 24)
     }
@@ -382,8 +398,49 @@ struct ApprovalSheet: View {
             ForEach(boundAccountPubkeys, id: \.self) { pubkey in
                 progressRow(for: pubkey)
             }
+            cancelHandshakeButton
+                .padding(.top, 8)
         }
         .padding(.vertical, 12)
+    }
+
+    /// Escape hatch shown during the handshake loop (`isConnecting=true`).
+    /// Required because the sheet blocks swipe-dismiss via
+    /// `interactiveDismissDisabled` and the loop's internal timeouts (10s
+    /// relay connect + 3×2s publish retry per signer) can stack to ~45s
+    /// for N=4 with dead relays. If the client app has already timed out
+    /// on its side, there's nothing to wait for — give the user a way out
+    /// instead of forcing an app restart.
+    private var cancelHandshakeButton: some View {
+        Button(role: .cancel) {
+            cancelHandshake()
+        } label: {
+            Text("Cancel")
+                .font(.subheadline.weight(.medium))
+        }
+        .buttonStyle(.bordered)
+    }
+
+    /// User-initiated cancellation. Three steps in fixed order:
+    ///   1. Latch `userCancelled = true` so the in-flight Task's eventual
+    ///      MainActor completion block returns early instead of firing
+    ///      `onCompletion` with stale state.
+    ///   2. Cancel the Task — propagates through `URLSession.shared.data`
+    ///      and the iteration-boundary `Task.isCancelled` checks in
+    ///      `handleNostrConnect`.
+    ///   3. `dismiss()` — the sheet's `.sheet(item:)` binding fires the
+    ///      parent's `onDismiss`, which clears `parsedURI` and re-arms
+    ///      the QR scanner.
+    /// Already-succeeded signers (if any) keep their `ClientPermissions`
+    /// + `ConnectedClient` rows on disk; the user can revoke from
+    /// Settings if they don't want them. We don't try to undo partial
+    /// progress — pair-client POSTs may already be acknowledged by the
+    /// proxy.
+    private func cancelHandshake() {
+        userCancelled = true
+        handshakeTask?.cancel()
+        handshakeTask = nil
+        dismiss()
     }
 
     // MARK: - Result View (Task 11)
@@ -767,7 +824,7 @@ struct ApprovalSheet: View {
         currentlyPairing = signers.first
         succeededSoFar = []
 
-        Task { @MainActor in
+        handshakeTask = Task { @MainActor in
             var bgTaskID: UIBackgroundTaskIdentifier = .invalid
             bgTaskID = UIApplication.shared.beginBackgroundTask(withName: "nostrconnect-pair") {
                 if bgTaskID != .invalid {
@@ -806,42 +863,56 @@ struct ApprovalSheet: View {
                         }
                     }
                 )
-                // On the main actor by virtue of Task { @MainActor in ... }.
-                succeededSoFar = Set(result.succeeded)
-                currentlyPairing = nil
-                isConnecting = false
-                handshakeCompleted = true
-                handshakeResult = result
-                onCompletion(result)
+                // User-cancel guard: if the user tapped Cancel after the
+                // loop got far enough to produce a result (race window
+                // between dismiss() and the awaited return), don't fire
+                // onCompletion — the sheet is already dismissing and the
+                // parent's parsedURI / approvalContext are about to be
+                // cleared in onDismiss. Firing onCompletion here would
+                // surface a stale partial-failure alert or result view
+                // after the user has explicitly chosen to abandon the
+                // flow.
+                if !userCancelled {
+                    // On the main actor by virtue of Task { @MainActor in ... }.
+                    succeededSoFar = Set(result.succeeded)
+                    currentlyPairing = nil
+                    isConnecting = false
+                    handshakeCompleted = true
+                    handshakeResult = result
+                    onCompletion(result)
+                }
             } catch {
                 // Boundary error (e.g., empty signers) — synthesize an
                 // all-failure result so the parent treats it uniformly.
-                isConnecting = false
-                handshakeCompleted = true
-                // Empty-signers edge case: signers.map yields []; that produces
-                // HandshakeResult(succeeded: [], failed: []) where all three
-                // boolean flags are false → parent doesn't dismiss → sheet
-                // stuck-open with no recourse. Synthesize one entry so
-                // isAllFailure is true and the parent dismisses + alerts.
-                let failed: [HandshakeResult.FailedSigner] = signers.isEmpty
-                    ? [HandshakeResult.FailedSigner(
-                        signerPubkey: "",
-                        errorMessage: error.localizedDescription
-                      )]
-                    : signers.map {
-                        HandshakeResult.FailedSigner(
-                            signerPubkey: $0,
+                if !userCancelled {
+                    isConnecting = false
+                    handshakeCompleted = true
+                    // Empty-signers edge case: signers.map yields []; that produces
+                    // HandshakeResult(succeeded: [], failed: []) where all three
+                    // boolean flags are false → parent doesn't dismiss → sheet
+                    // stuck-open with no recourse. Synthesize one entry so
+                    // isAllFailure is true and the parent dismisses + alerts.
+                    let failed: [HandshakeResult.FailedSigner] = signers.isEmpty
+                        ? [HandshakeResult.FailedSigner(
+                            signerPubkey: "",
                             errorMessage: error.localizedDescription
-                        )
-                    }
-                let synthesized = HandshakeResult(succeeded: [], failed: failed)
-                handshakeResult = synthesized
-                onCompletion(synthesized)
+                          )]
+                        : signers.map {
+                            HandshakeResult.FailedSigner(
+                                signerPubkey: $0,
+                                errorMessage: error.localizedDescription
+                            )
+                        }
+                    let synthesized = HandshakeResult(succeeded: [], failed: failed)
+                    handshakeResult = synthesized
+                    onCompletion(synthesized)
+                }
             }
             if bgTaskID != .invalid {
                 UIApplication.shared.endBackgroundTask(bgTaskID)
                 bgTaskID = .invalid
             }
+            handshakeTask = nil
         }
     }
 }

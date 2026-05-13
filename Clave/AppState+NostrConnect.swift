@@ -59,6 +59,19 @@ extension AppState {
         var failed: [HandshakeResult.FailedSigner] = []
 
         for (index, signerPubkey) in signerPubkeys.enumerated() {
+            // User-cancel check at iteration boundary. ApprovalSheet's
+            // Cancel button calls `handshakeTask?.cancel()` — the
+            // URLSession + relay-connect calls inside runSingleConnect
+            // respond to Task cancellation by throwing CancellationError,
+            // which the per-iteration catch below treats as a failure. We
+            // additionally short-circuit the outer loop so subsequent
+            // signers don't even start, instead of churning through 3+
+            // dead handshakes after the user has already navigated away.
+            // Returns whatever's accumulated so far (the caller in
+            // ApprovalSheet's `runHandshake` guards on userCancelled and
+            // suppresses onCompletion anyway, so the partial result is
+            // effectively discarded by the UI).
+            if Task.isCancelled { break }
             // Fire the progress callback BEFORE each iteration so the UI can
             // mark THIS signer as "currently pairing" while the handshake
             // runs. Phase 1 single-mode callers pass nil — behavior unchanged.
