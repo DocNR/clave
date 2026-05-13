@@ -308,29 +308,16 @@ struct ConnectAccountPicker: View {
         }
     }
 
-    /// Account avatar with kind:0 profile-picture fetched via `AsyncImage`,
-    /// falling back to `AvatarView`'s initials+gradient when the URL is
-    /// nil/loading/failed. Matches the pattern used in `HomeView.clientRow`
-    /// and `ApprovalSheet`.
-    @ViewBuilder
+    /// Account avatar reading the on-disk profile-picture cache
+    /// (`cached-profile-<pubkey>.dat` in the app group). Falls back to
+    /// gradient+initials when no cached image exists. Matches the pattern
+    /// used in `AccountStripView`, `SettingsView`, and `SlimIdentityBar` —
+    /// fixes the previous `AsyncImage(url:)` cache-miss flicker that
+    /// rendered "default" on every sheet presentation.
     private func accountAvatar(for account: Account) -> some View {
-        let size: CGFloat = 60
-        if let pictureURL = account.profile?.pictureURL,
-           let url = URL(string: pictureURL) {
-            AsyncImage(url: url) { image in
-                image.resizable().scaledToFill()
-            } placeholder: {
-                AvatarView(pubkeyHex: account.pubkeyHex,
-                           name: account.displayLabel,
-                           size: size)
-            }
-            .frame(width: size, height: size)
-            .clipShape(Circle())
-        } else {
-            AvatarView(pubkeyHex: account.pubkeyHex,
-                       name: account.displayLabel,
-                       size: size)
-        }
+        CachedAccountAvatarView(pubkeyHex: account.pubkeyHex,
+                                displayLabel: account.displayLabel,
+                                size: 60)
     }
 
     /// User-facing truncated npub for the picker subtitle. Falls back to

@@ -150,7 +150,9 @@ struct ApprovalSheet: View {
         let account = appState.accounts.first(where: { $0.pubkeyHex == pubkey })
         let label = account?.displayLabel ?? String(pubkey.prefix(8))
         return HStack(spacing: 6) {
-            AvatarView(pubkeyHex: pubkey, name: account?.displayLabel, size: 28)
+            CachedAccountAvatarView(pubkeyHex: pubkey,
+                                    displayLabel: account?.displayLabel,
+                                    size: 28)
             Text(label)
                 .font(.caption.weight(.medium))
                 .lineLimit(1)
@@ -477,7 +479,9 @@ struct ApprovalSheet: View {
                 .foregroundStyle(.green)
                 .font(.title3)
                 .frame(width: 24, height: 24)
-            AvatarView(pubkeyHex: pubkey, name: account?.displayLabel, size: 28)
+            CachedAccountAvatarView(pubkeyHex: pubkey,
+                                    displayLabel: account?.displayLabel,
+                                    size: 28)
             Text(label)
                 .font(.subheadline.weight(.medium))
                 .lineLimit(1)
@@ -638,7 +642,9 @@ struct ApprovalSheet: View {
                 }
             }
             .frame(width: 24, height: 24)
-            AvatarView(pubkeyHex: pubkey, name: account?.displayLabel, size: 28)
+            CachedAccountAvatarView(pubkeyHex: pubkey,
+                                    displayLabel: account?.displayLabel,
+                                    size: 28)
             Text(label)
                 .font(.subheadline)
                 .foregroundStyle(isQueued ? .secondary : .primary)
