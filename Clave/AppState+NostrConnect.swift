@@ -144,7 +144,7 @@ extension AppState {
             let resultField = LightSigner.connectAckResult(
                 isMultiAccount: parsedURI.isMultiAccount,
                 echoedSecret: parsedURI.secret,
-                accountName: account?.profile?.displayName,
+                accountName: account?.profile?.displayName ?? account?.profile?.name,
                 accountPicture: account?.profile?.pictureURL,
                 total: total
             )
