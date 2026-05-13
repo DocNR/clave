@@ -580,12 +580,22 @@ struct ApprovalSheet: View {
                 // all-failure result so the parent treats it uniformly.
                 isConnecting = false
                 handshakeCompleted = true
-                let failed = signers.map {
-                    HandshakeResult.FailedSigner(
-                        signerPubkey: $0,
+                // Empty-signers edge case: signers.map yields []; that produces
+                // HandshakeResult(succeeded: [], failed: []) where all three
+                // boolean flags are false → parent doesn't dismiss → sheet
+                // stuck-open with no recourse. Synthesize one entry so
+                // isAllFailure is true and the parent dismisses + alerts.
+                let failed: [HandshakeResult.FailedSigner] = signers.isEmpty
+                    ? [HandshakeResult.FailedSigner(
+                        signerPubkey: "",
                         errorMessage: error.localizedDescription
-                    )
-                }
+                      )]
+                    : signers.map {
+                        HandshakeResult.FailedSigner(
+                            signerPubkey: $0,
+                            errorMessage: error.localizedDescription
+                        )
+                    }
                 onCompletion(HandshakeResult(succeeded: [], failed: failed))
             }
             if bgTaskID != .invalid {
