@@ -83,18 +83,21 @@ Note: this benefits the **client → Clave** direction (delivery to Clave). It d
 
 ## Compatibility matrix
 
-| Client | Platform | Library family | Connect modes | Status | Issue attribution |
-|---|---|---|---|---|---|
-| [Nostur](https://nostur.com) | iOS | NDK-iOS / nostr-essentials | bunker | ✅ Works | — |
-| [fevela.me](https://fevela.me) | Web | nostr-tools (recent) | bunker, nostrconnect | ✅ Works | — |
-| [noStrudel](https://nostrudel.ninja) | Web | applesauce-signers | bunker, nostrconnect (non-`relay.nsec.app` URI) | ⚠️ Partial — see [notes](#nostrudel) | client-side (relay-specific) |
-| [Coracle](https://coracle.social) | Web | welshman | bunker, nostrconnect | ⚠️ Partial — see [notes](#coracle) | library-shared (welshman) |
-| [zap.cooking](https://zap.cooking) | Web | custom wrapper over NDK | bunker | ⚠️ Partial — see [notes](#zapcooking) | client-side |
-| [plebs vs. zombies](https://plebsvszombies.cc) | Web | nostr-tools (old, ~2.17) | bunker | ⚠️ Partial — see [notes](#plebs-vs-zombies) | library-shared (old nostr-tools) |
-| [YakiHonne](https://yakihonne.com) | Web (+ mobile?) | NDK | bunker, nostrconnect | ⚠️ Partial — see [notes](#yakihonne) | unknown |
-| [Primal](https://primal.net) | Web / iOS / Android | nostr-tools (recent, inferred) | bunker, nostrconnect | ❓ Untested end-to-end | — |
-| [Snort](https://snort.social) | Web | nostr-tools (inferred) | bunker, nostrconnect | ❓ Untested end-to-end | — |
-| [Amethyst](https://github.com/vitorpamplona/amethyst) | Android | (Amber-shaped, inferred) | bunker | ❓ Untested with Clave | — |
+> **Multi-account NostrConnect** is Clave's `accounts=multi` URI extension introduced in build 80 (see `docs/integrations.md`). Clients in the ✅ column emit URIs with this flag and accumulate multiple `connect` acks within a listening window. Clients in the ❌ column use the standard single-account flow; multi-aware Clave still works with them as a single-account signer.
+
+| Client | Platform | Library family | Connect modes | Multi-account NostrConnect | Status | Issue attribution |
+|---|---|---|---|---|---|---|
+| [Spectr](https://github.com/DocNR/spectr) | Web | nostr-tools (custom accumulator) | bunker, nostrconnect | ✅ Supported | ✅ Works | — |
+| [Nostur](https://nostur.com) | iOS | NDK-iOS / nostr-essentials | bunker | ❌ Single-account only | ✅ Works | — |
+| [fevela.me](https://fevela.me) | Web | nostr-tools (recent) | bunker, nostrconnect | ❌ Single-account only | ✅ Works | — |
+| [noStrudel](https://nostrudel.ninja) | Web | applesauce-signers | bunker, nostrconnect (non-`relay.nsec.app` URI) | ❌ Single-account only | ⚠️ Partial — see [notes](#nostrudel) | client-side (relay-specific) |
+| [Coracle](https://coracle.social) | Web | welshman | bunker, nostrconnect | ❌ Single-account only | ⚠️ Partial — see [notes](#coracle) | library-shared (welshman) |
+| [zap.cooking](https://zap.cooking) | Web | custom wrapper over NDK | bunker | ❌ Single-account only | ⚠️ Partial — see [notes](#zapcooking) | client-side |
+| [plebs vs. zombies](https://plebsvszombies.cc) | Web | nostr-tools (old, ~2.17) | bunker | ❌ Single-account only | ⚠️ Partial — see [notes](#plebs-vs-zombies) | library-shared (old nostr-tools) |
+| [YakiHonne](https://yakihonne.com) | Web (+ mobile?) | NDK | bunker, nostrconnect | ❌ Single-account only | ⚠️ Partial — see [notes](#yakihonne) | unknown |
+| [Primal](https://primal.net) | Web / iOS / Android | nostr-tools (recent, inferred) | bunker, nostrconnect | ❌ Single-account only | ❓ Untested end-to-end | — |
+| [Snort](https://snort.social) | Web | nostr-tools (inferred) | bunker, nostrconnect | ❌ Single-account only | ❓ Untested end-to-end | — |
+| [Amethyst](https://github.com/vitorpamplona/amethyst) | Android | (Amber-shaped, inferred) | bunker | ❌ Single-account only | ❓ Untested with Clave | — |
 
 **Status meanings:**
 
