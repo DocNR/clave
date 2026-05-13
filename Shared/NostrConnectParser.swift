@@ -20,6 +20,7 @@ enum NostrConnectParser {
         let url: String?
         let imageURL: String?
         let suggestedTrustLevel: TrustLevel
+        let isMultiAccount: Bool
     }
 
     static func parse(_ uri: String) throws -> ParsedURI {
@@ -51,6 +52,9 @@ enum NostrConnectParser {
         let url = queryItems.first(where: { $0.name == "url" })?.value
         let imageURL = queryItems.first(where: { $0.name == "image" })?.value
 
+        let accountsParam = queryItems.first(where: { $0.name == "accounts" })?.value
+        let isMultiAccount = accountsParam == "multi"
+
         let suggestedTrustLevel: TrustLevel
         if requestedPerms.isEmpty {
             suggestedTrustLevel = .medium
@@ -68,7 +72,8 @@ enum NostrConnectParser {
             name: name,
             url: url,
             imageURL: imageURL,
-            suggestedTrustLevel: suggestedTrustLevel
+            suggestedTrustLevel: suggestedTrustLevel,
+            isMultiAccount: isMultiAccount
         )
     }
 }
