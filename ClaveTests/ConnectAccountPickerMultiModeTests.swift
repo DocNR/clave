@@ -48,4 +48,17 @@ final class ConnectAccountPickerMultiModeTests: XCTestCase {
         XCTAssertTrue(ConnectAccountPicker.canProceed(selectedCount: 1))
         XCTAssertTrue(ConnectAccountPicker.canProceed(selectedCount: 5))
     }
+
+    func testDefaultSelection_AllCapped_EmptyResult() {
+        // Boundary: ≤5 accounts, but EVERY pubkey is in cappedSigners → empty
+        // selection. Picker presents but Continue stays disabled until user
+        // unchecks nothing (i.e. they can't proceed without revoking a pair
+        // elsewhere first). Locks the cap + default-selection interaction.
+        let pubkeys = ["pk1", "pk2", "pk3"]
+        let selected = ConnectAccountPicker.defaultSelection(
+            for: pubkeys,
+            cappedSigners: ["pk1", "pk2", "pk3"]
+        )
+        XCTAssertEqual(selected, Set())
+    }
 }

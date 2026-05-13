@@ -61,6 +61,15 @@ struct ConnectAccountPicker: View {
 
     @State private var multiModeSelectedPubkeys: Set<String> = []
     @State private var multiModeCappedSigners: Set<String> = []
+    /// One-shot guard so `.onAppear` re-firing (parent re-render, navigation
+    /// push/pop) does NOT clobber the user's hand-picked selection. The cap
+    /// refresh still runs every appear — only the selection seed is gated.
+    @State private var didInitMultiSelection: Bool = false
+    /// Tracks which capped row's tap-hint is currently visible. Nil = no
+    /// hint shown. Tapping a non-capped row (or the same capped row again)
+    /// clears it. Per spec §"Cap pre-flight in the picker": tap on a capped
+    /// row must surface a hint, not be silently swallowed.
+    @State private var capHintForPubkey: String? = nil
 
     var body: some View {
         NavigationStack {
@@ -97,6 +106,8 @@ struct ConnectAccountPicker: View {
 
     private func setupMultiModeDefaults() {
         guard case .multi = mode else { return }
+        // Always refresh capped signers — pair counts can change between
+        // appearances (a user pairing another client in a different flow).
         multiModeCappedSigners = Set(
             appState.accounts
                 .map(\.pubkeyHex)
@@ -105,10 +116,15 @@ struct ConnectAccountPicker: View {
                     currentPairCount: SharedStorage.pairCountForSigner($0)
                 ).isAtCap }
         )
+        // Only initialize selection the FIRST time — preserve user's
+        // unchecks across .onAppear re-entries (which can fire if the
+        // sheet's parent re-renders).
+        guard !didInitMultiSelection else { return }
         multiModeSelectedPubkeys = Self.defaultSelection(
             for: appState.accounts.map(\.pubkeyHex),
             cappedSigners: multiModeCappedSigners
         )
+        didInitMultiSelection = true
     }
 
     private var continueButton: some View {
@@ -219,49 +235,69 @@ struct ConnectAccountPicker: View {
         .buttonStyle(.plain)
     }
 
-    /// Multi-mode: tap-to-toggle (checkbox behavior). Capped rows are
-    /// disabled and render with a "5/5 clients" badge. Tapping a non-capped
-    /// row toggles its membership in `multiModeSelectedPubkeys`; the sheet
-    /// does NOT dismiss on row tap — dismissal happens via the Continue
-    /// button at the bottom.
+    /// Multi-mode: tap-to-toggle (checkbox behavior). Capped rows render
+    /// with a "5/5 clients" badge and dimmed visuals; tapping a capped row
+    /// surfaces an inline hint (NOT silently swallowed — see spec §"Cap
+    /// pre-flight in the picker"). Tapping a non-capped row toggles its
+    /// membership in `multiModeSelectedPubkeys`; the sheet does NOT dismiss
+    /// on row tap — dismissal happens via the Continue button at the bottom.
     private func multiModeRow(for account: Account) -> some View {
         let theme = AccountTheme.forAccount(pubkeyHex: account.pubkeyHex)
         let isSelected = multiModeSelectedPubkeys.contains(account.pubkeyHex)
         let isCapped = multiModeCappedSigners.contains(account.pubkeyHex)
+        let showingCapHint = capHintForPubkey == account.pubkeyHex
         return Button {
-            toggleMultiSelection(account.pubkeyHex)
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            if isCapped {
+                // Toggle the hint visibility for this row; clears hint on
+                // any other row that might have been showing one.
+                capHintForPubkey = showingCapHint ? nil : account.pubkeyHex
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            } else {
+                // Tapping a non-capped row clears any visible cap hint and
+                // toggles selection.
+                capHintForPubkey = nil
+                toggleMultiSelection(account.pubkeyHex)
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            }
         } label: {
-            HStack(spacing: 14) {
-                Image(systemName: isSelected ? "checkmark.square.fill" : "square")
-                    .font(.system(size: 22, weight: .regular))
-                    .foregroundStyle(isSelected ? theme.accent : Color.secondary)
-                    .frame(width: 28)
-                accountAvatar(for: account)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("@\(account.displayLabel)")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(.primary)
-                    Text(truncatedNpub(account.pubkeyHex))
-                        .font(.system(.caption2, design: .monospaced))
-                        .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 14) {
+                    Image(systemName: isSelected ? "checkmark.square.fill" : "square")
+                        .font(.system(size: 22, weight: .regular))
+                        .foregroundStyle(isSelected ? theme.accent : Color.secondary)
+                        .frame(width: 28)
+                    accountAvatar(for: account)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("@\(account.displayLabel)")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(.primary)
+                        Text(truncatedNpub(account.pubkeyHex))
+                            .font(.system(.caption2, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if isCapped {
+                        Text("\(PairAccountCapInfo.cap)/\(PairAccountCapInfo.cap) clients")
+                            .font(.caption2.bold())
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color(.tertiarySystemGroupedBackground), in: Capsule())
+                    }
                 }
-                Spacer()
-                if isCapped {
-                    Text("\(PairAccountCapInfo.cap)/\(PairAccountCapInfo.cap) clients")
-                        .font(.caption2.bold())
+                .opacity(isCapped ? 0.5 : 1.0)
+                if showingCapHint {
+                    Text("This account has \(PairAccountCapInfo.cap) paired clients. Revoke one in this account's settings to add another.")
+                        .font(.caption)
                         .foregroundStyle(.secondary)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(Color(.tertiarySystemGroupedBackground), in: Capsule())
+                        .fixedSize(horizontal: false, vertical: true)
+                        .transition(.opacity)
                 }
             }
             .padding(12)
             .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
-            .opacity(isCapped ? 0.5 : 1.0)
         }
         .buttonStyle(.plain)
-        .disabled(isCapped)
     }
 
     private func toggleMultiSelection(_ pubkeyHex: String) {
