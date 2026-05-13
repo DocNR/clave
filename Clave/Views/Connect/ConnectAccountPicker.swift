@@ -191,7 +191,11 @@ struct ConnectAccountPicker: View {
     }
 
     /// Single-mode: tap-to-pick (radio behavior). Tapping a row commits the
-    /// selection and dismisses the sheet.
+    /// selection and dismisses the sheet. The CURRENT account (the one
+    /// active in the identity bar) is row-highlighted to match multi-mode's
+    /// selection highlight — both modes use the same "tinted row + theme
+    /// stroke" treatment so the picker reads consistently regardless of
+    /// mode.
     private func singleModeRow(for account: Account) -> some View {
         let theme = AccountTheme.forAccount(pubkeyHex: account.pubkeyHex)
         let isCurrent = account.pubkeyHex == appState.currentAccount?.pubkeyHex
@@ -201,16 +205,7 @@ struct ConnectAccountPicker: View {
             dismiss()
         } label: {
             HStack(spacing: 14) {
-                ZStack {
-                    if isCurrent {
-                        Circle()
-                            .fill(LinearGradient(colors: [theme.start, theme.end],
-                                                 startPoint: .topLeading,
-                                                 endPoint: .bottomTrailing))
-                            .frame(width: 68, height: 68)
-                    }
-                    accountAvatar(for: account)
-                }
+                accountAvatar(for: account)
                 VStack(alignment: .leading, spacing: 3) {
                     Text("@\(account.displayLabel)")
                         .font(.system(size: 16, weight: .semibold))
@@ -230,7 +225,7 @@ struct ConnectAccountPicker: View {
                 }
             }
             .padding(12)
-            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
+            .background(rowBackground(theme: theme, highlighted: isCurrent))
         }
         .buttonStyle(.plain)
     }
@@ -295,9 +290,30 @@ struct ConnectAccountPicker: View {
                 }
             }
             .padding(12)
-            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
+            .background(rowBackground(theme: theme, highlighted: isSelected))
         }
         .buttonStyle(.plain)
+    }
+
+    /// Unified row background shared across `.single` (highlights the
+    /// CURRENT account) and `.multi` (highlights SELECTED rows). When
+    /// highlighted: per-account theme tint + accent-color stroke border;
+    /// otherwise the default grouped-list background. This is the visual
+    /// language consistency the picker was missing — every row, every
+    /// mode, same selection-state treatment.
+    @ViewBuilder
+    private func rowBackground(theme: AccountTheme, highlighted: Bool) -> some View {
+        if highlighted {
+            ZStack {
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(theme.start.opacity(0.18))
+                RoundedRectangle(cornerRadius: 12)
+                    .strokeBorder(theme.accent.opacity(0.4), lineWidth: 1)
+            }
+        } else {
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color(.secondarySystemGroupedBackground))
+        }
     }
 
     private func toggleMultiSelection(_ pubkeyHex: String) {
