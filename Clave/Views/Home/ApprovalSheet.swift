@@ -35,6 +35,15 @@ struct ApprovalSheet: View {
     /// parent decides whether to dismiss (all-success / all-failure) or
     /// hand control to the partial-failure result view (Task 11).
     @State private var handshakeCompleted: Bool = false
+    /// Authoritative per-row outcome captured at end of `runHandshake`.
+    /// Drives the partial-failure result view (Task 11): per-row error
+    /// messages + per-row Retry buttons. Mutated in place during retry
+    /// to move entries between `failed` and `succeeded`.
+    @State private var handshakeResult: HandshakeResult? = nil
+    /// In-flight retry tracking — disables the Retry button while the
+    /// per-signer handshake re-runs. Prevents double-tap from launching
+    /// two simultaneous handshakes for the same signer.
+    @State private var retryingSigners: Set<String> = []
 
     private let protectedKinds: Set<Int> = SharedStorage.getProtectedKinds()
 
@@ -70,9 +79,8 @@ struct ApprovalSheet: View {
                         // the parent's onCompletion dismisses the sheet
                         // before this branch is visible for more than a
                         // frame. For partial-failure the sheet stays here
-                        // until Task 11 replaces this placeholder with the
-                        // per-row result view + Done button.
-                        completedPlaceholder
+                        // and the per-row result view renders (Task 11).
+                        resultView
                     } else {
                         trustLevelCards
                         permissionsSection
@@ -83,7 +91,17 @@ struct ApprovalSheet: View {
             }
             .navigationTitle("Approve Connection")
             .navigationBarTitleDisplayMode(.inline)
-            .interactiveDismissDisabled(isConnecting)
+            // Block swipe-dismiss during the handshake loop AND during the
+            // partial-failure result view — otherwise the user can swipe
+            // away unretried failures with no second chance. Done is the
+            // only exit from the partial state. All-success and all-failure
+            // dismissals are driven by the parent's onCompletion, so this
+            // guard never blocks them.
+            .interactiveDismissDisabled(
+                isConnecting
+                    || (handshakeCompleted
+                        && (handshakeResult?.isPartialFailure ?? false))
+            )
             .alert("Connection limit reached", isPresented: $showConnectionCapAlert) {
                 Button("OK", role: .cancel) { }
             } message: {
@@ -366,23 +384,236 @@ struct ApprovalSheet: View {
         .padding(.vertical, 12)
     }
 
-    /// Empty-but-non-empty placeholder while the parent decides what to do
-    /// with the completed result. Task 11 replaces this with the partial-
-    /// failure result view (per-row state + retry/done buttons).
-    private var completedPlaceholder: some View {
-        VStack(spacing: 12) {
-            if isMulti {
-                ForEach(boundAccountPubkeys, id: \.self) { pubkey in
-                    progressRow(for: pubkey)
-                }
-            } else {
-                ProgressView().controlSize(.small)
-                Text("Finishing up…")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+    // MARK: - Result View (Task 11)
+
+    /// Rendered after the handshake loop completes (handshakeCompleted=true).
+    /// Three variants:
+    ///   - all-success: brief checkmark + names. Parent dismisses immediately
+    ///     on isAllSuccess (Option B per Task 11 design notes — the spec's
+    ///     1.5s flash is skipped in favor of an immediate dismiss; this view
+    ///     is visible for at most one frame). The success view is implemented
+    ///     defensively so a future Option A switch (parent waits for sheet
+    ///     self-dismiss) only requires re-wiring the parent.
+    ///   - partial-failure: header "M of N paired" + per-row error + Retry,
+    ///     plus a Done button. Sheet stays open until user taps Done. swipe-
+    ///     dismiss is blocked via interactiveDismissDisabled.
+    ///   - all-failure: parent dismisses + alerts; nothing rendered here.
+    @ViewBuilder
+    private var resultView: some View {
+        if let result = handshakeResult {
+            if result.isAllSuccess {
+                successResultView(result)
+            } else if result.isPartialFailure {
+                partialFailureResultView(result)
             }
+            // all-failure: parent dismisses immediately → nothing to render.
+        } else {
+            // Race window: handshakeCompleted latched but result not yet
+            // assigned (single frame). Keep the user looking at something
+            // sensible rather than empty space.
+            ProgressView()
+                .controlSize(.small)
+                .padding(.vertical, 24)
+        }
+    }
+
+    /// Success-only post-loop view. Rendered for one-frame in Option B
+    /// (parent dismisses immediately) — visible if a future Option A
+    /// switches the parent to wait for the sheet's self-dismiss signal.
+    private func successResultView(_ result: HandshakeResult) -> some View {
+        VStack(spacing: 12) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 48))
+                .foregroundStyle(.green)
+            Text(successMessage(for: result))
+                .font(.headline)
+                .multilineTextAlignment(.center)
+        }
+        .padding()
+    }
+
+    private func successMessage(for result: HandshakeResult) -> String {
+        let names = result.succeeded.map { pubkey in
+            appState.accounts.first(where: { $0.pubkeyHex == pubkey })?.displayLabel
+                ?? String(pubkey.prefix(8))
+        }.joined(separator: ", ")
+        return "\(clientDisplayName) is now signed in for \(names)"
+    }
+
+    /// Partial-failure result view — the user sees which signers succeeded
+    /// and which failed, with a per-row Retry button. Done dismisses;
+    /// swipe-dismiss is blocked via interactiveDismissDisabled to prevent
+    /// orphaning unretried failures.
+    private func partialFailureResultView(_ result: HandshakeResult) -> some View {
+        let total = result.succeeded.count + result.failed.count
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                Text("\(result.succeeded.count) of \(total) paired successfully")
+                    .font(.headline)
+            }
+            ForEach(result.succeeded, id: \.self) { pubkey in
+                succeededRow(pubkey: pubkey)
+            }
+            ForEach(result.failed, id: \.signerPubkey) { failed in
+                failedRow(failed)
+            }
+            HStack {
+                Spacer()
+                Button("Done") { dismiss() }
+                    .buttonStyle(.borderedProminent)
+            }
+            .padding(.top, 8)
         }
         .padding(.vertical, 12)
+    }
+
+    private func succeededRow(pubkey: String) -> some View {
+        let account = appState.accounts.first(where: { $0.pubkeyHex == pubkey })
+        let label = account?.displayLabel ?? String(pubkey.prefix(8))
+        return HStack(spacing: 10) {
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+                .font(.title3)
+                .frame(width: 24, height: 24)
+            AvatarView(pubkeyHex: pubkey, name: account?.displayLabel, size: 28)
+            Text(label)
+                .font(.subheadline.weight(.medium))
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 0)
+        }
+        .padding(8)
+        .background(Color(.secondarySystemGroupedBackground),
+                    in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func failedRow(_ failed: HandshakeResult.FailedSigner) -> some View {
+        let account = appState.accounts.first(where: { $0.pubkeyHex == failed.signerPubkey })
+        let label = account?.displayLabel ?? String(failed.signerPubkey.prefix(8))
+        return HStack(spacing: 10) {
+            Image(systemName: "xmark.circle.fill")
+                .foregroundStyle(.red)
+                .font(.title3)
+                .frame(width: 24, height: 24)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(label)
+                    .font(.subheadline.weight(.medium))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Text(failed.errorMessage)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+            Spacer(minLength: 0)
+            Button("Retry") {
+                retryFailed(signer: failed.signerPubkey)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(retryingSigners.contains(failed.signerPubkey))
+        }
+        .padding(8)
+        .background(Color(.secondarySystemGroupedBackground),
+                    in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    /// Re-runs the handshake for a single failed signer. Mutates
+    /// `handshakeResult` in place: success moves the entry from `failed`
+    /// to `succeeded`; failure updates the error message inline. If retry
+    /// drains `failed` to empty, signals the parent via `onCompletion` so
+    /// the parent's all-success branch fires and the sheet dismisses.
+    ///
+    /// Retry uses a fresh ClientPermissions template rebuilt from the
+    /// current trust/override state (same as buildAndApprove). The
+    /// AppState+NostrConnect layer's per-signer rewrite (see
+    /// runSingleConnect) ensures the row gets keyed to *this* signer
+    /// before save.
+    private func retryFailed(signer: String) {
+        // Guard against double-tap mid-retry.
+        guard !retryingSigners.contains(signer) else { return }
+        retryingSigners.insert(signer)
+        let perms = ClientPermissions(
+            pubkey: parsedURI.clientPubkey,
+            trustLevel: selectedTrust,
+            kindOverrides: kindOverrides,
+            methodPermissions: ClientPermissions.defaultMethodPermissions,
+            name: parsedURI.name,
+            url: parsedURI.url,
+            imageURL: parsedURI.imageURL,
+            connectedAt: Date().timeIntervalSince1970,
+            lastSeen: Date().timeIntervalSince1970,
+            requestCount: 0,
+            signerPubkeyHex: signer
+        )
+        Task { @MainActor in
+            do {
+                let retryResult = try await appState.handleNostrConnect(
+                    parsedURI: parsedURI,
+                    signerPubkeys: [signer],
+                    permissions: perms
+                )
+                retryingSigners.remove(signer)
+                guard let current = handshakeResult else { return }
+                if retryResult.isAllSuccess {
+                    let updated = HandshakeResult(
+                        succeeded: current.succeeded + [signer],
+                        failed: current.failed.filter { $0.signerPubkey != signer }
+                    )
+                    handshakeResult = updated
+                    succeededSoFar.insert(signer)
+                    // If all rows are now succeeded, signal the parent so
+                    // it dismisses + clears its staged state. Without this
+                    // the sheet would sit at "M of M paired successfully"
+                    // with no failures, which is a dead-end UX (Done
+                    // works, but the all-success path should match the
+                    // initial-loop all-success path).
+                    if updated.isAllSuccess {
+                        onCompletion(updated)
+                    }
+                } else {
+                    // handleNostrConnect returned a non-success result for
+                    // this single-signer retry (it caught the throw
+                    // internally and packaged it as a FailedSigner).
+                    let newError = retryResult.failed.first?.errorMessage
+                        ?? "Retry failed"
+                    let updatedFailed = current.failed.map { f -> HandshakeResult.FailedSigner in
+                        if f.signerPubkey == signer {
+                            return HandshakeResult.FailedSigner(
+                                signerPubkey: signer,
+                                errorMessage: newError
+                            )
+                        }
+                        return f
+                    }
+                    handshakeResult = HandshakeResult(
+                        succeeded: current.succeeded,
+                        failed: updatedFailed
+                    )
+                }
+            } catch {
+                // Boundary throw (e.g., empty signers — shouldn't happen
+                // since we pass [signer]). Update the row's error message
+                // in place; row stays for further retries.
+                retryingSigners.remove(signer)
+                guard let current = handshakeResult else { return }
+                let updatedFailed = current.failed.map { f -> HandshakeResult.FailedSigner in
+                    if f.signerPubkey == signer {
+                        return HandshakeResult.FailedSigner(
+                            signerPubkey: signer,
+                            errorMessage: error.localizedDescription
+                        )
+                    }
+                    return f
+                }
+                handshakeResult = HandshakeResult(
+                    succeeded: current.succeeded,
+                    failed: updatedFailed
+                )
+            }
+        }
     }
 
     private func progressRow(for pubkey: String) -> some View {
@@ -574,6 +805,7 @@ struct ApprovalSheet: View {
                 currentlyPairing = nil
                 isConnecting = false
                 handshakeCompleted = true
+                handshakeResult = result
                 onCompletion(result)
             } catch {
                 // Boundary error (e.g., empty signers) — synthesize an
@@ -596,7 +828,9 @@ struct ApprovalSheet: View {
                             errorMessage: error.localizedDescription
                         )
                     }
-                onCompletion(HandshakeResult(succeeded: [], failed: failed))
+                let synthesized = HandshakeResult(succeeded: [], failed: failed)
+                handshakeResult = synthesized
+                onCompletion(synthesized)
             }
             if bgTaskID != .invalid {
                 UIApplication.shared.endBackgroundTask(bgTaskID)
