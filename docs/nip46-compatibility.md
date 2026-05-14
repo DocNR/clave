@@ -1,6 +1,6 @@
 # NIP-46 Client Compatibility (Clave)
 
-_Last updated: 2026-05-07 — statuses reflect Clave build 29 unless noted otherwise. iOS same-device timing section verified on build 66._
+_Last updated: 2026-05-14 — statuses reflect Clave build 29 unless noted otherwise. iOS same-device timing section verified on build 66._
 
 This document tracks how Nostr clients interoperate with Clave's NIP-46 signer. It is **Clave-centric**: every status row reflects what we have actually tested against Clave specifically. Other NIP-46 signers (Amber, nsec.app, etc.) may behave differently with the same client.
 
@@ -208,11 +208,12 @@ Cross-cutting patterns observed during compatibility testing. Useful for predict
 - Specific bug: when the URI relay is `wss://relay.nsec.app`, the client never advances past the connect ack — appears unrelated to the signer (reproduces with both Clave and nsec.app).
 - Workaround: configure noStrudel's nostrconnect relay to anything else.
 
-### rust-nostr (`nostr-sdk`, `nostr-sdk-swift`, ≤ 0.44.2)
+### rust-nostr (`nostr-sdk`, `nostr-sdk-swift`, `nostr-sdk-kmp`)
 
-- `ResponseResult::parse` for the `connect` method strictly requires the response to be `"ack"`. Per NIP-46 spec, signers may return `"ack"` OR the URI's `secret` echoed back. Both Clave and nsec.app return the latter, so rust-nostr clients on this version cannot complete a `bunker://` connect against a spec-compliant signer.
-- Master has a partial fix on the parser side, but `nostr-connect/src/client.rs::connect()` still calls `res.to_ack()?` which only accepts `Self::Ack`. As of 2026-04-22 (no tagged release > 0.44.0), bunker:// remains broken on master too.
-- The `nostrconnect://` path on rust-nostr has a different code path and is reportedly working.
+- The NIP-46 `connect` response may be `"ack"` OR the URI's `secret` echoed back — both are spec-compliant. Clave echoes the secret.
+- **Current state (verified against rust-nostr master `0a030e1c7`, 2026-05-13):** the response parser and the `nostrconnect://` path accept both forms, but the `bunker://` path does not — `nostr-connect/src/client.rs::connect()` ends with `res.to_ack()?`, which only accepts `ResponseResult::Ack` and rejects `ResponseResult::ConnectSecret`. So `bunker://` pairing against a signer that echoes the secret (e.g. Clave) still fails. Filed upstream: [rust-nostr/nostr#1352](https://github.com/rust-nostr/nostr/issues/1352).
+- Secondary, same area: `Error::UnexpectedResponse`'s `Display` impl swaps the `expected`/`received` labels, so the error message reads backwards — which makes the bug look like the signer is at fault. Also noted in #1352.
+- The `nostrconnect://` path works (it accepts both response forms).
 - Workaround: client authors can vendor a slim NIP-46 client (POWR did this — ~300 lines) and plug it into rust-nostr's `NostrSigner.custom(...)` factory until upstream lands a release.
 
 ### Custom wrappers
@@ -275,7 +276,7 @@ Public list of issues filed against client/library repos for NIP-46 bugs surface
 
 | Issue | Library / Client | Status | Filed |
 |---|---|---|---|
-| Bunker `connect` parser strictly requires `"ack"`, rejects spec-allowed echoed-secret response | rust-nostr | Open / partial fix on master as of 2026-04-22 | _not yet filed by us — bug confirmed via independent NIP-46 probe testing_ |
+| `bunker://` `connect()` rejects spec-allowed echoed-secret response (+ swapped `Display` labels) | rust-nostr | [#1352](https://github.com/rust-nostr/nostr/issues/1352) — open | 2026-05-14 |
 | `applesauce-signers` + `relay.nsec.app` connect-ack stall | noStrudel / applesauce | Not yet filed | — |
 | welshman treats non-null `switch_relays` as migration trigger | Coracle / welshman | Not yet filed | — |
 | Custom authManager bypasses NDK pairing flow + decrypt-swallow | zap.cooking | Not yet filed | — |
@@ -338,6 +339,7 @@ Open a PR that:
 
 | Date | Change |
 |---|---|
+| 2026-05-14 | Updated the rust-nostr family note with the verified master `0a030e1c7` state (`bunker://` `connect()` still broken; parser + `nostrconnect://` path fixed) and the swapped `Display` labels. Filed [rust-nostr/nostr#1352](https://github.com/rust-nostr/nostr/issues/1352) and linked it in the upstream-issues table. |
 | 2026-05-07 | Added "iOS same-device pairing" section (recommends `bunker://` for same-device iOS, explains the nostrconnect WebSocket suspension constraint). Added "Improving post-pair delivery reliability for Clave-paired clients" section (recommends `wss://relay.powr.build/` in nostrconnect URI relay sets for client→Clave wake-up). Clave-side handshake protection in [PR #26](https://github.com/DocNR/clave/pull/26) / build 62; verified on build 66 against [noStrudel](https://nostrudel.ninja) and [Jumble](https://github.com/CodyTseng/jumble). |
 | 2026-04-29 | Initial publication. Build 29. |
 
