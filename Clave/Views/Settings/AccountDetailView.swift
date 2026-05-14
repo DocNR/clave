@@ -19,6 +19,7 @@ struct AccountDetailView: View {
 
     @State private var showDeleteAlert = false
     @State private var showRotateBunkerAlert = false
+    @State private var showClearConnectionsAlert = false
     @State private var showExportSheet = false
     @State private var isAboutExpanded: Bool = false
 
@@ -51,6 +52,7 @@ struct AccountDetailView: View {
             if account != nil {
                 profileSection
                 securitySection
+                connectionsSection
                 deleteSection
             }
         }
@@ -87,6 +89,14 @@ struct AccountDetailView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Generates a new bunker URI for this account. Existing pairings continue working.")
+        }
+        .alert("Clear all connections for \(deleteAlertNameSnippet)?",
+               isPresented: $showClearConnectionsAlert) {
+            Button("Clear \(connectionCount) connection\(connectionCount == 1 ? "" : "s")",
+                   role: .destructive) { performClearConnections() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Paired apps will lose access immediately and need to re-pair to sign for this account again. This doesn't delete the account itself.")
         }
         .sheet(isPresented: $showExportSheet) {
             ExportKeySheet()
@@ -359,6 +369,36 @@ struct AccountDetailView: View {
         guard let account else { return }
         _ = SharedStorage.rotateBunkerSecret(for: account.pubkeyHex)
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+    }
+
+    // MARK: - Connections
+
+    /// Per-account "Clear all connections" surface. Mirrors the destructive
+    /// language of deleteSection but distinct in scope: this keeps the
+    /// account around and only unpairs its connected clients. Hidden when
+    /// the account has zero connections (nothing to clear).
+    @ViewBuilder
+    private var connectionsSection: some View {
+        if connectionCount > 0 {
+            Section {
+                Button(role: .destructive) {
+                    showClearConnectionsAlert = true
+                } label: {
+                    Label("Clear all connections", systemImage: "link.badge.minus")
+                }
+                .listRowBackground(Color.clear)
+            } footer: {
+                Text("Unpairs all \(connectionCount) connected client\(connectionCount == 1 ? "" : "s") from this account. Paired apps will need to re-pair to sign for this account again. The account itself stays on this device.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func performClearConnections() {
+        guard let account else { return }
+        appState.clearAllClients(for: account.pubkeyHex)
+        UINotificationFeedbackGenerator().notificationOccurred(.warning)
     }
 
     // MARK: - Delete

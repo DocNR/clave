@@ -280,6 +280,55 @@ extension AppState {
         }
     }
 
+    /// Best-effort bulk unpair of every client paired with `signerPubkeyHex`.
+    /// Used by AccountDetailView's "Clear all connections" and SettingsView's
+    /// cross-account "Clear all connections for all accounts" controls.
+    ///
+    /// Differs from deleteAccount(pubkey:) in scope: the account itself stays
+    /// paired — keychain entry, bunker secret, account row all preserved.
+    /// Only the client-side rows + proxy-side pair entries are torn down.
+    /// The account can be re-paired with new clients immediately afterward.
+    ///
+    /// Steps:
+    ///   1. For each ConnectedClient: fire-and-forget unpair-client to the
+    ///      proxy (NIP-98 signed with the signer's nsec). Network failures
+    ///      enqueue a pendingPairOp via the existing retry mechanism — same
+    ///      contract as single-client revoke from HomeView swipe.
+    ///   2. Drop pending pair-ops for this signer — the proxy will GC its
+    ///      rows server-side regardless.
+    ///   3. Wipe local ConnectedClient + ClientPermissions rows for this
+    ///      signer (scoped helper — never touches other accounts' rows).
+    ///
+    /// Each per-client unpair logs its own ActivityEntry via the existing
+    /// unpairClientWithProxy path — no summary entry added here. Returns the
+    /// count of clients that were targeted (the number of unpair-client
+    /// requests fired); useful for caller-side feedback like haptics.
+    @discardableResult
+    func clearAllClients(for signerPubkeyHex: String) -> Int {
+        let clientsToUnpair = SharedStorage.getConnectedClients(for: signerPubkeyHex)
+        for client in clientsToUnpair {
+            unpairClientWithProxy(clientPubkey: client.pubkey, signer: signerPubkeyHex)
+        }
+        let pairOpsToDrop = SharedStorage.getPendingPairOps(for: signerPubkeyHex)
+        for op in pairOpsToDrop {
+            SharedStorage.removePendingPairOp(id: op.id)
+        }
+        SharedStorage.unpairAllClients(for: signerPubkeyHex)
+        return clientsToUnpair.count
+    }
+
+    /// Cross-account variant. Iterates every Account in `accounts` and
+    /// calls `clearAllClients(for:)` per signer. Returns the total client
+    /// count across all signers.
+    @discardableResult
+    func clearAllClientsForAllAccounts() -> Int {
+        var total = 0
+        for account in accounts {
+            total += clearAllClients(for: account.pubkeyHex)
+        }
+        return total
+    }
+
     func rotateBunkerSecret() {
         rotateBunkerSecret(for: signerPubkeyHex)
     }
