@@ -176,6 +176,13 @@ struct ConnectTabView: View {
             approvalContext = nil
             parsedURI = nil
             pickedSignerPubkeys = []
+            // Route back to Home after a successful pairing. Staying on the
+            // Connect tab would leave the user looking at the camera
+            // viewfinder again with nothing to do — Home is where they see
+            // the freshly-paired client. Failure / partial-failure paths
+            // deliberately stay on Connect so the user can retry or read
+            // the error without losing context.
+            appState.selectedTab = .home
         } else if result.isAllFailure {
             approvalContext = nil
             parsedURI = nil
