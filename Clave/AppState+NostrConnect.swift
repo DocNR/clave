@@ -72,6 +72,28 @@ extension AppState {
             // suppresses onCompletion anyway, so the partial result is
             // effectively discarded by the UI).
             if Task.isCancelled { break }
+
+            // Inter-iteration pacing to avoid relay rate-limit drops on
+            // rapid N kind:24133 events sharing one #p tag. Spec §"Risks
+            // #1" calls this out — some relays rate-limit per destination
+            // pubkey, and an unmitigated multi-pair burst at N=5 has
+            // surfaced occasional ack drops in dogfood. 200ms × (N-1)
+            // adds at most ~1s for N=5, well within the 30s
+            // UIBackgroundTask budget. Skipped on index==0 (nothing to
+            // space FROM), and on single-account flows (loop runs once,
+            // bit-identical to pre-pacing behavior). Task.sleep is
+            // cancellation-aware — `break` on CancellationError returns
+            // the partially-accumulated result up the stack, where
+            // ApprovalSheet's userCancelled guard suppresses
+            // onCompletion if the cancel came from the Cancel button.
+            if index > 0 {
+                do {
+                    try await Task.sleep(nanoseconds: 200_000_000)
+                } catch {
+                    break
+                }
+            }
+
             // Fire the progress callback BEFORE each iteration so the UI can
             // mark THIS signer as "currently pairing" while the handshake
             // runs. Phase 1 single-mode callers pass nil — behavior unchanged.
