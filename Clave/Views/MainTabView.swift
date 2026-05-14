@@ -1,5 +1,13 @@
 import SwiftUI
 
+/// Tab identity for `MainTabView`. Lives as a top-level enum so `AppState`
+/// can hold the current selection (`appState.selectedTab`) and sibling tabs
+/// can route between each other without a direct reference — e.g.
+/// `ConnectTabView` routes to `.home` after a successful pairing.
+enum MainTab: Hashable {
+    case home, activity, connect, discover, settings
+}
+
 struct MainTabView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.scenePhase) private var scenePhase
@@ -9,28 +17,34 @@ struct MainTabView: View {
     @State private var pendingStopTask: Task<Void, Never>? = nil
 
     var body: some View {
-        TabView {
+        @Bindable var appState = appState
+        TabView(selection: $appState.selectedTab) {
             HomeView()
+                .tag(MainTab.home)
                 .tabItem {
                     Label("Home", systemImage: "house.fill")
                 }
 
             ActivityView()
+                .tag(MainTab.activity)
                 .tabItem {
                     Label("Activity", systemImage: "list.bullet")
                 }
 
             ConnectTabView()
+                .tag(MainTab.connect)
                 .tabItem {
                     Label("Connect", systemImage: "bolt.fill")
                 }
 
             DiscoverView()
+                .tag(MainTab.discover)
                 .tabItem {
                     Label("Discover", systemImage: "safari")
                 }
 
             SettingsView()
+                .tag(MainTab.settings)
                 .tabItem {
                     Label("Settings", systemImage: "gearshape.fill")
                 }

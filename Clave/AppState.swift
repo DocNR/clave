@@ -68,6 +68,15 @@ final class AppState {
     /// forbids stored properties in extensions.
     var profileImage: UIImage?
 
+    // MARK: - UI navigation state
+
+    /// Selected `MainTabView` tab. Lives on AppState (not local `@State`)
+    /// so sibling tabs can route between each other — e.g. `ConnectTabView`
+    /// sets this to `.home` after a successful pairing so the user lands
+    /// back on Home instead of staring at the Connect tab's camera
+    /// viewfinder. Defaults to `.home` (the app's landing tab).
+    var selectedTab: MainTab = .home
+
     // MARK: - Pending approval surface (root alert + inbox bell)
     //
     // `pendingRequests` is the on-disk source of truth (cap 20, written by
