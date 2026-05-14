@@ -227,11 +227,14 @@ Today's NIP-46 `connect` ack carries `result: "ack"` or `result: "<echoed_secret
 {
   "echoed_secret": "abc123...",
   "name": "alice",
-  "picture": "https://..."
+  "picture": "https://...",
+  "total": 3
 }
 ```
 
-`echoed_secret` preserves the existing handshake validation (clients today check secret-match per the `nip46-interop-gotchas` post-stackernews fix). `name` and `picture` come from the account's cached `kind:0` profile (`Account.profile.displayName`, `Account.profile.picture`). The client can populate column headers / account-switcher rows immediately without a follow-up profile fetch.
+`echoed_secret` preserves the existing handshake validation (clients today check secret-match per the `nip46-interop-gotchas` post-stackernews fix). `name` and `picture` come from the account's cached `kind:0` profile (`Account.profile.displayName`, `Account.profile.pictureURL`). The client can populate column headers / account-switcher rows immediately without a follow-up profile fetch.
+
+`total` is the count of accounts the user selected in Clave's `.multi`-mode picker — the number of acks Clave will emit for this `(client_pk, secret)` handshake. **Every ack in the batch carries the same `total` value**, so a client receiving any one ack already knows how many to expect. Multi-aware clients (e.g. Spectr's `nostrConnectionLoginMulti` accumulator) use `total` for an auto-finalize signal — closing the subscription as soon as `count == total`, rather than waiting for the 60s timeout. **`total` MUST equal the picker selection count exactly.** Over-promising (announcing `total: 4` but only 3 acks land) is recoverable via the 60s timeout but creates an "is the missing one still loading?" UX moment. Under-promising (announcing `total: 2` when the user selected 3) would orphan the third ack — multi-aware clients close their subscription on auto-finalize, dropping later-arriving acks.
 
 This is purely additive: a client that doesn't parse the JSON shape but does string-compare the secret still validates the handshake correctly, because if `result` looks like JSON it won't match the secret string and the existing fallback path applies. Clients that *do* string-compare the secret as a sole validation will fail to validate multi-account acks — but this is a multi-account-aware client by definition (it set `accounts=multi`), so it's responsible for parsing the new shape.
 

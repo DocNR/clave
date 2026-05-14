@@ -12,11 +12,13 @@ struct SettingsView: View {
     @State private var devSettings = DeveloperSettings.shared
     @State private var versionTapTimes: [Date] = []
     @State private var showCopyLogsConfirmation = false
+    @State private var showClearAllConnectionsAlert = false
 
     var body: some View {
         NavigationStack {
             Form {
                 accountsSection
+                connectionsSection
                 permissionsSection
                 pushProxySection
                 relaySection
@@ -126,6 +128,66 @@ struct SettingsView: View {
         } message: { _ in
             Text(deleteAlertMessage)
         }
+    }
+
+    // MARK: - Connections (cross-account bulk clear)
+
+    /// Cross-account "Clear all connections" surface. Hidden when there are
+    /// zero paired clients across all accounts (nothing to clear). Distinct
+    /// from per-account clear (lives on AccountDetailView): this one wipes
+    /// every pairing on the device in a single confirmation. Accounts
+    /// themselves stay paired with this device.
+    @ViewBuilder
+    private var connectionsSection: some View {
+        if totalConnectionCount > 0 {
+            Section("Connections") {
+                Button(role: .destructive) {
+                    showClearAllConnectionsAlert = true
+                } label: {
+                    Label("Clear all connections for all accounts",
+                          systemImage: "link.badge.minus")
+                }
+            }
+            .alert("Clear all connections?",
+                   isPresented: $showClearAllConnectionsAlert) {
+                Button("Clear \(totalConnectionCount) connection\(totalConnectionCount == 1 ? "" : "s")",
+                       role: .destructive) {
+                    performClearAllConnections()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text(clearAllConnectionsMessage)
+            }
+        }
+    }
+
+    /// Sum of paired clients across every account on this device. Drives
+    /// both the section's visibility and the alert's count copy.
+    private var totalConnectionCount: Int {
+        appState.accounts.reduce(0) { total, account in
+            total + SharedStorage.getConnectedClients(for: account.pubkeyHex).count
+        }
+    }
+
+    /// Number of accounts that actually have at least one paired client —
+    /// drives "X across N accounts" copy. An account with zero clients
+    /// doesn't need to appear in the count phrasing.
+    private var accountsWithConnectionsCount: Int {
+        appState.accounts.filter {
+            !SharedStorage.getConnectedClients(for: $0.pubkeyHex).isEmpty
+        }.count
+    }
+
+    private var clearAllConnectionsMessage: String {
+        let acrossClause = accountsWithConnectionsCount > 1
+            ? " across \(accountsWithConnectionsCount) accounts"
+            : ""
+        return "Unpairs every connected client\(acrossClause). Paired apps will need to re-pair to keep signing. Accounts themselves stay on this device."
+    }
+
+    private func performClearAllConnections() {
+        appState.clearAllClientsForAllAccounts()
+        UINotificationFeedbackGenerator().notificationOccurred(.warning)
     }
 
     /// Avatar treatment matches the Home strip / slim banner: cached PFP with

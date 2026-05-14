@@ -193,6 +193,12 @@ enum SharedStorage {
         getConnectedClients().filter { $0.signerPubkeyHex == signerPubkeyHex }
     }
 
+    /// Count of distinct paired clients for a given signer pubkey. Used by
+    /// the multi-mode picker to pre-flight the per-signer 5-pair cap.
+    static func pairCountForSigner(_ signerPubkeyHex: String) -> Int {
+        getConnectedClients(for: signerPubkeyHex).count
+    }
+
     /// Note: argument label `forSigner:` (not `for:`) to disambiguate from
     /// the legacy single-arg `getClientPermissions(for: pubkey)` (which
     /// matches by client pubkey). Both `String` → Swift can't pick the

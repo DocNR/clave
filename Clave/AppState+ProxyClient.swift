@@ -234,8 +234,11 @@ extension AppState {
     func pairClientWithProxy(clientPubkey: String, relayUrls: [String], signer: String? = nil) {
         // Persist the client's URI relay set locally first (used by Layer 1's
         // foreground subscription). Idempotent.
-        // Use the explicitly-provided signer (e.g. boundAccountPubkey from deeplink)
-        // or fall back to the current account — matching unpairClientWithProxy's pattern.
+        // Use the explicitly-provided signer (e.g. the current iteration of
+        // runSingleConnect's multi-account loop, or deeplinkBoundAccount when
+        // a deeplink pre-bound the URI) or fall back to the current account
+        // — matching unpairClientWithProxy's pattern. Phase 2 callers in
+        // AppState+NostrConnect.swift pass the loop's per-iteration signer.
         let resolvedSigner = signer ?? signerPubkeyHex
         logger.notice("[Pair] pair-client begin client=\(clientPubkey.prefix(8), privacy: .public) signer=\(resolvedSigner.prefix(8), privacy: .public) relays=\(relayUrls.count, privacy: .public)")
         SharedStorage.setClientRelayUrls(pubkey: clientPubkey, relayUrls: relayUrls, signer: resolvedSigner)

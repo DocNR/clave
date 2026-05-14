@@ -186,8 +186,9 @@ final class AppState {
     var pendingDeeplinkAccountChoice: NostrConnectParser.ParsedURI?
 
     /// Pubkey of the account chosen by ConnectAccountPicker. Threaded
-    /// through to ApprovalSheet via boundAccountPubkey. Cleared after
-    /// the connect completes or the user cancels.
+    /// through to ApprovalSheet via boundAccountPubkeys (wrapped in a
+    /// 1-element array). Cleared after the connect completes or the
+    /// user cancels.
     var deeplinkBoundAccount: String?
 
     init() {

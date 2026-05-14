@@ -42,21 +42,78 @@ extension AppState {
     func handleNostrConnect(
         parsedURI: NostrConnectParser.ParsedURI,
         signerPubkeys: [String],
-        permissions: ClientPermissions
+        permissions: ClientPermissions,
+        progress: ((_ currentIndex: Int, _ total: Int, _ currentSigner: String) -> Void)? = nil
     ) async throws -> HandshakeResult {
         guard !signerPubkeys.isEmpty else {
             throw ClaveError.noSignerKey
         }
 
+        // The picker's selected-count is the authoritative `total` per the
+        // multi-account spec. Computed once at the top of the loop so every
+        // ack in the batch carries the same value (clients use it to know
+        // when they've received all expected acks).
+        let total = signerPubkeys.count
+
         var succeeded: [String] = []
         var failed: [HandshakeResult.FailedSigner] = []
 
-        for signerPubkey in signerPubkeys {
+        for (index, signerPubkey) in signerPubkeys.enumerated() {
+            // User-cancel check at iteration boundary. ApprovalSheet's
+            // Cancel button calls `handshakeTask?.cancel()` — the
+            // URLSession + relay-connect calls inside runSingleConnect
+            // respond to Task cancellation by throwing CancellationError,
+            // which the per-iteration catch below treats as a failure. We
+            // additionally short-circuit the outer loop so subsequent
+            // signers don't even start, instead of churning through 3+
+            // dead handshakes after the user has already navigated away.
+            // Returns whatever's accumulated so far (the caller in
+            // ApprovalSheet's `runHandshake` guards on userCancelled and
+            // suppresses onCompletion anyway, so the partial result is
+            // effectively discarded by the UI).
+            if Task.isCancelled { break }
+
+            // Inter-iteration pacing to avoid relay rate-limit drops on
+            // rapid N kind:24133 events sharing one #p tag. Spec §"Risks
+            // #1" calls this out — some relays rate-limit per destination
+            // pubkey, and an unmitigated multi-pair burst at N=5 has
+            // surfaced occasional ack drops in dogfood. 200ms × (N-1)
+            // adds at most ~1s for N=5, well within the 30s
+            // UIBackgroundTask budget. Skipped on index==0 (nothing to
+            // space FROM), and on single-account flows (loop runs once,
+            // bit-identical to pre-pacing behavior). Task.sleep is
+            // cancellation-aware — `break` on CancellationError returns
+            // the partially-accumulated result up the stack, where
+            // ApprovalSheet's userCancelled guard suppresses
+            // onCompletion if the cancel came from the Cancel button.
+            if index > 0 {
+                do {
+                    try await Task.sleep(nanoseconds: 200_000_000)
+                } catch {
+                    break
+                }
+            }
+
+            // Fire the progress callback BEFORE each iteration so the UI can
+            // mark THIS signer as "currently pairing" while the handshake
+            // runs. Phase 1 single-mode callers pass nil — behavior unchanged.
+            //
+            // The callback only reports forward motion: "we're about to pair
+            // signer at index N". It deliberately does NOT carry the prior
+            // signer's outcome — the cumulative HandshakeResult arrives at
+            // the end. UIs that want incremental status during the loop
+            // (e.g., ApprovalSheet's progressRow) can speculatively assume
+            // success for prior signers and reconcile against the final
+            // result; speculative-success matches the common case (rare
+            // failures) and is corrected at result time by Task 11's
+            // partial-failure view.
+            progress?(index, total, signerPubkey)
             do {
                 try await runSingleConnect(
                     parsedURI: parsedURI,
                     signerPubkey: signerPubkey,
-                    permissions: permissions
+                    permissions: permissions,
+                    total: total
                 )
                 succeeded.append(signerPubkey)
             } catch {
@@ -76,7 +133,8 @@ extension AppState {
     private func runSingleConnect(
         parsedURI: NostrConnectParser.ParsedURI,
         signerPubkey resolvedSignerPubkey: String,
-        permissions: ClientPermissions
+        permissions: ClientPermissions,
+        total: Int
     ) async throws {
         guard !resolvedSignerPubkey.isEmpty,
               let nsec = SharedKeychain.loadNsec(for: resolvedSignerPubkey) else {
@@ -85,8 +143,18 @@ extension AppState {
         let privateKey = try Bech32.decodeNsec(nsec)
         let signerPubkey = try LightEvent.pubkeyHex(from: privateKey)
 
-        // Save client permissions
-        SharedStorage.saveClientPermissions(permissions)
+        // Save client permissions. CRITICAL: the `permissions` arg arrives
+        // with `signerPubkeyHex` set to the FIRST bound account's pubkey
+        // (ApprovalSheet.buildAndApprove only inspects boundAccountPubkeys[0]
+        // when building the template). For multi-account pairs we must
+        // rewrite signerPubkeyHex to *this* iteration's signer before save,
+        // otherwise all N iterations overwrite the same row and signers
+        // 2…N end up with no ClientPermissions entry — LightSigner then
+        // rejects their requests on lookup. Spec §"handleNostrConnect —
+        // N-up handshake loop" calls for N distinct rows keyed by
+        // (signer_pubkey_i, client_pubkey).
+        let perSignerPermissions = permissions.with(signerPubkeyHex: signerPubkey)
+        SharedStorage.saveClientPermissions(perSignerPermissions)
 
         guard !parsedURI.relays.isEmpty else {
             throw ClaveError.noRelay
@@ -129,7 +197,18 @@ extension AppState {
         for _ in 1...3 {
             // Build a fresh event each attempt (new created_at = new event ID)
             let responseId = UUID().uuidString
-            let responseDict: [String: Any] = ["id": responseId, "result": parsedURI.secret]
+            // Resolve account profile for enriched JSON ack (multi only).
+            // Single-account flow falls back to bare-secret string inside
+            // LightSigner.connectAckResult.
+            let account = accounts.first(where: { $0.pubkeyHex == signerPubkey })
+            let resultField = LightSigner.connectAckResult(
+                isMultiAccount: parsedURI.isMultiAccount,
+                echoedSecret: parsedURI.secret,
+                accountName: account?.profile?.displayName ?? account?.profile?.name,
+                accountPicture: account?.profile?.pictureURL,
+                total: total
+            )
+            let responseDict: [String: Any] = ["id": responseId, "result": resultField]
             guard let responseData = try? JSONSerialization.data(withJSONObject: responseDict),
                   let responseJSON = String(data: responseData, encoding: .utf8) else {
                 continue

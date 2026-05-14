@@ -721,6 +721,56 @@ enum LightSigner {
         }
     }
 
+    /// Build the `result` field for a NIP-46 `connect` ack.
+    ///
+    /// Single-account (`isMultiAccount: false`): bare echoed-secret string,
+    /// matches today's behavior. Backwards-compatible with all existing
+    /// clients including ones that string-compare `result == secret`.
+    ///
+    /// Multi-account (`isMultiAccount: true`): JSON object
+    /// `{echoed_secret, name?, picture?, total}`. Lets multi-aware clients
+    /// (Spectr) render account labels without a follow-up kind:0 fetch and
+    /// auto-finalize their listening window on `count == total`.
+    ///
+    /// `total` MUST equal the picker's selected-count exactly per spec.
+    /// Pass the same value on every iteration of the N-up handshake loop
+    /// (each ack in the batch carries the same `total`).
+    static func connectAckResult(
+        isMultiAccount: Bool,
+        echoedSecret: String,
+        accountName: String?,
+        accountPicture: String?,
+        total: Int
+    ) -> String {
+        guard isMultiAccount else {
+            return echoedSecret
+        }
+        // Build heterogeneous JSON object: String fields + Int `total`.
+        var fields: [String: Any] = [
+            "echoed_secret": echoedSecret,
+            "total": total
+        ]
+        if let name = accountName, !name.isEmpty {
+            fields["name"] = name
+        }
+        if let picture = accountPicture, !picture.isEmpty {
+            fields["picture"] = picture
+        }
+        // Sorted keys → deterministic output (helps test assertions + log
+        // diffing).
+        guard let data = try? JSONSerialization.data(
+                withJSONObject: fields,
+                options: [.sortedKeys]
+              ),
+              let str = String(data: data, encoding: .utf8) else {
+            // Fallback: if JSON serialization fails (shouldn't happen for
+            // plain String + Int fields), degrade to bare secret rather
+            // than breaking the handshake.
+            return echoedSecret
+        }
+        return str
+    }
+
     /// Decrypt just enough of a kind:24133 event to determine its NIP-46 method.
     /// Returns nil if the event is malformed, not addressed to us, or the JSON-RPC payload is invalid.
     /// Used by the NSE + foreground signing loops to sort events so that `connect` requests are
