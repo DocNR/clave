@@ -257,10 +257,6 @@ struct ConnectAccountPicker: View {
         } label: {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 14) {
-                    Image(systemName: isSelected ? "checkmark.square.fill" : "square")
-                        .font(.system(size: 22, weight: .regular))
-                        .foregroundStyle(isSelected ? theme.accent : Color.secondary)
-                        .frame(width: 28)
                     accountAvatar(for: account)
                     VStack(alignment: .leading, spacing: 3) {
                         Text("@\(account.displayLabel)")
