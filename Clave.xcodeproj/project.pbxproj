@@ -8,8 +8,12 @@
 
 /* Begin PBXBuildFile section */
 		006B17A84C114EDF9B129CAE /* NostrConnectParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34B139A8E147475F9B40B3D5 /* NostrConnectParser.swift */; };
+		2423CB18D50B2E24C6A6FF4A /* EntitlementService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2399A369793AE0D3D33EADA4 /* EntitlementService.swift */; };
+		34CBA7C30F31BE62223F0338 /* Entitlement.swift in Sources */ = {isa = PBXBuildFile; fileRef = E671D1F2204302E539745585 /* Entitlement.swift */; };
 		4963A6373F0641F1B1A1455A330BCB5B /* DeeplinkRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7835E9DD22C448C3893D6D945AFFEA16 /* DeeplinkRouter.swift */; };
 		6D2C503B9EF64C8EA5101CDB /* NostrConnectParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34B139A8E147475F9B40B3D5 /* NostrConnectParser.swift */; };
+		77CF80E014C7761C7D80E997 /* EntitlementService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2399A369793AE0D3D33EADA4 /* EntitlementService.swift */; };
+		925E218DD834A18B7EAA45D3 /* Entitlement.swift in Sources */ = {isa = PBXBuildFile; fileRef = E671D1F2204302E539745585 /* Entitlement.swift */; };
 		AE01F2A3B4C5D6E700000002 /* ActivitySummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE01F2A3B4C5D6E700000001 /* ActivitySummary.swift */; };
 		AE01F2A3B4C5D6E700000003 /* ActivitySummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE01F2A3B4C5D6E700000001 /* ActivitySummary.swift */; };
 		AE01F2A3B4C5D6E700000005 /* Nip19.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE01F2A3B4C5D6E700000004 /* Nip19.swift */; };
@@ -90,6 +94,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		2399A369793AE0D3D33EADA4 /* EntitlementService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = EntitlementService.swift; sourceTree = "<group>"; };
 		34B139A8E147475F9B40B3D5 /* NostrConnectParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NostrConnectParser.swift; sourceTree = "<group>"; };
 		7835E9DD22C448C3893D6D945AFFEA16 /* DeeplinkRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeeplinkRouter.swift; sourceTree = "<group>"; };
 		894FE9FF88CD485ABCD31C05 /* ClientPermissions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClientPermissions.swift; sourceTree = "<group>"; };
@@ -101,6 +106,7 @@
 		DE7E10B1DE7E10B1DE7E10B1 /* DeveloperSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeveloperSettings.swift; sourceTree = "<group>"; };
 		DE7E10C1DE7E10C1DE7E10C1 /* LogExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogExporter.swift; sourceTree = "<group>"; };
 		DE7E10C4DE7E10C4DE7E10C4 /* RelayUtils.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelayUtils.swift; sourceTree = "<group>"; };
+		E671D1F2204302E539745585 /* Entitlement.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Entitlement.swift; sourceTree = "<group>"; };
 		EF3D7A0F2F8BCAE3005A6545 /* Clave.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Clave.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		EF3D7A1C2F8BCAE6005A6545 /* ClaveTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ClaveTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		EF3D7A262F8BCAE6005A6545 /* ClaveUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ClaveUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -145,11 +151,15 @@
 		};
 		EF3D7A1F2F8BCAE6005A6545 /* ClaveTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+			);
 			path = ClaveTests;
 			sourceTree = "<group>";
 		};
 		EF3D7A292F8BCAE6005A6545 /* ClaveUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+			);
 			path = ClaveUITests;
 			sourceTree = "<group>";
 		};
@@ -245,6 +255,8 @@
 				AE01F2A3B4C5D6E700000007 /* SharedKeychain+Enumeration.swift */,
 				EFCA55B463A619311A35AF3C /* SharedModels.swift */,
 				EFEE4316AC522CDDA35AFAC1 /* SharedStorage.swift */,
+				E671D1F2204302E539745585 /* Entitlement.swift */,
+				2399A369793AE0D3D33EADA4 /* EntitlementService.swift */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -295,8 +307,6 @@
 				EF3D7A1F2F8BCAE6005A6545 /* ClaveTests */,
 			);
 			name = ClaveTests;
-			packageProductDependencies = (
-			);
 			productName = ClaveTests;
 			productReference = EF3D7A1C2F8BCAE6005A6545 /* ClaveTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
@@ -318,8 +328,6 @@
 				EF3D7A292F8BCAE6005A6545 /* ClaveUITests */,
 			);
 			name = ClaveUITests;
-			packageProductDependencies = (
-			);
 			productName = ClaveUITests;
 			productReference = EF3D7A262F8BCAE6005A6545 /* ClaveUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
@@ -456,6 +464,8 @@
 				AE01F2A3B4C5D6E700000008 /* SharedKeychain+Enumeration.swift in Sources */,
 				C1A4F2B3C5D6E700000011 /* AccountTheme.swift in Sources */,
 				4963A6373F0641F1B1A1455A330BCB5B /* DeeplinkRouter.swift in Sources */,
+				34CBA7C30F31BE62223F0338 /* Entitlement.swift in Sources */,
+				77CF80E014C7761C7D80E997 /* EntitlementService.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -494,6 +504,8 @@
 				AE01F2A3B4C5D6E700000006 /* Nip19.swift in Sources */,
 				B2551C1A4D99451B8AABCA1763DF333C /* DeeplinkRouter.swift in Sources */,
 				B0EBA01E2F90AB01000A0003 /* PendingApprovalBanner.swift in Sources */,
+				925E218DD834A18B7EAA45D3 /* Entitlement.swift in Sources */,
+				2423CB18D50B2E24C6A6FF4A /* EntitlementService.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
