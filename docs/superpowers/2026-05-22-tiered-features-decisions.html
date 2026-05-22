@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tiered Features — Decisions to Make</title>
+<style>
+  :root{
+    --bg:#0d1117;--card:#161b22;--panel:#1c2330;--line:#2d3543;
+    --ink:#e6edf3;--muted:#9aa7b4;--dim:#6e7d8c;
+    --rec:#3fcaa1;--rec-bg:#102a22;--alt:#222b38;
+    --t1:#f5a623;--t2:#4aa8ff;--t3:#3fcaa1;--warn:#f0883e;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:16px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;padding:38px 18px}
+  .wrap{max-width:940px;margin:0 auto}
+  h1{font-size:25px;margin:0 0 4px}
+  .sub{color:var(--muted);font-size:14.5px;margin:0}
+  .lead{color:var(--muted);font-size:14.5px;margin:16px 0 26px;border-left:3px solid var(--line);padding:6px 0 6px 15px}
+  .lead b{color:var(--ink)}
+  .d{background:var(--card);border:1px solid var(--line);border-radius:13px;padding:20px 22px;margin-bottom:16px}
+  .d .head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:4px}
+  .num{font-size:12px;font-weight:800;color:#0d1117;background:var(--ink);border-radius:6px;padding:2px 8px;letter-spacing:.4px}
+  .tag{font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;padding:2px 8px;border-radius:999px;border:1px solid}
+  .tag.t1{color:var(--t1);border-color:var(--t1)} .tag.t2{color:var(--t2);border-color:var(--t2)}
+  .tag.t3{color:var(--t3);border-color:var(--t3)} .tag.seq{color:#c9d4e0;border-color:var(--line)}
+  .q{font-size:17px;font-weight:650;margin:6px 0 14px}
+  .opts{display:flex;flex-direction:column;gap:8px}
+  .opt{border:1px solid var(--line);border-radius:9px;padding:11px 13px;background:var(--alt);font-size:14px}
+  .opt.rec{border-color:var(--rec);background:var(--rec-bg)}
+  .opt .lbl{font-weight:650}
+  .pill{font-size:10.5px;font-weight:800;letter-spacing:.4px;color:#0d1117;background:var(--rec);border-radius:999px;padding:2px 7px;margin-left:8px;vertical-align:middle}
+  .opt .desc{color:var(--muted);font-size:13px;margin-top:3px}
+  .why{margin-top:13px;font-size:13px;color:var(--dim)}
+  .why b{color:var(--muted)}
+  .sub-d{margin-top:12px;padding-top:12px;border-top:1px dashed var(--line)}
+  .sub-d .q{font-size:14.5px;font-weight:600;margin:0 0 10px}
+  code{background:#0b1f17;color:#7ee3b8;border:1px solid #1d3b2e;border-radius:5px;padding:1px 5px;
+    font:12.5px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace}
+  .blocker{background:#241a10;border:1px solid var(--warn);border-radius:13px;padding:18px 22px;margin:22px 0 8px}
+  .blocker h3{margin:0 0 6px;font-size:14px;color:var(--warn);text-transform:uppercase;letter-spacing:.5px}
+  .blocker p{margin:6px 0;font-size:14px;color:var(--ink)}
+  .foot{color:var(--muted);font-size:14px;margin-top:24px}
+  .foot b{color:var(--ink)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Tiered Features — Decisions to Make</h1>
+  <p class="sub">Distilled from the three design specs · 2026-05-22</p>
+  <p class="lead">
+    These are the calls that actually drive the build. I've recommended a default for each
+    (<span style="color:var(--rec);font-weight:700">green</span>) — just tell me where you'd choose differently.
+    Everything else in the specs I can decide as I write the plan.
+  </p>
+
+  <!-- D0 SEQUENCING -->
+  <div class="d">
+    <div class="head"><span class="num">0</span><span class="tag seq">Sequencing</span></div>
+    <div class="q">Which tier do I build first?</div>
+    <div class="opts">
+      <div class="opt rec"><span class="lbl">Tier 1 — Key backup &amp; recovery</span><span class="pill">RECOMMENDED</span>
+        <div class="desc">Biggest exposure vs. Amber; table stakes for a custody app.</div></div>
+      <div class="opt"><span class="lbl">Tier 2 — App-launch lock</span>
+        <div class="desc">Fastest / lowest-effort win if you want a quick ship first.</div></div>
+      <div class="opt"><span class="lbl">Tier 3 — Multi-relay bunker</span>
+        <div class="desc">Reliability fix; also the only one with proxy-side work testable here in the cloud.</div></div>
+    </div>
+    <div class="why"><b>Why it matters:</b> all three are independent and ship separately, so this is purely "what first."</div>
+  </div>
+
+  <!-- D1 iCloud -->
+  <div class="d">
+    <div class="head"><span class="num">1</span><span class="tag t1">Tier 1</span></div>
+    <div class="q">How do encrypted backups reach iCloud?</div>
+    <div class="opts">
+      <div class="opt rec"><span class="lbl">Option B — app-encrypted blob</span><span class="pill">RECOMMENDED</span>
+        <div class="desc">Store a passphrase-encrypted <code>ncryptsec</code> in your private iCloud. Apple sees only ciphertext; the passphrase never leaves the device. Working key stays device-only.</div></div>
+      <div class="opt"><span class="lbl">Option A — iCloud Keychain sync</span>
+        <div class="desc">~5 lines, no passphrase, auto multi-device. But the raw key enters Apple's escrow — contradicts "never leaves the device."</div></div>
+      <div class="opt"><span class="lbl">No iCloud — manual only</span>
+        <div class="desc">Seed words / <code>ncryptsec</code> / QR only. Zero cloud exposure, but no auto recover-a-lost-phone path.</div></div>
+    </div>
+    <div class="why"><b>Why it matters:</b> defines the core trust story and how much gets built.</div>
+  </div>
+
+  <!-- D2 mnemonic -->
+  <div class="d">
+    <div class="head"><span class="num">2</span><span class="tag t1">Tier 1</span></div>
+    <div class="q">Switch new-key generation to a seed phrase (NIP-06)?</div>
+    <div class="opts">
+      <div class="opt rec"><span class="lbl">Yes — generate from a BIP-39 mnemonic</span><span class="pill">RECOMMENDED</span>
+        <div class="desc">Enables 12/24-word backup &amp; restore — the format most Nostr users expect. Changes <code>Keys.generate()</code> for future keys only.</div></div>
+      <div class="opt"><span class="lbl">No — keep raw key generation</span>
+        <div class="desc">Simpler, but seed words are impossible — backup is <code>ncryptsec</code>/iCloud only, forever.</div></div>
+    </div>
+    <div class="sub-d">
+      <div class="q">If yes — keep the mnemonic around?</div>
+      <div class="opts">
+        <div class="opt rec"><span class="lbl">Persist it encrypted</span><span class="pill">RECOMMENDED</span>
+          <div class="desc">Lets "show my seed words later" + seed-based iCloud work, under one passphrase.</div></div>
+        <div class="opt"><span class="lbl">Show once, then discard</span>
+          <div class="desc">Smallest secret footprint, but words can never be re-displayed.</div></div>
+      </div>
+    </div>
+    <div class="why"><b>Why it matters:</b> seed words can't be added to a key after the fact — this is a now-or-never call for new keys.</div>
+  </div>
+
+  <!-- D3 legacy keys -->
+  <div class="d">
+    <div class="head"><span class="num">3</span><span class="tag t1">Tier 1</span></div>
+    <div class="q">What about existing &amp; imported keys (which have no seed phrase)?</div>
+    <div class="opts">
+      <div class="opt rec"><span class="lbl">Accept — <code>ncryptsec</code> + iCloud only, say so clearly</span><span class="pill">RECOMMENDED</span>
+        <div class="desc">"Seed words unavailable for this key" messaging; steer to encrypted backup. No silent migration.</div></div>
+      <div class="opt"><span class="lbl">Add a "rotate to a seed-backed key" nudge</span>
+        <div class="desc">Better long-term, but edges into NIP-41 migration — a separate, larger effort.</div></div>
+    </div>
+    <div class="why"><b>Why it matters:</b> your current testers' keys fall here, so it sets their backup expectations.</div>
+  </div>
+
+  <!-- D4 scrypt -->
+  <div class="d">
+    <div class="head"><span class="num">4</span><span class="tag t1">Tier 1</span></div>
+    <div class="q">Backup encryption strength vs. unlock speed (scrypt cost)?</div>
+    <div class="opts">
+      <div class="opt rec"><span class="lbl"><code>log_n = 16</code> default + optional "stronger / slower"</span><span class="pill">RECOMMENDED</span>
+        <div class="desc">~1–2s to derive on a modern iPhone; the cost factor is stored in the blob, so restores work either way.</div></div>
+      <div class="opt"><span class="lbl">Always <code>log_n = 18</code></span>
+        <div class="desc">Stronger, but noticeably slower on older devices.</div></div>
+    </div>
+    <div class="why"><b>Why it matters:</b> minor/technical — fine to just take my default unless you have a preference.</div>
+  </div>
+
+  <!-- D5 lock -->
+  <div class="d">
+    <div class="head"><span class="num">5</span><span class="tag t2">Tier 2</span></div>
+    <div class="q">Launch-lock default and re-lock timeout?</div>
+    <div class="opts">
+      <div class="opt rec"><span class="lbl">On by default (when device has Face ID/passcode), re-lock after 1 min</span><span class="pill">RECOMMENDED</span>
+        <div class="desc">Safe posture; 1 min avoids re-prompts during the app-switch bounces of pairing.</div></div>
+      <div class="opt"><span class="lbl">Off by default (opt-in in Settings)</span>
+        <div class="desc">Zero first-run friction; relies on users finding the toggle.</div></div>
+      <div class="opt"><span class="lbl">Different timeout — Immediately / 5 min</span>
+        <div class="desc">Stricter or looser than 1 min.</div></div>
+    </div>
+    <div class="why"><b>Why it matters:</b> safety vs. friction. (Note: in-app approval will require auth regardless, and the NSE keeps signing while locked.)</div>
+  </div>
+
+  <!-- D6 relays -->
+  <div class="d">
+    <div class="head"><span class="num">6</span><span class="tag t3">Tier 3</span></div>
+    <div class="q">How far does the multi-relay change go in v1?</div>
+    <div class="opts">
+      <div class="opt rec"><span class="lbl">Phase A — fixed multi-relay set, read-only in Settings</span><span class="pill">RECOMMENDED</span>
+        <div class="desc">Proxy subscribes to ~2–3 relays with dedup; keeps <code>relay.powr.build</code> so existing pairings don't break. User-editable relays come later.</div></div>
+      <div class="opt"><span class="lbl">Go straight to user-editable relays</span>
+        <div class="desc">More flexible, but needs dynamic per-pubkey proxy subscription management — bigger scope.</div></div>
+    </div>
+    <div class="why"><b>Why it matters:</b> Phase A removes the single-point-of-failure cheaply. (I'll probe <code>relay.powr.build</code> / <code>relay.nsec.app</code> / <code>relay.damus.io</code> to pick the default set.)</div>
+  </div>
+
+  <!-- BLOCKER -->
+  <div class="blocker">
+    <h3>One thing I need to verify before sizing Tier 1</h3>
+    <p>Does <code>nostr-sdk-swift</code> 0.44.2 expose <code>EncryptedSecretKey</code> (NIP-49) and mnemonic-based <code>Keys</code> (NIP-06)?</p>
+    <p><b>If yes</b> → Tier 1 is mostly wiring up SDK calls. <b>If no</b> → a real decision: bump the SDK, or hand-roll scrypt + XChaCha20-Poly1305 + BIP-39/32 (materially larger). I'll confirm this from the package before drafting the plan.</p>
+  </div>
+
+  <p class="foot">
+    <b>Your move:</b> reply with your picks (even just "all recommended" works), and I'll bake them into the
+    first implementation plan — Tier 1 unless you say otherwise.
+  </p>
+</div>
+</body>
+</html>
