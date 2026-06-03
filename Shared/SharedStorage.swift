@@ -363,6 +363,68 @@ enum SharedStorage {
         logger.notice("[Storage] unpairAllClients(for: \(signerPubkeyHex.prefix(8), privacy: .public)) perms=\(beforeP)→\(perms.count) clients=\(beforeC)→\(clients.count)")
     }
 
+    // MARK: - NIP-44 v3 permissions schema migration
+
+    /// Current permissions-schema version. v3 adds per-(method, kind, scope?)
+    /// grants on ClientPermissions. See `migrateToV3PermissionsSchemaIfNeeded`
+    /// for the wipe-and-rebuild policy resolved 2026-06-02.
+    static let currentPermissionsSchemaVersion: Int = 3
+
+    /// One-time wipe of ClientPermissions on first launch after v3 ships.
+    ///
+    /// Rationale (BACKLOG NIP-44 v3 "permission migration RESOLVED"):
+    /// the perpetual two-code-path tax of a parallel v2/v3 permission
+    /// schema isn't justified at Clave's user-count. Wipe-and-rebuild
+    /// instead. Users re-grant permissions naturally on the next request
+    /// from each paired app; the approval UI shows a one-time explainer
+    /// card on next launch (gated by `needsV3ExplainerCardKey`).
+    ///
+    /// What this DOES wipe:
+    ///   - All ClientPermissions rows (trust levels, kind overrides,
+    ///     method grants, the new v3KindScopePermissions field)
+    ///
+    /// What this does NOT touch:
+    ///   - Accounts (Keychain-stored nsecs)
+    ///   - ConnectedClients (the pair-connection metadata: pubkeys, names,
+    ///     relays, lastSeen) — pairings stay alive, only the GRANTS get
+    ///     reset. Users keep their app connections.
+    ///   - Bunker secrets, APNs device token, proxy registrations
+    ///   - Pending requests, activity log
+    ///
+    /// Idempotent: returns early once the stored schema version is
+    /// `>= currentPermissionsSchemaVersion`.
+    static func migrateToV3PermissionsSchemaIfNeeded() {
+        let storedVersion = defaults.integer(forKey: SharedConstants.permissionsSchemaVersionKey)
+        guard storedVersion < currentPermissionsSchemaVersion else { return }
+
+        let perms = getClientPermissions()
+        let beforeCount = perms.count
+
+        // Wipe by removing the key entirely. Next read returns []
+        // (getClientPermissions handles nil data gracefully). This is
+        // simpler than `save([])` and produces a smaller UserDefaults
+        // footprint on the recently-fresh-installed user.
+        defaults.removeObject(forKey: SharedConstants.clientPermissionsKey)
+        defaults.set(currentPermissionsSchemaVersion, forKey: SharedConstants.permissionsSchemaVersionKey)
+        defaults.set(true, forKey: SharedConstants.needsV3ExplainerCardKey)
+
+        logger.notice("[Storage] migrateToV3PermissionsSchemaIfNeeded: wiped \(beforeCount) ClientPermissions rows (storedVersion=\(storedVersion) → \(currentPermissionsSchemaVersion))")
+    }
+
+    /// Reads the one-time explainer-card flag set by the v3 migration.
+    /// UI consumers should call `clearV3ExplainerCardFlag()` once the
+    /// user has acknowledged the card so it doesn't redisplay on every
+    /// app launch.
+    static func needsV3ExplainerCard() -> Bool {
+        defaults.bool(forKey: SharedConstants.needsV3ExplainerCardKey)
+    }
+
+    /// Clears the v3 explainer-card flag — called after the user
+    /// dismisses the explainer card in the UI.
+    static func clearV3ExplainerCardFlag() {
+        defaults.set(false, forKey: SharedConstants.needsV3ExplainerCardKey)
+    }
+
     /// Migrate legacy paired clients to ClientPermissions (one-time, on first launch after update)
     static func migrateIfNeeded() {
         // Skip if already migrated (clientPermissions key exists with data)
