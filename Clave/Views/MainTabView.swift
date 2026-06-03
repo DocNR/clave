@@ -211,6 +211,10 @@ struct MainTabView: View {
             base = "Approve Encryption Request"
         case "nip04_decrypt", "nip44_decrypt":
             base = "Approve Decryption Request"
+        case "nip44v3_encrypt":
+            base = "Approve v3 Encryption"
+        case "nip44v3_decrypt":
+            base = "Approve v3 Decryption"
         default:
             base = "Approve Request"
         }
@@ -227,6 +231,23 @@ struct MainTabView: View {
 
         if request.method == "sign_event", let kind = request.eventKind {
             lines.append(KnownKinds.label(for: kind))
+        } else if let v3Kind = request.v3Kind {
+            // v3 messages bind (kind, scope) into the MAC, so showing them here
+            // is cryptographically meaningful — they're what gives the prompt
+            // its trustworthiness vs the opaque v2 prompts above. Tap into the
+            // inbox detail view for the full grant Picker (Once / kind / kind+scope).
+            lines.append(KnownKinds.label(for: Int(v3Kind)))
+            if let scope = request.v3Scope, !scope.isEmpty {
+                lines.append("Scope: \u{201C}\(scope)\u{201D}")
+            }
+            switch KnownKinds.sensitivityTier(for: Int(v3Kind)) {
+            case .tierS:
+                lines.append("⚠️ Highly sensitive — only approve if you initiated this right now")
+            case .tierA:
+                lines.append("⚠️ Sensitive context")
+            case .tierB, .normal:
+                break
+            }
         } else {
             lines.append("Method: \(request.method)")
         }
