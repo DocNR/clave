@@ -349,7 +349,12 @@ enum LightSigner {
                             id: UUID().uuidString,
                             requestEventJSON: eventJSON,
                             method: method,
-                            eventKind: eventKind ?? 0,
+                            // Pass nil through when extractEventKind couldn't find a kind
+                            // (only sign_event populates eventKind today). A `?? 0` here
+                            // would store Optional(0) which the detail view treats as a
+                            // valid kind and renders as "Kind 0 — Profile Metadata"
+                            // alongside the v3Kind row for v3 requests.
+                            eventKind: eventKind,
                             clientPubkey: senderPubkey,
                             timestamp: Date().timeIntervalSince1970,
                             responseRelayUrl: responseRelayUrl,
