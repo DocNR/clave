@@ -82,9 +82,9 @@ struct PendingRequestDetailView: View {
                 if let scope = request.v3Scope, !scope.isEmpty {
                     v3ScopeRow(scope: scope)
                 }
-                if let banner = tierWarningBanner(forKind: Int(v3Kind)) {
-                    banner
-                }
+                // tierWarningBanner is @ViewBuilder; for `.normal` it returns
+                // EmptyView() which renders nothing. No conditional binding.
+                tierWarningBanner(forKind: Int(v3Kind))
             }
             if let preview = contentPreview {
                 VStack(alignment: .leading, spacing: 4) {

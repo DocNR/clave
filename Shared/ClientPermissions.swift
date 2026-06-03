@@ -19,7 +19,7 @@ enum TrustLevel: String, Codable, CaseIterable {
 /// `implementing.md`).
 ///
 /// Hashable so it fits in `Set<KindScopeKey>`; Codable for persistence.
-struct KindScopeKey: Codable, Hashable {
+struct KindScopeKey: Codable, Hashable, Sendable {
     let kind: UInt32
     let scope: String?
 }
