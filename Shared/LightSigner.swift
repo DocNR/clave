@@ -315,6 +315,20 @@ enum LightSigner {
                 if !allowed {
                     logger.notice("[LightSigner] Permission denied for \(method, privacy: .public) — queuing for approval")
 
+                    // For nip44v3_* requests, capture kind+scope from the RPC
+                    // params so the approval UI can render the context without
+                    // re-parsing the inner JSON-RPC. params[1] is the kind as
+                    // a stringified u32, params[2] is the scope as raw UTF-8.
+                    let v3Kind: UInt32?
+                    let v3Scope: String?
+                    if method == "nip44v3_encrypt" || method == "nip44v3_decrypt" {
+                        v3Kind = params.count > 1 ? UInt32(params[1]) : nil
+                        v3Scope = params.count > 2 ? params[2] : nil
+                    } else {
+                        v3Kind = nil
+                        v3Scope = nil
+                    }
+
                     // Serialize the full request event so the app can process it later
                     var queuedRequestId: String? = nil
                     if let eventData = try? JSONSerialization.data(withJSONObject: requestEvent),
@@ -327,7 +341,9 @@ enum LightSigner {
                             clientPubkey: senderPubkey,
                             timestamp: Date().timeIntervalSince1970,
                             responseRelayUrl: responseRelayUrl,
-                            signerPubkeyHex: signerPubkey
+                            signerPubkeyHex: signerPubkey,
+                            v3Kind: v3Kind,
+                            v3Scope: v3Scope
                         )
                         SharedStorage.queuePendingRequest(pending)
                         queuedRequestId = pending.id
