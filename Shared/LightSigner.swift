@@ -300,12 +300,24 @@ enum LightSigner {
                         break
                     }
                     allowed = perms.isKindAllowed(kind, protectedKinds: SharedStorage.getProtectedKinds())
-                case "nip04_encrypt", "nip04_decrypt", "nip44_encrypt", "nip44_decrypt",
-                     "nip44v3_encrypt", "nip44v3_decrypt":
-                    // v3 methods route through the same isMethodAllowed gate as v2 for now.
-                    // Granular (kind, scope) permission check lands with the permission-model
-                    // schema change (BACKLOG NIP-44 v3 entry, "permission migration RESOLVED").
+                case "nip04_encrypt", "nip04_decrypt", "nip44_encrypt", "nip44_decrypt":
                     allowed = perms.isMethodAllowed(method)
+                case "nip44v3_encrypt", "nip44v3_decrypt":
+                    // v3 methods carry caller-supplied (kind, scope) in params[1] and
+                    // params[2]. Look up the granular (method, kind, scope?) grant
+                    // stored in v3KindScopePermissions by the approval UI. Both the
+                    // exact (kind, scope) match and the wildcard (kind, nil)
+                    // "always allow this kind" match return true; otherwise the
+                    // request goes through the approval queue.
+                    //
+                    // Per spec extensions/nip46.md: params shape is
+                    // (pubkey_hex, kind_u32_string, scope_utf8, plaintext_b64-or-ct).
+                    if params.count >= 3, let kindVal = UInt32(params[1]) {
+                        allowed = perms.isV3CallAllowed(method: method, kind: kindVal, scope: params[2])
+                    } else {
+                        // Malformed v3 request — surface to user, don't auto-approve.
+                        allowed = false
+                    }
                 case "connect", "ping", "get_public_key", "describe", "switch_relays":
                     allowed = true
                 default:
