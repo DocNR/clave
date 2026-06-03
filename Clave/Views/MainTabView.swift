@@ -16,6 +16,13 @@ struct MainTabView: View {
     /// .active resumes within 2s (e.g. control-center swipe, app-switcher peek).
     @State private var pendingStopTask: Task<Void, Never>? = nil
 
+    /// Drives the one-time v3 schema-migration explainer sheet. Initialized
+    /// from `SharedStorage.needsV3ExplainerCard()` on first appear of the
+    /// tab root (i.e. once per cold launch after onboarding); the card
+    /// itself clears the underlying flag on dismiss so subsequent
+    /// foregrounds skip the sheet.
+    @State private var showV3ExplainerCard = false
+
     var body: some View {
         @Bindable var appState = appState
         TabView(selection: $appState.selectedTab) {
@@ -118,6 +125,14 @@ struct MainTabView: View {
             }
         } message: { request in
             Text(alertMessage(for: request))
+        }
+        .onAppear {
+            if SharedStorage.needsV3ExplainerCard() {
+                showV3ExplainerCard = true
+            }
+        }
+        .sheet(isPresented: $showV3ExplainerCard) {
+            V3ExplainerCardView()
         }
     }
 

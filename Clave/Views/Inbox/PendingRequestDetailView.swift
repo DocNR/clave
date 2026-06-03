@@ -9,12 +9,27 @@ import SwiftUI
 /// from the old orange card), and the raw event JSON behind a
 /// disclosure for power users. Approve / Deny live at the bottom in
 /// their own section.
+/// Grant scope selected by the user in the v3 approval prompt. Drives
+/// what (if anything) gets written to `ClientPermissions.v3KindScopePermissions`
+/// on approve.
+private enum V3GrantChoice: Hashable {
+    /// Approve this single call only — no grant persisted.
+    case once
+    /// Persist `KindScopeKey(kind, nil)` — auto-approve future calls for
+    /// the same kind regardless of scope.
+    case alwaysKind
+    /// Persist `KindScopeKey(kind, scope)` — auto-approve only when the
+    /// caller supplies this exact scope under this kind (tighter grant).
+    case alwaysKindScope
+}
+
 struct PendingRequestDetailView: View {
     let request: PendingRequest
     @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
 
     @State private var alwaysAllow = false
+    @State private var v3GrantChoice: V3GrantChoice = .once
     @State private var processing = false
     @State private var errorMessage: String?
     @State private var showRawJSON = false
@@ -27,6 +42,11 @@ struct PendingRequestDetailView: View {
             trustSection
             if request.method == "sign_event", request.eventKind != nil {
                 alwaysAllowSection
+            } else if isV3Method, request.v3Kind != nil {
+                v3GrantSection
+            }
+            if isLegacyV2Method {
+                legacyV2FootnoteSection
             }
             rawJSONSection
             actionsSection
@@ -57,6 +77,15 @@ struct PendingRequestDetailView: View {
             if let kind = request.eventKind {
                 LabeledContent("Kind", value: KnownKinds.label(for: kind))
             }
+            if let v3Kind = request.v3Kind {
+                v3KindRow(kind: v3Kind)
+                if let scope = request.v3Scope, !scope.isEmpty {
+                    v3ScopeRow(scope: scope)
+                }
+                if let banner = tierWarningBanner(forKind: Int(v3Kind)) {
+                    banner
+                }
+            }
             if let preview = contentPreview {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Preview")
@@ -68,6 +97,67 @@ struct PendingRequestDetailView: View {
                         .textSelection(.enabled)
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private func v3KindRow(kind: UInt32) -> some View {
+        let kindInt = Int(kind)
+        if KnownKinds.names[kindInt] != nil {
+            LabeledContent("Kind", value: KnownKinds.label(for: kindInt))
+        } else {
+            VStack(alignment: .leading, spacing: 2) {
+                LabeledContent("Kind", value: "kind:\(kindInt)")
+                Text("Unknown — Clave doesn't recognize this type. Approve only if you trust this app.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func v3ScopeRow(scope: String) -> some View {
+        let display = scope.count > 80 ? String(scope.prefix(77)) + "…" : scope
+        VStack(alignment: .leading, spacing: 2) {
+            Text("Scope")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            Text("\u{201C}\(display)\u{201D}")
+                .font(.system(.subheadline, design: .monospaced))
+                .textSelection(.enabled)
+        }
+    }
+
+    @ViewBuilder
+    private func tierWarningBanner(forKind kind: Int) -> some View {
+        switch KnownKinds.sensitivityTier(for: kind) {
+        case .tierS:
+            Label {
+                Text("This data is highly sensitive. Only approve if you initiated this action right now in \(displayClientName).")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+            } icon: {
+                Image(systemName: "lock.shield.fill")
+            }
+            .foregroundStyle(.red)
+        case .tierA:
+            Label {
+                Text("This is a private message or wallet operation. Approve only if you recognize this action.")
+                    .font(.subheadline)
+            } icon: {
+                Image(systemName: "exclamationmark.triangle.fill")
+            }
+            .foregroundStyle(.orange)
+        case .tierB:
+            Label {
+                Text("This may be private list content. Review the kind and scope above before approving.")
+                    .font(.subheadline)
+            } icon: {
+                Image(systemName: "info.circle.fill")
+            }
+            .foregroundStyle(.secondary)
+        case .normal:
+            EmptyView()
         }
     }
 
@@ -98,6 +188,65 @@ struct PendingRequestDetailView: View {
             if let kind = request.eventKind {
                 Text("Future requests for \(KnownKinds.label(for: kind)) from \(displayClientName) will be auto-signed. You can revoke in Settings → \(displayClientName).")
             }
+        }
+    }
+
+    /// v3-specific grant chooser. Tier S kinds get an info-only message
+    /// (no always-allow) per the spec's sensitivity-tier policy; all
+    /// other tiers get a Picker with Once / kind-wildcard / kind+scope
+    /// options. The kind+scope option only appears when the request
+    /// actually carries a non-empty scope.
+    @ViewBuilder
+    private var v3GrantSection: some View {
+        if let kind = request.v3Kind {
+            let kindInt = Int(kind)
+            let tier = KnownKinds.sensitivityTier(for: kindInt)
+            if tier == .tierS {
+                Section {
+                    Label {
+                        Text("Always allow is unavailable for sensitive financial data. Approve once, or deny.")
+                            .font(.subheadline)
+                    } icon: {
+                        Image(systemName: "lock.fill")
+                    }
+                    .foregroundStyle(.secondary)
+                } header: {
+                    Text("Grant permission")
+                }
+            } else {
+                let hasScope = (request.v3Scope?.isEmpty == false)
+                Section {
+                    Picker("Grant permission", selection: $v3GrantChoice) {
+                        Text("Once").tag(V3GrantChoice.once)
+                        Text(alwaysKindPickerLabel(kind: kindInt))
+                            .tag(V3GrantChoice.alwaysKind)
+                        if hasScope, let scope = request.v3Scope {
+                            Text("Always allow this kind + scope (\u{201C}\(scopePickerSummary(scope))\u{201D})")
+                                .tag(V3GrantChoice.alwaysKindScope)
+                        }
+                    }
+                    .pickerStyle(.inline)
+                    .labelsHidden()
+                    .disabled(processing)
+                } header: {
+                    Text("Grant permission")
+                } footer: {
+                    Text(v3GrantFooter(kindInt: kindInt))
+                }
+            }
+        }
+    }
+
+    /// Small caption shown below v2 prompts to teach users why v3-aware
+    /// prompts (when they exist) are richer. Indirect upgrade pressure
+    /// on client authors; renders only for v2 encrypt/decrypt methods.
+    private var legacyV2FootnoteSection: some View {
+        Section {
+            EmptyView()
+        } footer: {
+            Text("NIP-44 v2 — Clave cannot tell what this data represents. Upgrade your app for clearer prompts.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -165,6 +314,24 @@ struct PendingRequestDetailView: View {
                     allowed: true
                 )
             }
+            // v3 grant persistence — mirrors the sign_event override path
+            // above. Inline (rather than an AppState helper) because this is
+            // the sole writer and the data shape is local to this view's
+            // V3GrantChoice state. Tier S short-circuits at the UI level
+            // (no .alwaysKind / .alwaysKindScope branches are reachable
+            // because the picker isn't rendered).
+            if isV3Method, v3GrantChoice != .once, let kind = request.v3Kind {
+                let signer = request.signerPubkeyHex.isEmpty
+                    ? appState.signerPubkeyHex
+                    : request.signerPubkeyHex
+                if var perms = SharedStorage.getClientPermissions(signer: signer, client: request.clientPubkey) {
+                    let scopeKey: String? = (v3GrantChoice == .alwaysKindScope) ? request.v3Scope : nil
+                    var grants = perms.v3KindScopePermissions[request.method, default: []]
+                    grants.insert(KindScopeKey(kind: kind, scope: scopeKey))
+                    perms.v3KindScopePermissions[request.method] = grants
+                    SharedStorage.saveClientPermissions(perms)
+                }
+            }
             let outcome = await appState.approvePendingRequest(request)
             processing = false
             switch outcome {
@@ -199,8 +366,49 @@ struct PendingRequestDetailView: View {
         case "nip04_decrypt":    return "Decrypt (NIP-04)"
         case "nip44_encrypt":    return "Encrypt (NIP-44)"
         case "nip44_decrypt":    return "Decrypt (NIP-44)"
+        case "nip44v3_encrypt":  return "Encrypt (NIP-44 v3)"
+        case "nip44v3_decrypt":  return "Decrypt (NIP-44 v3)"
         case "connect":          return "Connect"
         default:                 return request.method
+        }
+    }
+
+    private var isV3Method: Bool {
+        request.method == "nip44v3_encrypt" || request.method == "nip44v3_decrypt"
+    }
+
+    /// True for v2 encrypt/decrypt methods that lack the kind+scope
+    /// binding that makes v3 prompts informative. Drives the footnote
+    /// section that teaches users about the v3 upgrade path.
+    private var isLegacyV2Method: Bool {
+        switch request.method {
+        case "nip04_encrypt", "nip04_decrypt",
+             "nip44_encrypt", "nip44_decrypt":
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func alwaysKindPickerLabel(kind: Int) -> String {
+        if KnownKinds.names[kind] != nil {
+            return "Always allow \(KnownKinds.label(for: kind))"
+        }
+        return "Always allow kind:\(kind)"
+    }
+
+    private func scopePickerSummary(_ scope: String) -> String {
+        scope.count > 32 ? String(scope.prefix(29)) + "…" : scope
+    }
+
+    private func v3GrantFooter(kindInt: Int) -> String {
+        switch v3GrantChoice {
+        case .once:
+            return "This request only — no future calls will be auto-approved."
+        case .alwaysKind:
+            return "Future \(actionLabel.lowercased()) calls for this kind from \(displayClientName) will be auto-approved. Revoke in Settings → \(displayClientName)."
+        case .alwaysKindScope:
+            return "Future \(actionLabel.lowercased()) calls for this exact kind + scope from \(displayClientName) will be auto-approved. Revoke in Settings → \(displayClientName)."
         }
     }
 
