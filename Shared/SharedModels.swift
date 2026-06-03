@@ -113,6 +113,22 @@ struct PendingRequest: Codable, Identifiable, Hashable {
     /// unmigrated legacy rows; populated for new rows enqueued by NSE / L1
     /// (Task 4 caller updates). Migration (Task 8) backfills.
     let signerPubkeyHex: String
+    /// For nip44v3_encrypt / nip44v3_decrypt requests only: the caller-supplied
+    /// kind from params[1], captured at queue time so the approval UI can
+    /// render the context (kind label + sensitivity tier) without re-parsing
+    /// the inner RPC. Nil for all other methods — including v2 nip44/nip04
+    /// and sign_event (use `eventKind` for that).
+    ///
+    /// Backward-compat: decodeIfPresent ?? nil — legacy rows from before this
+    /// field existed decode cleanly with nil.
+    let v3Kind: UInt32?
+    /// For nip44v3_* requests only: the caller-supplied scope from params[2]
+    /// as raw UTF-8 string. Already validated UTF-8 by the time it reaches
+    /// the queue (LightSigner constructs NIP44v3.Context which throws on
+    /// invalid UTF-8 — but invalid context never reaches the auto-approve
+    /// gate, so we capture the string here defensively). Empty string for
+    /// kinds without scope, nil for non-v3 methods.
+    let v3Scope: String?
 
     init(
         id: String,
@@ -122,7 +138,9 @@ struct PendingRequest: Codable, Identifiable, Hashable {
         clientPubkey: String,
         timestamp: Double,
         responseRelayUrl: String?,
-        signerPubkeyHex: String = ""
+        signerPubkeyHex: String = "",
+        v3Kind: UInt32? = nil,
+        v3Scope: String? = nil
     ) {
         self.id = id
         self.requestEventJSON = requestEventJSON
@@ -132,14 +150,18 @@ struct PendingRequest: Codable, Identifiable, Hashable {
         self.timestamp = timestamp
         self.responseRelayUrl = responseRelayUrl
         self.signerPubkeyHex = signerPubkeyHex
+        self.v3Kind = v3Kind
+        self.v3Scope = v3Scope
     }
 
     // Explicit Codable — promoted from synthesized so we can use
-    // `decodeIfPresent ?? ""` for `signerPubkeyHex` on legacy rows. Wire
+    // `decodeIfPresent ?? ""` for `signerPubkeyHex` on legacy rows, and
+    // `decodeIfPresent ?? nil` for the v3 fields on pre-v3 rows. Wire
     // format is identical to the synthesized version for all other fields.
     private enum CodingKeys: String, CodingKey {
         case id, requestEventJSON, method, eventKind, clientPubkey, timestamp
         case responseRelayUrl, signerPubkeyHex
+        case v3Kind, v3Scope
     }
 
     init(from decoder: Decoder) throws {
@@ -152,6 +174,8 @@ struct PendingRequest: Codable, Identifiable, Hashable {
         timestamp = try c.decode(Double.self, forKey: .timestamp)
         responseRelayUrl = try c.decodeIfPresent(String.self, forKey: .responseRelayUrl)
         signerPubkeyHex = try c.decodeIfPresent(String.self, forKey: .signerPubkeyHex) ?? ""
+        v3Kind = try c.decodeIfPresent(UInt32.self, forKey: .v3Kind)
+        v3Scope = try c.decodeIfPresent(String.self, forKey: .v3Scope)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -164,6 +188,8 @@ struct PendingRequest: Codable, Identifiable, Hashable {
         try c.encode(timestamp, forKey: .timestamp)
         try c.encodeIfPresent(responseRelayUrl, forKey: .responseRelayUrl)
         try c.encode(signerPubkeyHex, forKey: .signerPubkeyHex)
+        try c.encodeIfPresent(v3Kind, forKey: .v3Kind)
+        try c.encodeIfPresent(v3Scope, forKey: .v3Scope)
     }
 }
 
