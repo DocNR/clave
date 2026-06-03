@@ -300,7 +300,11 @@ enum LightSigner {
                         break
                     }
                     allowed = perms.isKindAllowed(kind, protectedKinds: SharedStorage.getProtectedKinds())
-                case "nip04_encrypt", "nip04_decrypt", "nip44_encrypt", "nip44_decrypt":
+                case "nip04_encrypt", "nip04_decrypt", "nip44_encrypt", "nip44_decrypt",
+                     "nip44v3_encrypt", "nip44v3_decrypt":
+                    // v3 methods route through the same isMethodAllowed gate as v2 for now.
+                    // Granular (kind, scope) permission check lands with the permission-model
+                    // schema change (BACKLOG NIP-44 v3 entry, "permission migration RESOLVED").
                     allowed = perms.isMethodAllowed(method)
                 case "connect", "ping", "get_public_key", "describe", "switch_relays":
                     allowed = true
@@ -607,6 +611,40 @@ enum LightSigner {
                 return (nil, "nip44_decrypt failed: \(error.localizedDescription)")
             }
 
+        // MARK: NIP-44 v3 (extensions/nip46.md)
+        //
+        // 4-param signature: (pubkey_hex, kind_u32_string, scope_utf8, plaintext_b64 / ciphertext).
+        // kind+scope are caller-supplied AND bound into the MAC by NIP44v3.encrypt/decrypt,
+        // so a client lying about either causes MAC verify to fail. The decrypt path
+        // does NOT validate padding length (spec commit c6daedd, Amber PR #456 gotcha).
+
+        case "nip44v3_encrypt":
+            guard params.count >= 4 else { return (nil, "Missing params") }
+            guard let pubkeyData = Data(hexString: params[0]) else { return (nil, "Invalid pubkey") }
+            guard let kindVal = UInt32(params[1]) else { return (nil, "Invalid kind") }
+            let scopeBytes = Data(params[2].utf8)
+            guard let plaintextData = Data(base64Encoded: params[3]) else { return (nil, "Invalid plaintext_b64") }
+            do {
+                let context = try NIP44v3.Context(kind: kindVal, scope: scopeBytes)
+                let ciphertext = try NIP44v3.encrypt(seckey: privateKey, pubkey: pubkeyData, context: context, plaintext: plaintextData)
+                return (ciphertext, nil)
+            } catch {
+                return (nil, "nip44v3_encrypt failed: \(error.localizedDescription)")
+            }
+
+        case "nip44v3_decrypt":
+            guard params.count >= 4 else { return (nil, "Missing params") }
+            guard let pubkeyData = Data(hexString: params[0]) else { return (nil, "Invalid pubkey") }
+            guard let kindVal = UInt32(params[1]) else { return (nil, "Invalid kind") }
+            let scopeBytes = Data(params[2].utf8)
+            do {
+                let context = try NIP44v3.Context(kind: kindVal, scope: scopeBytes)
+                let plaintext = try NIP44v3.decrypt(seckey: privateKey, pubkey: pubkeyData, context: context, ciphertext: params[3])
+                return (plaintext.base64EncodedString(), nil)
+            } catch {
+                return (nil, "nip44v3_decrypt failed: \(error.localizedDescription)")
+            }
+
         case "switch_relays":
             // Return JSON null per NIP-46 ("null if there is nothing to be
             // changed"). Matches Amber's responder-only pattern and NDK's
@@ -616,7 +654,7 @@ enum LightSigner {
             return ("null", nil)
 
         case "describe":
-            return ("[\"connect\",\"sign_event\",\"get_public_key\",\"ping\",\"nip04_encrypt\",\"nip04_decrypt\",\"nip44_encrypt\",\"nip44_decrypt\",\"switch_relays\",\"describe\"]", nil)
+            return ("[\"connect\",\"sign_event\",\"get_public_key\",\"ping\",\"nip04_encrypt\",\"nip04_decrypt\",\"nip44_encrypt\",\"nip44_decrypt\",\"nip44v3_encrypt\",\"nip44v3_decrypt\",\"switch_relays\",\"describe\"]", nil)
 
         default:
             return (nil, "Unsupported method: \(method)")
