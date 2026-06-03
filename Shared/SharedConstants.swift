@@ -27,6 +27,19 @@ enum SharedConstants {
     static let bunkerSecretKey = "bunkerSecret"
     static let pairedClientsKey = "pairedClients"
     static let clientPermissionsKey = "clientPermissions"
+    /// Persisted permissions-schema version. Bumped to 3 when v3 grants
+    /// (per-(method, kind, scope?)) land. Migration policy is "wipe all
+    /// ClientPermissions on schema upgrade" (BACKLOG NIP-44 v3
+    /// "permission migration RESOLVED 2026-06-02"). Stored as Int via
+    /// `UserDefaults.integer(forKey:)` which returns 0 for missing keys,
+    /// so any pre-v3 user reads as schema=0 and triggers the wipe.
+    static let permissionsSchemaVersionKey = "permissionsSchemaVersion"
+    /// One-time flag the approval UI reads to decide whether to show the
+    /// "we improved how Clave shows what apps want to do — re-grant
+    /// permissions for your existing apps the next time they make a
+    /// request" explainer card. Set true by the migration; the UI clears
+    /// it after the user dismisses the card.
+    static let needsV3ExplainerCardKey = "needsV3ExplainerCard"
     static let cachedProfileKey = "cachedProfile"
     /// Snapshot of the user's last signed kind:3 contact-list pubkey set,
     /// stored as a JSON-encoded `[String]` (sorted hex pubkeys). Used by

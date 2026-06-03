@@ -324,6 +324,16 @@ final class AppState {
         // 1. Hydrate the accounts list + currentAccount from UserDefaults.
         loadAccounts()
 
+        // 1.5 NIP-44 v3 permissions schema migration. Idempotent — returns
+        //     early once storedVersion >= currentPermissionsSchemaVersion.
+        //     Runs before any ClientPermissions read so the wipe state
+        //     is visible to all downstream loaders. Touches NOTHING outside
+        //     the clientPermissionsKey UserDefaults entry: accounts,
+        //     connected clients, bunker secrets, keys, pending requests
+        //     all stay intact. Users keep their app pairings; only the
+        //     grants get reset.
+        SharedStorage.migrateToV3PermissionsSchemaIfNeeded()
+
         // 2. Reinstall recovery: if accountsKey is empty AND Keychain has
         //    pubkey-keyed entries, reconstruct minimum Account records
         //    from Keychain. Handles the rare iOS Storage-settings
