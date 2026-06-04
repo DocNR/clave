@@ -450,6 +450,78 @@ final class NIP44v3Tests: XCTestCase {
         }
     }
 
+    // MARK: - Wire kind / scope tamper tests
+    //
+    // Validates the spec step-4 check ("Fail if kind != expected_kind / scope
+    // != expected_scope") in `NIP44v3.decrypt`. Without it, a wire whose
+    // embedded kind/scope bytes are tampered but whose MAC tag is intact
+    // would silently decrypt successfully whenever the caller's context
+    // matches the original encryption (which it always does for legitimate
+    // use), so the spec invariant "embedded context is authenticated" would
+    // be only partially enforced.
+
+    /// Tamper one byte of the embedded `kind` field in a valid v3 wire and
+    /// verify decrypt rejects with `.decryptionFailed`. Uses vector 0 which
+    /// has kind=1 and empty scope.
+    func testDecryptRejectsTamperedEmbeddedKind() throws {
+        let vec = Self.encryptDecryptVectors[0]
+        let seckey = try Self.hex(vec.secret1)
+        let pubkey = try Self.pubkey(forSecret: vec.secret2)
+        let ctx = NIP44v3.Context(kind: vec.kind)
+
+        guard var rawWire = Data(base64Encoded: vec.ciphertextB64) else {
+            return XCTFail("vector 0 base64 decode failed")
+        }
+        XCTAssertGreaterThanOrEqual(rawWire.count, 69, "wire too short to tamper kind")
+        // Flip the low byte of kind (offset 68) to a different value.
+        // MAC tag (offset 33..<65) is NOT touched.
+        rawWire[68] ^= 0xff
+        let tamperedB64 = rawWire.base64EncodedString()
+
+        do {
+            _ = try NIP44v3.decrypt(seckey: seckey, pubkey: pubkey, context: ctx, ciphertext: tamperedB64)
+            XCTFail("decrypt should have rejected tampered embedded kind")
+        } catch let e as NIP44v3.Error {
+            XCTAssertEqual(e, .decryptionFailed,
+                           "tampered embedded kind should surface as .decryptionFailed (see spec step-4 doc comment in NIP44v3.decrypt)")
+        } catch {
+            XCTFail("wrong error type: \(error)")
+        }
+    }
+
+    /// Tamper one byte of the embedded `scope` field in a valid v3 wire and
+    /// verify decrypt rejects with `.decryptionFailed`. Uses vector 1 which
+    /// has kind=30078 and a non-empty scope.
+    func testDecryptRejectsTamperedEmbeddedScope() throws {
+        let vec = Self.encryptDecryptVectors[1]
+        XCTAssertFalse(vec.scopeHex.isEmpty, "test requires a non-empty-scope vector")
+
+        let seckey = try Self.hex(vec.secret1)
+        let pubkey = try Self.pubkey(forSecret: vec.secret2)
+        let scope = try Self.hex(vec.scopeHex)
+        let ctx = try NIP44v3.Context(kind: vec.kind, scope: scope)
+
+        guard var rawWire = Data(base64Encoded: vec.ciphertextB64) else {
+            return XCTFail("vector 1 base64 decode failed")
+        }
+        // Scope starts at offset 73 (after version(1) + nonce(32) + mac(32)
+        // + kind(4) + scope_len(4)). Flip the first scope byte.
+        XCTAssertGreaterThan(scope.count, 0, "vector 1 scope unexpectedly empty")
+        XCTAssertGreaterThanOrEqual(rawWire.count, 74, "wire too short to tamper scope")
+        rawWire[73] ^= 0xff
+        let tamperedB64 = rawWire.base64EncodedString()
+
+        do {
+            _ = try NIP44v3.decrypt(seckey: seckey, pubkey: pubkey, context: ctx, ciphertext: tamperedB64)
+            XCTFail("decrypt should have rejected tampered embedded scope")
+        } catch let e as NIP44v3.Error {
+            XCTAssertEqual(e, .decryptionFailed,
+                           "tampered embedded scope should surface as .decryptionFailed")
+        } catch {
+            XCTFail("wrong error type: \(error)")
+        }
+    }
+
     // MARK: - Helpers
 
     private static func hex(_ s: String) throws -> Data {

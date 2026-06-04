@@ -137,10 +137,16 @@ extension NIP44v3 {
     ///   3. `Encryption.decrypt(parts.chacha20Ciphertext, parts.mac, encKey,
     ///      macKey, context.kind, context.scope, parts.nonce)` → plaintext.
     ///
-    /// Note: `parts.kind` and `parts.scope` from the wire are NOT compared
-    /// against `context.kind` / `context.scope` directly — MAC verify already
-    /// covers this (and explicit comparison would leak which mismatch
-    /// occurred to a side-channel-watching attacker).
+    /// Spec algorithm step 4 ("Check the scope and kind to be what is
+    /// expected"): the embedded `parts.kind` / `parts.scope` are compared
+    /// against the caller-supplied `context.kind` / `context.scope` BEFORE
+    /// MAC verify. MAC verify alone is insufficient — because our MAC
+    /// computation uses caller context (which by construction matches what
+    /// the encryptor signed in), a wire whose embedded kind/scope bytes are
+    /// tampered but MAC tag is unchanged would otherwise silently decrypt
+    /// successfully. Both check mismatches collapse to `.decryptionFailed`
+    /// (same as MAC failure) so an outside observer can't oracle which
+    /// kind of mismatch tripped the rejection.
     ///
     /// - Parameters:
     ///   - seckey: Local 32-byte secp256k1 secret key.
@@ -160,6 +166,16 @@ extension NIP44v3 {
             parts = try Ciphertext.decode(ciphertext)
         } catch let e as Ciphertext.Error {
             throw mapCiphertextError(e)
+        }
+
+        // Spec step 4 — embedded kind / scope must equal caller's context.
+        // See doc comment above for why MAC verify alone isn't sufficient.
+        // Both branches throw `.decryptionFailed` (same case as MAC failure)
+        // so a wire-tampering observer can't tell whether they tripped a
+        // kind mismatch, a scope mismatch, or a MAC mismatch.
+        guard parts.kind == context.kind,
+              constantTimeBytesEqual(parts.scope, context.scope) else {
+            throw Error.decryptionFailed
         }
 
         let derived: Keys.Derived
@@ -182,6 +198,31 @@ extension NIP44v3 {
         } catch let e as Encryption.Error {
             throw mapEncryptionDecryptError(e)
         }
+    }
+
+    /// Constant-time byte equality for the scope comparison in `decrypt`.
+    /// `Data == Data` short-circuits on the first mismatching byte, which
+    /// would leak the mismatch position via timing. XOR-fold + OR
+    /// accumulator stays branch-free over the full length.
+    ///
+    /// (Encryption.swift has an internal `constantTimeEqual` for the MAC
+    /// comparison; duplicated here rather than exported across layer
+    /// boundaries because the duplication is a 12-line helper and exposing
+    /// the per-layer crypto primitives across modules invites accidental
+    /// non-crypto usage.)
+    private static func constantTimeBytesEqual(_ a: Data, _ b: Data) -> Bool {
+        guard a.count == b.count else { return false }
+        var accum: UInt8 = 0
+        a.withUnsafeBytes { aRaw in
+            b.withUnsafeBytes { bRaw in
+                let ap = aRaw.bindMemory(to: UInt8.self).baseAddress!
+                let bp = bRaw.bindMemory(to: UInt8.self).baseAddress!
+                for i in 0..<a.count {
+                    accum |= ap[i] ^ bp[i]
+                }
+            }
+        }
+        return accum == 0
     }
 
     // MARK: - Test-only nonce-injection entry
