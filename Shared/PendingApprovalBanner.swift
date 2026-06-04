@@ -20,18 +20,34 @@ private let logger = Logger(subsystem: "dev.nostr.clave", category: "banner")
 /// which this helper provides.
 enum PendingApprovalBanner {
     /// Schedules a local notification matching the format NSE uses for
-    /// pending-approval pushes (title "Approve Signing Request", body
-    /// "<client> wants to sign <kind>", `.active` interruption).
+    /// pending-approval pushes (title varies by method, body has the v3
+    /// kind + scope + tier banner when present, `.active` interruption).
+    ///
+    /// `method` defaults to `"sign_event"` to preserve back-compat for
+    /// older callers (and the LockScreenActionRoutingTests fixture); for
+    /// v3 paths, supply method = `"nip44v3_encrypt"` / `"nip44v3_decrypt"`
+    /// + v3Kind + v3Scope so the body renders the same way the foreground
+    /// `MainTabView.alertMessage` does.
     ///
     /// Idempotent on identifier collisions — UNUserNotificationCenter
     /// replaces an existing pending request with the same identifier.
     /// We pass the request id so denying/approving the same request won't
     /// stack banners.
-    static func schedule(requestId: String, clientPubkey: String, eventKind: Int?) {
+    static func schedule(
+        requestId: String,
+        clientPubkey: String,
+        method: String = "sign_event",
+        eventKind: Int?,
+        v3Kind: UInt32? = nil,
+        v3Scope: String? = nil
+    ) {
         let content = makeContent(
             requestId: requestId,
             clientPubkey: clientPubkey,
-            eventKind: eventKind
+            method: method,
+            eventKind: eventKind,
+            v3Kind: v3Kind,
+            v3Scope: v3Scope
         )
 
         // No trigger → deliver immediately.
@@ -58,15 +74,23 @@ enum PendingApprovalBanner {
     static func makeContent(
         requestId: String,
         clientPubkey: String,
-        eventKind: Int?
+        method: String = "sign_event",
+        eventKind: Int?,
+        v3Kind: UInt32? = nil,
+        v3Scope: String? = nil
     ) -> UNMutableNotificationContent {
         let clientName = SharedStorage.getClientPermissions(for: clientPubkey)?.name
-            ?? String(clientPubkey.prefix(8))
-        let kindDesc = eventKind.map { KnownKinds.label(for: $0) } ?? "event"
+            ?? "Client …\(clientPubkey.suffix(8))"
 
         let content = UNMutableNotificationContent()
-        content.title = "Approve Signing Request"
-        content.body = "\(clientName) wants to sign \(kindDesc)"
+        content.title = pendingTitle(method: method)
+        content.body = pendingBody(
+            clientName: clientName,
+            method: method,
+            eventKind: eventKind,
+            v3Kind: v3Kind,
+            v3Scope: v3Scope
+        )
         content.sound = .default
         content.interruptionLevel = .active
         // Wires the long-press / swipe-down notification UI to surface
@@ -77,6 +101,64 @@ enum PendingApprovalBanner {
         content.categoryIdentifier = PendingApprovalCategory.identifier
         content.userInfo = ["pendingRequestId": requestId]
         return content
+    }
+
+    /// Method-aware title. Mirrors `MainTabView.alertTitle` (minus the
+    /// chain-position suffix — chain state isn't available in NSE, and
+    /// the foreground L1 path schedules the banner BEFORE
+    /// MainTabView's alert renders, so consistency on the bare base is
+    /// what matters). Shared with NSE so background-push and
+    /// L1-foreground banners render identically.
+    static func pendingTitle(method: String) -> String {
+        switch method {
+        case "sign_event":
+            return "Approve Signing Request"
+        case "nip04_encrypt", "nip44_encrypt":
+            return "Approve Encryption Request"
+        case "nip04_decrypt", "nip44_decrypt":
+            return "Approve Decryption Request"
+        case "nip44v3_encrypt":
+            return "Approve v3 Encryption"
+        case "nip44v3_decrypt":
+            return "Approve v3 Decryption"
+        default:
+            return "Approve Request"
+        }
+    }
+
+    /// Method-aware body. Mirrors `MainTabView.alertMessage` line-by-line
+    /// for v3 requests: client → kind label → scope quote → tier warning.
+    /// iOS notifications have no per-line styling, so lines join with `\n`
+    /// and tier prefixes use the same warning glyphs.
+    static func pendingBody(
+        clientName: String,
+        method: String,
+        eventKind: Int?,
+        v3Kind: UInt32?,
+        v3Scope: String?
+    ) -> String {
+        var lines: [String] = []
+        lines.append("From: \(clientName)")
+
+        if method == "sign_event", let kind = eventKind {
+            lines.append(KnownKinds.label(for: kind))
+        } else if let v3Kind {
+            lines.append(KnownKinds.label(for: Int(v3Kind)))
+            if let scope = v3Scope, !scope.isEmpty {
+                lines.append("Scope: \u{201C}\(scope)\u{201D}")
+            }
+            switch KnownKinds.sensitivityTier(for: Int(v3Kind)) {
+            case .tierS:
+                lines.append("⚠️ Highly sensitive — only approve if you initiated this right now")
+            case .tierA:
+                lines.append("⚠️ Sensitive context")
+            case .tierB, .normal:
+                break
+            }
+        } else {
+            lines.append("Method: \(method)")
+        }
+        return lines.joined(separator: "\n")
     }
 
     /// Removes the delivered/pending banner for a given request id. Called when

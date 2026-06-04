@@ -59,6 +59,15 @@ struct PendingRequestRow: View {
     }
 
     private var actionSummary: String {
+        // v3 branches are checked before legacy v2 since v3 carries strictly
+        // richer context (kind + scope). The eventKind/v3Kind fields are
+        // mutually exclusive after commit fc7cff4 — eventKind is nil for v3.
+        if request.method == "nip44v3_encrypt", let v3Kind = request.v3Kind {
+            return "Wants to encrypt \(KnownKinds.label(for: Int(v3Kind)))\(scopeSuffix)"
+        }
+        if request.method == "nip44v3_decrypt", let v3Kind = request.v3Kind {
+            return "Wants to decrypt \(KnownKinds.label(for: Int(v3Kind)))\(scopeSuffix)"
+        }
         switch request.method {
         case "sign_event":
             if let kind = request.eventKind {
@@ -72,6 +81,20 @@ struct PendingRequestRow: View {
         default:
             return request.method
         }
+    }
+
+    /// Trailing scope hint for v3 rows. Empty when scope is nil or empty,
+    /// otherwise `" (scope: <truncated>)"` capped at ~20 chars of scope so
+    /// the single-line row doesn't wrap on common iPhone widths.
+    private var scopeSuffix: String {
+        guard let scope = request.v3Scope, !scope.isEmpty else { return "" }
+        let trimmed: String
+        if scope.count > 20 {
+            trimmed = String(scope.prefix(17)) + "…"
+        } else {
+            trimmed = scope
+        }
+        return " (scope: \(trimmed))"
     }
 
     private var signerLabel: String {

@@ -13,7 +13,7 @@ struct ActivityRowView: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
-                    Text(entry.method)
+                    Text(methodLabel(entry.method))
                         .font(.subheadline.bold())
 
                     if let kind = entry.eventKind {
@@ -85,6 +85,25 @@ struct ActivityRowView: View {
     private func truncatedPubkey(_ hex: String) -> String {
         guard hex.count > 12 else { return hex }
         return String(hex.prefix(8)) + "..." + String(hex.suffix(4))
+    }
+
+    /// Mirrors `ActivityDetailView.methodLabel` and
+    /// `PendingRequestDetailView.actionLabel` so v3 method names render as
+    /// human-readable across all activity-log surfaces. Without this the
+    /// row would show the raw RPC name (`"nip44v3_encrypt"`) which leaks
+    /// implementation detail to end users.
+    private func methodLabel(_ method: String) -> String {
+        switch method {
+        case "sign_event":       return "Sign event"
+        case "nip04_encrypt":    return "Encrypt (NIP-04)"
+        case "nip04_decrypt":    return "Decrypt (NIP-04)"
+        case "nip44_encrypt":    return "Encrypt (NIP-44)"
+        case "nip44_decrypt":    return "Decrypt (NIP-44)"
+        case "nip44v3_encrypt":  return "Encrypt (NIP-44 v3)"
+        case "nip44v3_decrypt":  return "Decrypt (NIP-44 v3)"
+        case "connect":          return "Connect"
+        default:                 return method
+        }
     }
 
     private var clientLabel: String {

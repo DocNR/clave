@@ -6,7 +6,19 @@ private let logger = Logger(subsystem: "dev.nostr.clave.ClaveNSE", category: "si
 private struct SigningResult {
     enum Status {
         case success
-        case pending(clientPubkey: String, eventKind: Int?, requestId: String?)
+        /// `method` lets the NSE title branch v3 vs sign vs encrypt vs decrypt
+        /// (mirrors `MainTabView.alertTitle`). v3Kind/v3Scope drive the body's
+        /// kind label, scope quote, and tier banner (mirrors
+        /// `MainTabView.alertMessage`). Look-up of the queued PendingRequest
+        /// happens in `handleSigningRequest` so `deliverContent` only formats.
+        case pending(
+            clientPubkey: String,
+            method: String,
+            eventKind: Int?,
+            v3Kind: UInt32?,
+            v3Scope: String?,
+            requestId: String?
+        )
         case error(String)
         case noEvents
     }
@@ -85,12 +97,17 @@ class NotificationService: UNNotificationServiceExtension {
             content.interruptionLevel = .active
             contentHandler?(content)
 
-        case .pending(let clientPubkey, let eventKind, let requestId):
+        case .pending(let clientPubkey, let method, let eventKind, let v3Kind, let v3Scope, let requestId):
             let clientName = SharedStorage.getClientPermissions(for: clientPubkey)?.name
-                ?? String(clientPubkey.prefix(8))
-            let kindDesc = eventKind.map { KnownKinds.label(for: $0) } ?? "event"
-            content.title = "Approve Signing Request"
-            content.body = "\(clientName) wants to sign \(kindDesc)"
+                ?? "Client …\(clientPubkey.suffix(8))"
+            content.title = PendingApprovalBanner.pendingTitle(method: method)
+            content.body = PendingApprovalBanner.pendingBody(
+                clientName: clientName,
+                method: method,
+                eventKind: eventKind,
+                v3Kind: v3Kind,
+                v3Scope: v3Scope
+            )
             content.interruptionLevel = .active
             // Wires the long-press / swipe-down notification UI to surface
             // Approve + Deny action buttons. Category is registered in the
@@ -218,6 +235,7 @@ class NotificationService: UNNotificationServiceExtension {
             var lastError: String? = nil
             var handledCount = 0
             var lastPendingPubkey: String? = nil
+            var lastPendingMethod: String? = nil
             var lastPendingKind: Int? = nil
             var lastPendingRequestId: String? = nil
 
@@ -256,6 +274,7 @@ class NotificationService: UNNotificationServiceExtension {
                         lastError = result.errorMessage
                     } else if result.status == "pending" {
                         lastPendingPubkey = result.clientPubkey
+                        lastPendingMethod = result.method
                         lastPendingKind = result.eventKind
                         lastPendingRequestId = result.pendingRequestId
                     }
@@ -270,9 +289,28 @@ class NotificationService: UNNotificationServiceExtension {
             if handledCount == 0 {
                 return SigningResult(status: .noEvents)
             } else if let pendingPubkey = lastPendingPubkey {
+                // v3Kind/v3Scope live on the queued PendingRequest (captured
+                // at queue-time in LightSigner per commit fc7cff4). Look up
+                // by id rather than threading them through RequestResult so
+                // LightSigner stays untouched. Falls back to nil if the row
+                // was raced out from under us (e.g. user denied via another
+                // surface) — harmless, body just omits the v3 detail.
+                let v3K: UInt32?
+                let v3S: String?
+                if let id = lastPendingRequestId,
+                   let pr = SharedStorage.getPendingRequests().first(where: { $0.id == id }) {
+                    v3K = pr.v3Kind
+                    v3S = pr.v3Scope
+                } else {
+                    v3K = nil
+                    v3S = nil
+                }
                 return SigningResult(status: .pending(
                     clientPubkey: pendingPubkey,
+                    method: lastPendingMethod ?? "sign_event",
                     eventKind: lastPendingKind,
+                    v3Kind: v3K,
+                    v3Scope: v3S,
                     requestId: lastPendingRequestId
                 ))
             } else if let error = lastError {

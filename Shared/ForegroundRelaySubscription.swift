@@ -434,10 +434,18 @@ final class ForegroundRelaySubscription {
             if let result = result,
                result.status == "pending",
                let requestId = result.pendingRequestId {
+                // v3Kind/v3Scope live on the queued PendingRequest (captured
+                // by LightSigner at queue time). Look up by id so the L1
+                // banner matches the NSE banner byte-for-byte for v3
+                // methods.
+                let queued = SharedStorage.getPendingRequests().first(where: { $0.id == requestId })
                 PendingApprovalBanner.schedule(
                     requestId: requestId,
                     clientPubkey: result.clientPubkey,
-                    eventKind: result.eventKind
+                    method: result.method,
+                    eventKind: result.eventKind,
+                    v3Kind: queued?.v3Kind,
+                    v3Scope: queued?.v3Scope
                 )
             }
 
