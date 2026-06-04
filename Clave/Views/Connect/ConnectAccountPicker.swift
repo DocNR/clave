@@ -191,11 +191,14 @@ struct ConnectAccountPicker: View {
     }
 
     /// Single-mode: tap-to-pick (radio behavior). Tapping a row commits the
-    /// selection and dismisses the sheet. The CURRENT account (the one
-    /// active in the identity bar) is row-highlighted to match multi-mode's
-    /// selection highlight — both modes use the same "tinted row + theme
-    /// stroke" treatment so the picker reads consistently regardless of
-    /// mode.
+    /// selection and dismisses the sheet. Uses the shared card treatment
+    /// (see `cardBackground`) so the picker reads as the same visual family
+    /// as ApprovalSheet's trust-level cards. Because tap commits immediately
+    /// there is no persistent selection control — a trailing chevron signals
+    /// "tap to proceed" instead. The CURRENT account keeps its "Current"
+    /// badge for context but no longer borrows the selection highlight, so
+    /// the tinted-card language is reserved for actual selection in
+    /// multi-mode.
     private func singleModeRow(for account: Account) -> some View {
         let theme = AccountTheme.forAccount(pubkeyHex: account.pubkeyHex)
         let isCurrent = account.pubkeyHex == appState.currentAccount?.pubkeyHex
@@ -223,9 +226,12 @@ struct ConnectAccountPicker: View {
                         .padding(.vertical, 4)
                         .background(theme.start.opacity(0.15), in: Capsule())
                 }
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.tertiary)
             }
             .padding(12)
-            .background(rowBackground(theme: theme, highlighted: isCurrent))
+            .background(cardBackground(theme: theme, selected: false))
         }
         .buttonStyle(.plain)
     }
@@ -275,6 +281,7 @@ struct ConnectAccountPicker: View {
                             .padding(.vertical, 4)
                             .background(Color(.tertiarySystemGroupedBackground), in: Capsule())
                     }
+                    selectionControl(theme: theme, selected: isSelected, capped: isCapped)
                 }
                 .opacity(isCapped ? 0.5 : 1.0)
                 if showingCapHint {
@@ -286,30 +293,48 @@ struct ConnectAccountPicker: View {
                 }
             }
             .padding(12)
-            .background(rowBackground(theme: theme, highlighted: isSelected))
+            .background(cardBackground(theme: theme, selected: isSelected))
         }
         .buttonStyle(.plain)
     }
 
-    /// Unified row background shared across `.single` (highlights the
-    /// CURRENT account) and `.multi` (highlights SELECTED rows). When
-    /// highlighted: per-account theme tint + accent-color stroke border;
-    /// otherwise the default grouped-list background. This is the visual
-    /// language consistency the picker was missing — every row, every
-    /// mode, same selection-state treatment.
+    /// Multi-mode trailing selection control — the canonical iOS checkbox
+    /// cue. Selected rows show a filled accent checkmark; unselected rows
+    /// show an empty circle (signalling "tappable, multi-select" rather than
+    /// nothing, which would read as radio). Capped rows show a slashed
+    /// circle to make "can't select" obvious alongside the dim + badge.
     @ViewBuilder
-    private func rowBackground(theme: AccountTheme, highlighted: Bool) -> some View {
-        if highlighted {
-            ZStack {
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(theme.start.opacity(0.18))
-                RoundedRectangle(cornerRadius: 12)
-                    .strokeBorder(theme.accent.opacity(0.4), lineWidth: 1)
-            }
+    private func selectionControl(theme: AccountTheme, selected: Bool, capped: Bool) -> some View {
+        if capped {
+            Image(systemName: "circle.slash")
+                .font(.title3)
+                .foregroundStyle(.secondary)
+        } else if selected {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.title3)
+                .foregroundStyle(theme.accent)
         } else {
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color(.secondarySystemGroupedBackground))
+            Image(systemName: "circle")
+                .font(.title3)
+                .foregroundStyle(.secondary)
         }
+    }
+
+    /// Shared card background matching ApprovalSheet's trust-level cards so
+    /// the whole connect flow reads as one visual family. Selected rows get
+    /// a faint per-account tint fill (10%) plus a solid 2pt accent stroke;
+    /// unselected rows get the neutral grouped-list background with no
+    /// border. The full-opacity stroke + the trailing checkmark carry the
+    /// "selected" signal unambiguously, so even pale palette accents read
+    /// clearly — fixing the barely-tinted-row problem of the old treatment.
+    @ViewBuilder
+    private func cardBackground(theme: AccountTheme, selected: Bool) -> some View {
+        RoundedRectangle(cornerRadius: 12)
+            .fill(selected ? theme.start.opacity(0.10) : Color(.secondarySystemGroupedBackground))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(selected ? theme.accent : .clear, lineWidth: 2)
+            )
     }
 
     private func toggleMultiSelection(_ pubkeyHex: String) {
