@@ -305,7 +305,17 @@ struct ActivityDetailView: View {
     private var statusSection: some View {
         Section("Status") {
             if entry.method != "sign_event" {
-                row("Method", value: entry.method)
+                row("Method", value: methodLabel(entry.method))
+            }
+            if isV3Method {
+                // v3 logs the method but not the (kind, scope) pair (logging
+                // those requires extending ActivityEntry — flagged to the
+                // coordinator). Until then, surface what we DO know: that
+                // this was a v3 RPC, distinguishable from a v2 RPC by both
+                // the method name and the spec-binding hint below.
+                Text("NIP-44 v3 binds (kind, scope) into the MAC. Open the client's detail view for the current grant list.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
             }
             if entry.status != "signed" {
                 row("Status", value: entry.status.capitalized)
@@ -313,6 +323,26 @@ struct ActivityDetailView: View {
             if let error = entry.errorMessage, !error.isEmpty, entry.status != "signed" {
                 row("Error", value: error)
             }
+        }
+    }
+
+    private var isV3Method: Bool {
+        entry.method == "nip44v3_encrypt" || entry.method == "nip44v3_decrypt"
+    }
+
+    /// Mirrors `PendingRequestDetailView.actionLabel` so the past-tense
+    /// activity log reads the same vocabulary as the live approval prompt.
+    private func methodLabel(_ method: String) -> String {
+        switch method {
+        case "sign_event":       return "Sign event"
+        case "nip04_encrypt":    return "Encrypt (NIP-04)"
+        case "nip04_decrypt":    return "Decrypt (NIP-04)"
+        case "nip44_encrypt":    return "Encrypt (NIP-44)"
+        case "nip44_decrypt":    return "Decrypt (NIP-44)"
+        case "nip44v3_encrypt":  return "Encrypt (NIP-44 v3)"
+        case "nip44v3_decrypt":  return "Decrypt (NIP-44 v3)"
+        case "connect":          return "Connect"
+        default:                 return method
         }
     }
 

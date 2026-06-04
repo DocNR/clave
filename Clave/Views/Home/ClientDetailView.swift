@@ -1,5 +1,20 @@
 import SwiftUI
 
+/// Row-model for the NIP-44 v3 grants subsection. Flattens
+/// `ClientPermissions.v3KindScopePermissions` (a `[method: Set<KindScopeKey>]`)
+/// into one entry per `(method, KindScopeKey)` pair, with a stable id for
+/// SwiftUI `ForEach` keying. File-private — only `ClientDetailView` uses it.
+private struct V3GrantEntry: Hashable, Identifiable {
+    let method: String
+    let key: KindScopeKey
+    var id: String {
+        // Method + kind + (scope ?? sentinel) — sentinel avoids collisions
+        // with literal scope strings (NUL byte is not allowed in valid
+        // UTF-8 scope strings per spec).
+        "\(method)|\(key.kind)|\(key.scope ?? "\u{0}")"
+    }
+}
+
 struct ClientDetailView: View {
     let pubkey: String
 
@@ -232,6 +247,7 @@ struct ClientDetailView: View {
             VStack(alignment: .leading, spacing: 16) {
                 signingSubsection
                 encryptionSubsection
+                v3GrantsSubsection
             }
             .padding(.top, 8)
         }
@@ -328,8 +344,140 @@ struct ClientDetailView: View {
         case "nip04_decrypt": return "NIP-04 Decrypt"
         case "nip44_encrypt": return "NIP-44 Encrypt"
         case "nip44_decrypt": return "NIP-44 Decrypt"
+        case "nip44v3_encrypt": return "Encrypt (NIP-44 v3)"
+        case "nip44v3_decrypt": return "Decrypt (NIP-44 v3)"
         default: return method
         }
+    }
+
+    // MARK: - NIP-44 v3 grants
+
+    /// Per-(method, kind, scope?) grants captured via "Always allow…" picker
+    /// choices on `PendingRequestDetailView`'s v3 prompt. Distinct from
+    /// `methodPermissions` (v2 path) — v2 grants don't implicitly cover v3
+    /// (matches Amber's resolved design from PR #448 review).
+    ///
+    /// Empty state when no grants exist so users learn the feature exists
+    /// without having to first approve a v3 request.
+    @ViewBuilder
+    private var v3GrantsSubsection: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("NIP-44 v3 grants")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            let entries = v3GrantEntries
+            if entries.isEmpty {
+                Text("No grants yet. v3 calls require approval until you tap “Always allow…” on a prompt.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .padding(.vertical, 4)
+            } else {
+                ForEach(Array(entries.enumerated()), id: \.element.id) { idx, entry in
+                    v3GrantRow(entry: entry)
+                    if idx != entries.count - 1 {
+                        Divider()
+                    }
+                }
+            }
+        }
+    }
+
+    /// Flat, deterministically-ordered list of v3 grants for display. Sort
+    /// is (method asc, kind asc, scope asc with nil first) so the UI stays
+    /// stable across reloads.
+    private var v3GrantEntries: [V3GrantEntry] {
+        guard let perms = permissions else { return [] }
+        var out: [V3GrantEntry] = []
+        for (method, keys) in perms.v3KindScopePermissions {
+            for key in keys {
+                out.append(V3GrantEntry(method: method, key: key))
+            }
+        }
+        return out.sorted {
+            if $0.method != $1.method { return $0.method < $1.method }
+            if $0.key.kind != $1.key.kind { return $0.key.kind < $1.key.kind }
+            switch ($0.key.scope, $1.key.scope) {
+            case (nil, nil): return false
+            case (nil, _): return true
+            case (_, nil): return false
+            case (let a?, let b?): return a < b
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func v3GrantRow(entry: V3GrantEntry) -> some View {
+        let kindInt = Int(entry.key.kind)
+        let tier = KnownKinds.sensitivityTier(for: kindInt)
+        HStack(alignment: .top, spacing: 10) {
+            tierIcon(for: tier)
+                .frame(width: 16)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(methodLabel(entry.method))
+                    .font(.subheadline.weight(.medium))
+                Text(KnownKinds.label(for: kindInt))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if let scope = entry.key.scope, !scope.isEmpty {
+                    Text("Scope: \u{201C}\(scope)\u{201D}")
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .truncationMode(.middle)
+                } else {
+                    Text("(any scope)")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            Spacer()
+            Button(role: .destructive) {
+                revokeV3Grant(entry)
+            } label: {
+                Image(systemName: "minus.circle.fill")
+                    .foregroundStyle(.red)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Revoke grant for \(methodLabel(entry.method)) \(KnownKinds.label(for: kindInt))")
+        }
+        .padding(.vertical, 4)
+    }
+
+    /// Tier-S financial-loss kinds get a strong lock icon; Tier-A DM/wallet
+    /// kinds get a warning triangle; Tier-B list kinds get an info dot;
+    /// normal kinds get no leading icon (transparent placeholder keeps row
+    /// alignment).
+    @ViewBuilder
+    private func tierIcon(for tier: SensitivityTier) -> some View {
+        switch tier {
+        case .tierS:
+            Image(systemName: "lock.shield.fill")
+                .foregroundStyle(.red)
+        case .tierA:
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+        case .tierB:
+            Image(systemName: "info.circle.fill")
+                .foregroundStyle(.secondary)
+        case .normal:
+            // Empty placeholder so rows line up under sensitive grants.
+            Color.clear
+        }
+    }
+
+    private func revokeV3Grant(_ entry: V3GrantEntry) {
+        guard var perms = permissions else { return }
+        var grants = perms.v3KindScopePermissions[entry.method] ?? []
+        grants.remove(entry.key)
+        if grants.isEmpty {
+            perms.v3KindScopePermissions.removeValue(forKey: entry.method)
+        } else {
+            perms.v3KindScopePermissions[entry.method] = grants
+        }
+        SharedStorage.saveClientPermissions(perms)
+        permissions = perms
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
     }
 
     // MARK: - Recent Activity
