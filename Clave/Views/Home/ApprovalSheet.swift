@@ -324,13 +324,12 @@ struct ApprovalSheet: View {
     // MARK: - Action Buttons
 
     private var actionButtons: some View {
-        HStack(spacing: 16) {
-            Button("Deny") {
-                dismiss()
-            }
-            .buttonStyle(.bordered)
-            .frame(maxWidth: .infinity)
-
+        // Native iOS consent-sheet layout: full-width prominent primary on
+        // top, lighter secondary below, both at .large control size. The
+        // full width also lets the dynamic approve label ("Connect as
+        // @longname" / "Approve N accounts") breathe instead of fighting
+        // Deny for half the row.
+        VStack(spacing: 12) {
             Button {
                 buildAndApprove()
             } label: {
@@ -341,7 +340,14 @@ struct ApprovalSheet: View {
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
+            .controlSize(.large)
             .tint(.blue)
+
+            Button("Deny") {
+                dismiss()
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
             .frame(maxWidth: .infinity)
         }
         .padding(.top, 8)
