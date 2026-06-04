@@ -31,6 +31,14 @@ enum LightSigner {
         /// "View raw event" disclosure on `ActivityDetailView`. Set only
         /// for successful sign_event results; nil otherwise.
         var signedEventJSON: String? = nil
+        /// For `nip44v3_*` results: the caller-supplied kind from the RPC
+        /// params, captured so `logAndTrack` can stamp the resulting
+        /// ActivityEntry with the same context the live prompt rendered.
+        /// nil for non-v3 methods.
+        var v3Kind: UInt32? = nil
+        /// For `nip44v3_*` results: caller-supplied scope from the RPC
+        /// params (raw UTF-8 string).
+        var v3Scope: String? = nil
     }
 
     static func handleRequest(
@@ -137,6 +145,16 @@ enum LightSigner {
         // Extract event kind for sign_event
         let eventKind = extractEventKind(method: method, params: params)
 
+        // Extract v3 context (kind + scope) once for the lifetime of this
+        // request. v3 RPCs carry kind as a stringified u32 in params[1] and
+        // scope as raw UTF-8 in params[2]. Each RequestResult constructed
+        // below for v3 methods picks these up so the resulting ActivityEntry
+        // renders the same kind label + scope row + tier banner the live
+        // prompt showed. Nil for non-v3 methods.
+        let isV3Method = method == "nip44v3_encrypt" || method == "nip44v3_decrypt"
+        let v3Kind: UInt32? = isV3Method && params.count > 1 ? UInt32(params[1]) : nil
+        let v3Scope: String? = isV3Method && params.count > 2 ? params[2] : nil
+
         // Extract client name for connect
         let clientName = (method == "connect" && !params.isEmpty) ? extractConnectName(params: params) : nil
 
@@ -241,7 +259,8 @@ enum LightSigner {
                 // Wrong or missing secret and no permissions — reject
                 logger.notice("[LightSigner] Connect rejected: invalid secret")
                 let result = RequestResult(method: method, eventKind: nil, clientPubkey: senderPubkey,
-                                           status: "blocked", errorMessage: "Invalid or missing secret")
+                                           status: "blocked", errorMessage: "Invalid or missing secret",
+                                           v3Kind: v3Kind, v3Scope: v3Scope)
                 logAndTrack(result: result, signerPubkey: signerPubkey, clientName: clientName)
                 try await sendErrorResponse(
                     requestId: requestId, error: "Invalid or missing bunker secret",
@@ -273,7 +292,8 @@ enum LightSigner {
                 // ClaveApp sorting `connect` events to the front of each batch before dispatch.
                 logger.notice("[LightSigner] Rejecting unpaired client for method \(method, privacy: .public)")
                 let result = RequestResult(method: method, eventKind: eventKind, clientPubkey: senderPubkey,
-                                           status: "blocked", errorMessage: "Client not paired")
+                                           status: "blocked", errorMessage: "Client not paired",
+                                           v3Kind: v3Kind, v3Scope: v3Scope)
                 logAndTrack(result: result, signerPubkey: signerPubkey, clientName: clientName)
                 try await sendErrorResponse(
                     requestId: requestId, error: "Client not paired — send connect with valid bunker secret first",
@@ -368,7 +388,8 @@ enum LightSigner {
 
                     let result = RequestResult(method: method, eventKind: eventKind, clientPubkey: senderPubkey,
                                                status: "pending", errorMessage: "Queued for approval",
-                                               pendingRequestId: queuedRequestId)
+                                               pendingRequestId: queuedRequestId,
+                                               v3Kind: v3Kind, v3Scope: v3Scope)
                     logAndTrack(result: result, signerPubkey: signerPubkey, clientName: clientName)
                     try await sendErrorResponse(
                         requestId: requestId, error: "Permission denied — open Clave to approve",
@@ -403,7 +424,8 @@ enum LightSigner {
               let responseJSON = String(data: responseData, encoding: .utf8) else {
             logger.error("[LightSigner] Failed to serialize response")
             let result = RequestResult(method: method, eventKind: eventKind, clientPubkey: senderPubkey,
-                                       status: "error", errorMessage: "Serialization failed")
+                                       status: "error", errorMessage: "Serialization failed",
+                                       v3Kind: v3Kind, v3Scope: v3Scope)
             logAndTrack(result: result, signerPubkey: signerPubkey, clientName: clientName)
             return result
         }
@@ -436,7 +458,8 @@ enum LightSigner {
               let eventDict = try? JSONSerialization.jsonObject(with: eventData) as? [String: Any] else {
             logger.error("[LightSigner] Failed to serialize event for publish")
             let result = RequestResult(method: method, eventKind: eventKind, clientPubkey: senderPubkey,
-                                       status: "error", errorMessage: "Publish serialization failed")
+                                       status: "error", errorMessage: "Publish serialization failed",
+                                       v3Kind: v3Kind, v3Scope: v3Scope)
             logAndTrack(result: result, signerPubkey: signerPubkey, clientName: clientName)
             return result
         }
@@ -493,7 +516,8 @@ enum LightSigner {
                                    status: status, errorMessage: errorMsg,
                                    signedEventId: signedEventId, signedSummary: signedSummary,
                                    signedReferencedEventId: signedReferencedEventId,
-                                   signedEventJSON: signedEventJSON)
+                                   signedEventJSON: signedEventJSON,
+                                   v3Kind: v3Kind, v3Scope: v3Scope)
         logAndTrack(result: result, signerPubkey: signerPubkey, clientName: clientName)
         return result
     }
@@ -729,7 +753,9 @@ enum LightSigner {
             signedSummary: result.signedSummary,
             signedReferencedEventId: result.signedReferencedEventId,
             signedEventJSON: result.signedEventJSON,
-            signerPubkeyHex: signerPubkey
+            signerPubkeyHex: signerPubkey,
+            v3Kind: result.v3Kind,
+            v3Scope: result.v3Scope
         )
         SharedStorage.logActivity(entry)
         if result.clientPubkey != "unknown" && result.status != "blocked"

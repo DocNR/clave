@@ -307,15 +307,22 @@ struct ActivityDetailView: View {
             if entry.method != "sign_event" {
                 row("Method", value: methodLabel(entry.method))
             }
+            // v3 entries: kind + scope + tier banner, mirroring the live
+            // PendingRequestDetailView prompt. Pre-v3-fields legacy entries
+            // (v3Kind nil despite method being v3) fall back to the caveat
+            // pointing to ClientDetailView's live grants.
             if isV3Method {
-                // v3 logs the method but not the (kind, scope) pair (logging
-                // those requires extending ActivityEntry — flagged to the
-                // coordinator). Until then, surface what we DO know: that
-                // this was a v3 RPC, distinguishable from a v2 RPC by both
-                // the method name and the spec-binding hint below.
-                Text("NIP-44 v3 binds (kind, scope) into the MAC. Open the client's detail view for the current grant list.")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
+                if let v3Kind = entry.v3Kind {
+                    row("Kind", value: KnownKinds.label(for: Int(v3Kind)))
+                    if let scope = entry.v3Scope, !scope.isEmpty {
+                        v3ScopeRow(scope: scope)
+                    }
+                    tierBanner(forKind: Int(v3Kind))
+                } else {
+                    Text("NIP-44 v3 binds (kind, scope) into the MAC. Open the client's detail view for the current grant list.")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
             }
             if entry.status != "signed" {
                 row("Status", value: entry.status.capitalized)
@@ -328,6 +335,57 @@ struct ActivityDetailView: View {
 
     private var isV3Method: Bool {
         entry.method == "nip44v3_encrypt" || entry.method == "nip44v3_decrypt"
+    }
+
+    /// Mirrors the scope-row shape in `PendingRequestDetailView` — monospace,
+    /// curly quotes, truncated at 80 chars so single-line cells don't wrap.
+    @ViewBuilder
+    private func v3ScopeRow(scope: String) -> some View {
+        let display = scope.count > 80 ? String(scope.prefix(77)) + "…" : scope
+        VStack(alignment: .leading, spacing: 2) {
+            Text("Scope")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            Text("\u{201C}\(display)\u{201D}")
+                .font(.system(.subheadline, design: .monospaced))
+                .textSelection(.enabled)
+        }
+    }
+
+    /// Past-tense variant of `PendingRequestDetailView.tierWarningBanner`.
+    /// Same icons + colors + structure; the copy reads as a description of
+    /// what happened rather than a warning before approval.
+    @ViewBuilder
+    private func tierBanner(forKind kind: Int) -> some View {
+        switch KnownKinds.sensitivityTier(for: kind) {
+        case .tierS:
+            Label {
+                Text("Highly sensitive operation.")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+            } icon: {
+                Image(systemName: "lock.shield.fill")
+            }
+            .foregroundStyle(.red)
+        case .tierA:
+            Label {
+                Text("Sensitive context (DM, gift wrap, or wallet operation).")
+                    .font(.subheadline)
+            } icon: {
+                Image(systemName: "exclamationmark.triangle.fill")
+            }
+            .foregroundStyle(.orange)
+        case .tierB:
+            Label {
+                Text("May have involved private list or set content.")
+                    .font(.subheadline)
+            } icon: {
+                Image(systemName: "info.circle.fill")
+            }
+            .foregroundStyle(.secondary)
+        case .normal:
+            EmptyView()
+        }
     }
 
     /// Mirrors `PendingRequestDetailView.actionLabel` so the past-tense

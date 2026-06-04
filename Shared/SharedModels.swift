@@ -39,6 +39,16 @@ struct ActivityEntry: Codable, Identifiable {
     /// migration. After migration completes, every row has this populated.
     /// Filtered readers (Task 4) skip rows where this is empty.
     let signerPubkeyHex: String
+    /// For nip44v3_encrypt / nip44v3_decrypt entries: the caller-supplied
+    /// kind from the RPC params, captured at log time. Lets the activity
+    /// detail view render the same context binding (kind label + tier
+    /// banner) the live prompt showed. Nil for non-v3 methods and for
+    /// legacy rows logged before this field existed (decodeIfPresent ?? nil).
+    let v3Kind: UInt32?
+    /// For nip44v3_* entries: caller-supplied scope from params, as raw
+    /// UTF-8 string. Renders in the activity detail view's "Wants to"
+    /// section to match the live prompt.
+    let v3Scope: String?
 
     init(
         id: String,
@@ -52,7 +62,9 @@ struct ActivityEntry: Codable, Identifiable {
         signedSummary: String? = nil,
         signedReferencedEventId: String? = nil,
         signedEventJSON: String? = nil,
-        signerPubkeyHex: String = ""
+        signerPubkeyHex: String = "",
+        v3Kind: UInt32? = nil,
+        v3Scope: String? = nil
     ) {
         self.id = id
         self.method = method
@@ -66,12 +78,15 @@ struct ActivityEntry: Codable, Identifiable {
         self.signedReferencedEventId = signedReferencedEventId
         self.signedEventJSON = signedEventJSON
         self.signerPubkeyHex = signerPubkeyHex
+        self.v3Kind = v3Kind
+        self.v3Scope = v3Scope
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, method, eventKind, clientPubkey, timestamp, status, errorMessage
         case signedEventId, signedSummary, signedReferencedEventId, signedEventJSON
         case signerPubkeyHex
+        case v3Kind, v3Scope
     }
 
     init(from decoder: Decoder) throws {
@@ -88,6 +103,8 @@ struct ActivityEntry: Codable, Identifiable {
         signedReferencedEventId = try c.decodeIfPresent(String.self, forKey: .signedReferencedEventId)
         signedEventJSON = try c.decodeIfPresent(String.self, forKey: .signedEventJSON)
         signerPubkeyHex = try c.decodeIfPresent(String.self, forKey: .signerPubkeyHex) ?? ""
+        v3Kind = try c.decodeIfPresent(UInt32.self, forKey: .v3Kind)
+        v3Scope = try c.decodeIfPresent(String.self, forKey: .v3Scope)
     }
 }
 
