@@ -13,6 +13,7 @@ struct SettingsView: View {
     @State private var versionTapTimes: [Date] = []
     @State private var showCopyLogsConfirmation = false
     @State private var showClearAllConnectionsAlert = false
+    @State private var showReshowExplainerConfirmation = false
 
     var body: some View {
         NavigationStack {
@@ -386,6 +387,18 @@ struct SettingsView: View {
                 Label("Multi-Account", systemImage: "person.2.circle")
             }
 
+            Button {
+                SharedStorage.setNeedsV3ExplainerCard()
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+                showReshowExplainerConfirmation = true
+            } label: {
+                Label("Re-show v3 explainer card", systemImage: "lock.shield")
+            }
+
+            Text("Sets the one-time card flag back to true. The card fires on next MainTabView appear — return to Home tab (cmd-shift-h on simulator) or relaunch to trigger.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+
             Button(role: .destructive) {
                 devSettings.developerMenuUnlocked = false
                 versionTapTimes = []
@@ -395,6 +408,11 @@ struct SettingsView: View {
         }
         .alert("Logs copied to clipboard", isPresented: $showCopyLogsConfirmation) {
             Button("OK", role: .cancel) {}
+        }
+        .alert("v3 explainer card flag set", isPresented: $showReshowExplainerConfirmation) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("The card fires on next MainTabView appear. Switch to Home tab or relaunch to trigger it.")
         }
     }
 
