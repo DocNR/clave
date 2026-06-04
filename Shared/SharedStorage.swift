@@ -425,6 +425,15 @@ enum SharedStorage {
         defaults.set(false, forKey: SharedConstants.needsV3ExplainerCardKey)
     }
 
+    /// Sets the v3 explainer-card flag back to true — used by the
+    /// developer-settings re-show toggle so QA can verify the card
+    /// renders correctly without having to redo the schema migration.
+    /// Normal user-facing code never needs this; the flag is set by
+    /// `migrateToV3PermissionsSchemaIfNeeded` and cleared by the card.
+    static func setNeedsV3ExplainerCard() {
+        defaults.set(true, forKey: SharedConstants.needsV3ExplainerCardKey)
+    }
+
     /// Migrate legacy paired clients to ClientPermissions (one-time, on first launch after update)
     static func migrateIfNeeded() {
         // Skip if already migrated (clientPermissions key exists with data)
