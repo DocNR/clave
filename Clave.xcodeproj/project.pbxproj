@@ -280,6 +280,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = EF3D7A302F8BCAE6005A6545 /* Build configuration list for PBXNativeTarget "Clave" */;
 			buildPhases = (
+				EFC0FFEE2F8BCAE3005A6545 /* Preflight: require pushed HEAD before Archive */,
 				EF3D7A0B2F8BCAE3005A6545 /* Sources */,
 				EF3D7A0C2F8BCAE3005A6545 /* Frameworks */,
 				EF3D7A0D2F8BCAE3005A6545 /* Resources */,
@@ -372,6 +373,28 @@
 			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		EFC0FFEE2F8BCAE3005A6545 /* Preflight: require pushed HEAD before Archive */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Preflight: require pushed HEAD before Archive";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${SRCROOT}/scripts/preflight-archive.sh\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXProject section */
 		EF3D7A072F8BCAE3005A6545 /* Project object */ = {
