@@ -28,6 +28,8 @@ enum NostrConnectURISource {
 /// (nostrconnect vs bunker) plus the same-device pairing gotcha.
 struct ConnectNostrConnectSurface: View {
 
+    @Environment(AppState.self) private var appState
+
     /// Bound by parent (ConnectTabView, future Task 7). Triggers presentation
     /// of ConnectAccountPicker → ApprovalSheet.
     let parsedURI: NostrConnectParser.ParsedURI?
@@ -99,7 +101,13 @@ struct ConnectNostrConnectSurface: View {
         case .authorized:
             ZStack {
                 QRScannerView(
-                    isScanning: isScanning,
+                    // Gate the camera on the Connect tab being selected.
+                    // The TabView keeps this surface mounted after the
+                    // first visit, so without this the AVCaptureSession
+                    // would stay live (camera indicator on) on every other
+                    // tab. `isScanning` still drives scan dedup/pause; this
+                    // adds "and the user is actually looking at us".
+                    isScanning: isScanning && appState.selectedTab == .connect,
                     onCode: handleScannedCode,
                     onPermissionDenied: {
                         cameraAuthState = .denied
