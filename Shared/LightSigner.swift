@@ -64,6 +64,18 @@ enum LightSigner {
         // bucket — non-fatal but bounded.
         let signerPubkey = (try? LightEvent.pubkeyHex(from: privateKey)) ?? ""
 
+        // Signature verification (path-wide) — PHASE 1: OBSERVE-ONLY. Recompute
+        // the event id + BIP-340 Schnorr verify (LightEvent.verify) and LOG
+        // failures, but do NOT reject yet. This lets us confirm real traffic
+        // from every client verifies cleanly before flipping to hard reject
+        // (Phase 2). A failure means a forged/tampered/replayed-with-freshened-
+        // envelope event OR a client serialization mismatch we must account for.
+        // Runs before dedup so a forged/freshened id can't pollute the dedup
+        // ring or be trusted by the freshness window once enforcement lands.
+        if !LightEvent.verify(event: requestEvent) {
+            logger.error("[LightSigner] SIGCHECK FAIL eid=\((requestEvent["id"] as? String)?.prefix(8) ?? "?", privacy: .public) sender=\(senderPubkey.prefix(8), privacy: .public)")
+        }
+
         // Per-event-id dedupe (audit D.1.1). Both NSE and the foreground
         // relay subscription (Layer 1) call into this function; whichever
         // marks first wins, others skip. Cross-process semantics are lossy
