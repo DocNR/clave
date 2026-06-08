@@ -13,18 +13,15 @@ struct LightNostrEvent {
 
     func toJSON() -> String {
         let tagsJSON = tags.map { tag in
-            "[" + tag.map { "\"\(escapeJSON($0))\"" }.joined(separator: ",") + "]"
+            "[" + tag.map { "\"\(LightEvent.escapeJSON($0))\"" }.joined(separator: ",") + "]"
         }.joined(separator: ",")
 
-        return "{\"id\":\"\(id)\",\"pubkey\":\"\(pubkey)\",\"created_at\":\(createdAt),\"kind\":\(kind),\"tags\":[\(tagsJSON)],\"content\":\"\(escapeJSON(content))\",\"sig\":\"\(sig)\"}"
+        return "{\"id\":\"\(id)\",\"pubkey\":\"\(pubkey)\",\"created_at\":\(createdAt),\"kind\":\(kind),\"tags\":[\(tagsJSON)],\"content\":\"\(LightEvent.escapeJSON(content))\",\"sig\":\"\(sig)\"}"
     }
 
-    private func escapeJSON(_ str: String) -> String {
-        str.replacingOccurrences(of: "\\", with: "\\\\")
-           .replacingOccurrences(of: "\"", with: "\\\"")
-           .replacingOccurrences(of: "\n", with: "\\n")
-           .replacingOccurrences(of: "\r", with: "\\r")
-           .replacingOccurrences(of: "\t", with: "\\t")
+    func toDict() -> [String: Any] {
+        ["id": id, "pubkey": pubkey, "created_at": createdAt, "kind": kind,
+         "tags": tags, "content": content, "sig": sig]
     }
 }
 
@@ -115,12 +112,66 @@ enum LightEvent {
         return try sign(privateKey: privateKey, kind: kind, content: content, tags: tags, createdAt: createdAt)
     }
 
-    private static func escapeJSON(_ str: String) -> String {
-        str.replacingOccurrences(of: "\\", with: "\\\\")
-           .replacingOccurrences(of: "\"", with: "\\\"")
-           .replacingOccurrences(of: "\n", with: "\\n")
-           .replacingOccurrences(of: "\r", with: "\\r")
-           .replacingOccurrences(of: "\t", with: "\\t")
+    /// NIP-01 string escaping. Shared by `toJSON` (wire bytes), `sign` (id
+    /// computation) and `verify` (id recomputation) so all three agree
+    /// byte-for-byte. Escapes: `"` `\` and the named control chars
+    /// (\n \r \t \b \f); every other control char below 0x20 becomes a
+    /// lowercase `\u00xx` escape. `/`, DEL (0x7F) and all non-ASCII scalars
+    /// pass through unchanged. (Audit C3.1: control-char coverage.)
+    static func escapeJSON(_ str: String) -> String {
+        var out = String()
+        out.reserveCapacity(str.count)
+        for scalar in str.unicodeScalars {
+            switch scalar {
+            case "\\": out += "\\\\"
+            case "\"": out += "\\\""
+            case "\u{08}": out += "\\b"
+            case "\u{09}": out += "\\t"
+            case "\u{0A}": out += "\\n"
+            case "\u{0C}": out += "\\f"
+            case "\u{0D}": out += "\\r"
+            default:
+                if scalar.value < 0x20 {
+                    out += String(format: "\\u%04x", scalar.value)
+                } else {
+                    out.unicodeScalars.append(scalar)
+                }
+            }
+        }
+        return out
+    }
+
+    /// Recompute the event id from its canonical NIP-01 serialization and
+    /// verify the BIP-340 Schnorr signature. Fail-closed: any missing or
+    /// malformed field, an id mismatch, or a bad signature returns false.
+    static func verify(event: [String: Any]) -> Bool {
+        guard let pubkeyHex = event["pubkey"] as? String,
+              let claimedId = event["id"] as? String,
+              let sigHex = event["sig"] as? String,
+              let kind = event["kind"] as? Int,
+              let content = event["content"] as? String else { return false }
+        let ts: Int
+        if let i = event["created_at"] as? Int { ts = i }
+        else if let d = event["created_at"] as? Double { ts = Int(d) }
+        else { return false }
+        let rawTags = (event["tags"] as? [[Any]]) ?? []
+        let tags = rawTags.map { $0.map { "\($0)" } }
+
+        let tagsJSON = tags.map { tag in
+            "[" + tag.map { "\"\(escapeJSON($0))\"" }.joined(separator: ",") + "]"
+        }.joined(separator: ",")
+        let serialized = "[0,\"\(pubkeyHex)\",\(ts),\(kind),[\(tagsJSON)],\"\(escapeJSON(content))\"]"
+        let idHash = CryptoKit.SHA256.hash(data: Data(serialized.utf8))
+        guard Data(idHash).hex == claimedId else { return false }
+
+        guard let pubkeyData = Data(hexString: pubkeyHex), pubkeyData.count == 32,
+              let sigData = Data(hexString: sigHex), sigData.count == 64 else { return false }
+        do {
+            let signature = try P256K.Schnorr.SchnorrSignature(dataRepresentation: sigData)
+            let xonly = P256K.Schnorr.XonlyKey(dataRepresentation: pubkeyData)
+            var msg = Array(Data(idHash))
+            return xonly.isValid(signature, for: &msg)
+        } catch { return false }
     }
 
     private static func generateAuxRand() throws -> Data {
