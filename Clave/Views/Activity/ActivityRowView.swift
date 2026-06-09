@@ -102,6 +102,7 @@ struct ActivityRowView: View {
         case "nip44v3_encrypt":  return "Encrypt (NIP-44 v3)"
         case "nip44v3_decrypt":  return "Decrypt (NIP-44 v3)"
         case "connect":          return "Connect"
+        case "logout":           return "Disconnected"
         default:                 return method
         }
     }
