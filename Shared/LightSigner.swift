@@ -296,6 +296,22 @@ enum LightSigner {
             // client) consent.
             let perms = SharedStorage.getClientPermissions(signer: signerPubkey, client: senderPubkey)
 
+            // Replay guard: honor a paired-client logout only if it postdates the
+            // current pairing. A captured logout replayed after a re-pair would
+            // otherwise silently tear down the fresh session (logout is
+            // auto-allowed). created_at is coerced Double-or-Int (JSONSerialization
+            // may bridge it to a Double-typed NSNumber — the narrow `as? Int`
+            // would return nil and fail OPEN); mirrors the dedup block's coercion.
+            if method == "logout", let perms {
+                let ca = (requestEvent["created_at"] as? Double) ?? Double(requestEvent["created_at"] as? Int ?? 0)
+                if ca > 0, isLogoutReplay(eventCreatedAt: ca, pairingConnectedAt: perms.connectedAt) {
+                    logger.notice("[LightSigner] stale logout (predates pairing) — ignored as replay")
+                    return RequestResult(method: method, eventKind: nil, clientPubkey: senderPubkey,
+                                         status: "blocked", errorMessage: nil,
+                                         v3Kind: v3Kind, v3Scope: v3Scope)
+                }
+            }
+
             if perms == nil {
                 // Mirror Amber #460: a logout from a client with no live session
                 // is a no-op — no session to remove, and we surface nothing (no
@@ -759,6 +775,19 @@ enum LightSigner {
     }
 
     // MARK: - Helpers
+
+    /// Clock-skew tolerance for the logout replay guard. A legit logout always
+    /// postdates its pairing; a replay comes from a prior (earlier) session, so
+    /// a generous tolerance rejects replays without false-rejecting
+    /// skewed-but-legit logouts. Sessions are minutes+ apart in practice.
+    static let logoutReplaySkewTolerance: Double = 300
+
+    /// True if a logout event predates the current pairing (i.e. a replayed
+    /// frame from before a re-pair). Pure — unit-tested directly.
+    static func isLogoutReplay(eventCreatedAt: Double, pairingConnectedAt: Double,
+                               skewTolerance: Double = logoutReplaySkewTolerance) -> Bool {
+        eventCreatedAt < pairingConnectedAt - skewTolerance
+    }
 
     private static func extractEventKind(method: String, params: [String]) -> Int? {
         guard method == "sign_event", let eventJson = params.first,
