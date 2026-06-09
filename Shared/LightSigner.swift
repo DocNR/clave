@@ -1,5 +1,6 @@
 import Foundation
 import os.log
+import CryptoKit
 
 private let logger = Logger(subsystem: "dev.nostr.clave", category: "signer")
 
@@ -560,6 +561,14 @@ enum LightSigner {
             signedEventJSON = json
         }
 
+        // Ack-gated logout teardown (Amber #460 pattern: remove the session only
+        // after the "ack" actually went out). `status == "signed"` means a relay
+        // accepted the response; if publish failed we leave the session intact so
+        // the client can retry.
+        if method == "logout", status == "signed" {
+            await performLogoutTeardown(signerPubkey: signerPubkey, senderPubkey: senderPubkey)
+        }
+
         let result = RequestResult(method: method, eventKind: eventKind, clientPubkey: senderPubkey,
                                    status: status, errorMessage: errorMsg,
                                    signedEventId: signedEventId, signedSummary: signedSummary,
@@ -787,6 +796,70 @@ enum LightSigner {
     static func isLogoutReplay(eventCreatedAt: Double, pairingConnectedAt: Double,
                                skewTolerance: Double = logoutReplaySkewTolerance) -> Bool {
         eventCreatedAt < pairingConnectedAt - skewTolerance
+    }
+
+    // MARK: - Logout teardown
+
+    /// POST /unpair-client (NIP-98 signed). Pure attempt — returns success,
+    /// does NOT touch the retry queue (the caller owns that). 6s timeout so an
+    /// NSE-context await can't approach the 30s extension budget.
+    static func sendProxyUnpair(clientPubkey: String, signer: String) async -> Bool {
+        guard !signer.isEmpty, let nsec = SharedKeychain.loadNsec(for: signer) else { return false }
+        let privateKey: Data
+        do { privateKey = try Bech32.decodeNsec(nsec) } catch { return false }
+        let proxyURL = SharedConstants.sharedDefaults.string(forKey: SharedConstants.proxyURLKey)
+            ?? SharedConstants.defaultProxyURL
+        let unpairURL = "\(proxyURL)/unpair-client"
+        guard let url = URL(string: unpairURL) else { return false }
+        let bodyDict: [String: Any] = ["client_pubkey": clientPubkey]
+        guard let bodyData = try? JSONSerialization.data(withJSONObject: bodyDict) else { return false }
+        let bodyHash = SHA256.hash(data: bodyData).map { String(format: "%02x", $0) }.joined()
+        let authHeader: String
+        do {
+            authHeader = try LightEvent.signNip98(privateKey: privateKey, url: unpairURL,
+                                                  method: "POST", bodySha256Hex: bodyHash)
+        } catch { return false }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 6
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(authHeader, forHTTPHeaderField: "X-Clave-Auth")
+        request.httpBody = bodyData
+        do {
+            let (_, response) = try await URLSession.shared.data(for: request)
+            return (response as? HTTPURLResponse)?.statusCode == 200
+        } catch { return false }
+    }
+
+    /// Queue the unpair op FIRST (guarantees recovery if we're killed mid-POST
+    /// or the POST fails), attempt the POST, and clear the queued op only on a
+    /// 200. Shared by AppState's foreground unpair and the NSE logout teardown.
+    static func unpairClientAndQueue(clientPubkey: String, signer: String) async {
+        let op = PairOp(id: UUID().uuidString, kind: .unpair, clientPubkey: clientPubkey,
+                        relayUrls: nil, createdAt: Date().timeIntervalSince1970,
+                        failCount: 0, signerPubkeyHex: signer)
+        SharedStorage.enqueuePendingPairOp(op)
+        if await sendProxyUnpair(clientPubkey: clientPubkey, signer: signer) {
+            SharedStorage.removePendingPairOp(id: op.id)
+            logger.notice("[LightSigner] proxy unpair ok client=\(clientPubkey.prefix(8), privacy: .public)")
+        } else {
+            logger.notice("[LightSigner] proxy unpair deferred to queue client=\(clientPubkey.prefix(8), privacy: .public)")
+        }
+    }
+
+    /// Tear down a client's session on logout. Idempotent + race-reducing (the
+    /// had-guard skips a duplicate teardown if a racing process — NSE + the
+    /// foreground sub catching the same event — already removed the pair;
+    /// residual double-teardown is benign by idempotency). Keeps the activity
+    /// log (parity with the user-tap unpair; deliberately NOT Amber's history
+    /// wipe).
+    static func performLogoutTeardown(signerPubkey: String, senderPubkey: String) async {
+        guard SharedStorage.getClientPermissions(signer: signerPubkey, client: senderPubkey) != nil else {
+            logger.notice("[LightSigner] logout teardown skipped — pair already gone")
+            return
+        }
+        SharedStorage.removeClientPermissions(signer: signerPubkey, client: senderPubkey)
+        await unpairClientAndQueue(clientPubkey: senderPubkey, signer: signerPubkey)
     }
 
     private static func extractEventKind(method: String, params: [String]) -> Int? {
