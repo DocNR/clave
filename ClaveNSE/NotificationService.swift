@@ -21,6 +21,9 @@ private struct SigningResult {
         )
         case error(String)
         case noEvents
+        /// Informational, user-visible receipt (e.g. a client logout). Unlike
+        /// .success it is NOT blanked — it renders an active banner.
+        case info(title: String, body: String)
     }
     let status: Status
 }
@@ -121,6 +124,12 @@ class NotificationService: UNNotificationServiceExtension {
                 info["pendingRequestId"] = requestId
                 content.userInfo = info
             }
+            contentHandler?(content)
+
+        case .info(let title, let body):
+            content.title = title
+            content.body = body
+            content.interruptionLevel = .active  // override the proxy's passive payload so it actually shows
             contentHandler?(content)
 
         case .success, .noEvents:
@@ -238,6 +247,7 @@ class NotificationService: UNNotificationServiceExtension {
             var lastPendingMethod: String? = nil
             var lastPendingKind: Int? = nil
             var lastPendingRequestId: String? = nil
+            var loggedOutClient: String? = nil
 
             // Process connect requests before anything else so pairing state is
             // established before sign_event/encrypt/decrypt requests in the same batch.
@@ -268,6 +278,16 @@ class NotificationService: UNNotificationServiceExtension {
                         // Layer 1 foreground sub or another NSE wake already
                         // handled this event. No-op.
                         continue
+                    }
+                    if result.status == "blocked" && result.errorMessage == nil {
+                        // Silently dropped (unpaired/stale logout, or a signature-
+                        // verification reject): no banner. Decouple the silent intent
+                        // from the .success-by-elimination fallback so it can't be
+                        // broken by later changes.
+                        continue
+                    }
+                    if result.method == "logout" && result.status == "signed" {
+                        loggedOutClient = result.clientPubkey
                     }
                     handledCount += 1
                     if result.status == "error" {
@@ -315,6 +335,13 @@ class NotificationService: UNNotificationServiceExtension {
                 ))
             } else if let error = lastError {
                 return SigningResult(status: .error(error))
+            } else if let client = loggedOutClient {
+                let name = SharedStorage.getClientPermissions(for: client)?.name
+                    ?? "Client …\(client.suffix(8))"
+                return SigningResult(status: .info(
+                    title: "Disconnected",
+                    body: "\(name) signed out and was removed."
+                ))
             } else {
                 return SigningResult(status: .success)
             }
