@@ -341,91 +341,18 @@ extension AppState {
     /// leak surfaced during build 33 multi-account smoke test as
     /// "no pair found" log noise during pendingPairOps drains.
     func unpairClientWithProxy(clientPubkey: String, signer: String? = nil) {
-        // Layer 1: the unpaired client's URI relays may no longer be needed
-        // in the foreground sub's set. Refresh.
+        // Layer 1: the unpaired client's URI relays may no longer be needed in
+        // the foreground sub's set. Refresh.
         Task { @MainActor in
             ForegroundRelaySubscription.shared.refreshRelaySet()
         }
-
-        // Capture signer at call-time (default current) so the URLSession
-        // failure closure enqueues the PairOp under the correct account
-        // even if the user-driven account switch races the in-flight request.
+        // Capture signer at call-time (default current) so the retry enqueue
+        // lands under the correct account even if an account switch races.
         let capturedSigner = signer ?? signerPubkeyHex
         logger.notice("[Pair] unpair-client begin client=\(clientPubkey.prefix(8), privacy: .public) signer=\(capturedSigner.prefix(8), privacy: .public)")
-        guard !capturedSigner.isEmpty,
-              let nsec = SharedKeychain.loadNsec(for: capturedSigner) else {
-            logger.error("[Pair] unpair-client abort: empty signer or no nsec in Keychain client=\(clientPubkey.prefix(8), privacy: .public)")
-            return
+        Task {
+            await LightSigner.unpairClientAndQueue(clientPubkey: clientPubkey, signer: capturedSigner)
         }
-        let privateKey: Data
-        do {
-            privateKey = try Bech32.decodeNsec(nsec)
-        } catch {
-            logger.error("[Pair] unpair-client abort: Bech32 decode failed err=\(error.localizedDescription, privacy: .public)")
-            return
-        }
-
-        let proxyURL = SharedConstants.sharedDefaults.string(forKey: SharedConstants.proxyURLKey)
-            ?? SharedConstants.defaultProxyURL
-        let unpairURL = "\(proxyURL)/unpair-client"
-        guard let url = URL(string: unpairURL) else {
-            logger.error("[Pair] unpair-client abort: invalid URL=\(unpairURL, privacy: .public)")
-            return
-        }
-
-        let bodyDict: [String: Any] = ["client_pubkey": clientPubkey]
-        guard let bodyData = try? JSONSerialization.data(withJSONObject: bodyDict) else {
-            logger.error("[Pair] unpair-client abort: body serialization failed")
-            return
-        }
-        let bodyHash = SHA256.hash(data: bodyData).map { String(format: "%02x", $0) }.joined()
-
-        let authHeader: String
-        do {
-            authHeader = try LightEvent.signNip98(
-                privateKey: privateKey,
-                url: unpairURL,
-                method: "POST",
-                bodySha256Hex: bodyHash
-            )
-        } catch {
-            logger.error("[Pair] unpair-client abort: NIP-98 sign failed err=\(error.localizedDescription, privacy: .public)")
-            return
-        }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.timeoutInterval = 10
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue(authHeader, forHTTPHeaderField: "X-Clave-Auth")
-        request.httpBody = bodyData
-
-        URLSession.shared.dataTask(with: request) { _, response, error in
-            let http = response as? HTTPURLResponse
-            if http?.statusCode == 200 {
-                logger.notice("[Pair] unpair-client ok client=\(clientPubkey.prefix(8), privacy: .public) signer=\(capturedSigner.prefix(8), privacy: .public)")
-                return
-            }
-            let statusStr: String
-            if let code = http?.statusCode {
-                statusStr = "\(code)"
-            } else if let error {
-                statusStr = "net-err:\(error.localizedDescription)"
-            } else {
-                statusStr = "no-response"
-            }
-            logger.error("[Pair] unpair-client failed status=\(statusStr, privacy: .public) — queued for retry client=\(clientPubkey.prefix(8), privacy: .public)")
-            let op = PairOp(
-                id: UUID().uuidString,
-                kind: .unpair,
-                clientPubkey: clientPubkey,
-                relayUrls: nil,
-                createdAt: Date().timeIntervalSince1970,
-                failCount: 0,
-                signerPubkeyHex: capturedSigner
-            )
-            SharedStorage.enqueuePendingPairOp(op)
-        }.resume()
     }
 
     /// Drain the pending pair/unpair ops queue. Called on app foreground and
