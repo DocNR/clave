@@ -725,8 +725,16 @@ enum LightSigner {
             // the pairing UI. Validated on TestFlight builds 16+17.
             return ("null", nil)
 
+        case "logout":
+            // NIP-46 session teardown (nips#2373, Amber #460). Returning the
+            // ack string here is all processRequest does — the actual session
+            // removal happens in handleRequest after this ack is published,
+            // because teardown needs signer/sender pubkeys + storage + proxy,
+            // none of which processRequest (a pure fn) has access to.
+            return ("ack", nil)
+
         case "describe":
-            return ("[\"connect\",\"sign_event\",\"get_public_key\",\"ping\",\"nip04_encrypt\",\"nip04_decrypt\",\"nip44_encrypt\",\"nip44_decrypt\",\"nip44v3_encrypt\",\"nip44v3_decrypt\",\"switch_relays\",\"describe\"]", nil)
+            return ("[\"connect\",\"sign_event\",\"get_public_key\",\"ping\",\"nip04_encrypt\",\"nip04_decrypt\",\"nip44_encrypt\",\"nip44_decrypt\",\"nip44v3_encrypt\",\"nip44v3_decrypt\",\"switch_relays\",\"logout\",\"describe\"]", nil)
 
         default:
             return (nil, "Unsupported method: \(method)")
