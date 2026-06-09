@@ -297,6 +297,19 @@ enum LightSigner {
             let perms = SharedStorage.getClientPermissions(signer: signerPubkey, client: senderPubkey)
 
             if perms == nil {
+                // Mirror Amber #460: a logout from a client with no live session
+                // is a no-op — no session to remove, and we surface nothing (no
+                // "ack", no error). "blocked" + nil errorMessage + no
+                // sendErrorResponse → the NSE maps it to a blank/suppressed
+                // notification, so the user's Notification Center stays quiet.
+                if method == "logout" {
+                    logger.notice("[LightSigner] logout from unpaired client — silent no-op")
+                    return RequestResult(
+                        method: method, eventKind: nil, clientPubkey: senderPubkey,
+                        status: "blocked", errorMessage: nil,
+                        v3Kind: v3Kind, v3Scope: v3Scope
+                    )
+                }
                 // Unpaired clients may ONLY send `connect` — everything else (including kind:22242
                 // NIP-42 relay auth) requires a prior successful pair via bunker secret or
                 // nostrconnect handshake. Historical note: we briefly exempted kind:22242 here to
@@ -353,7 +366,11 @@ enum LightSigner {
                         // Malformed v3 request — surface to user, don't auto-approve.
                         allowed = false
                     }
-                case "connect", "ping", "get_public_key", "describe", "switch_relays":
+                case "connect", "ping", "get_public_key", "describe", "switch_relays", "logout":
+                    // logout ends the requesting client's OWN session (keyed by
+                    // senderPubkey) — there is nothing for the user to authorize,
+                    // and gating it would create zombie pairings (client has
+                    // already deleted its keypair per nips#2373). Never prompt.
                     allowed = true
                 default:
                     allowed = true
