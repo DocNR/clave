@@ -286,6 +286,19 @@ final class AppState {
         // automatically.
     }
 
+    // Opt the deinit out of MainActor isolation. With
+    // `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`, this otherwise-unannotated
+    // class is implicitly @MainActor, so the compiler synthesizes an *isolated*
+    // deinit that hops to the main executor via `swift_task_deinitOnExecutorImpl`.
+    // The Swift concurrency runtime in the iOS 26.2 simulator double-frees a
+    // TaskLocal scope on that hop (SIGABRT in `StopLookupScope::~StopLookupScope`);
+    // the 26.4 runtime fixes it. In production AppState is an app-lifetime
+    // singleton (`ContentView`'s `@State`) that never deinits, so only the unit
+    // tests — which construct throwaway instances — hit the bug. Cleanup here
+    // touches no isolated state (ARC just releases value-typed / thread-safe
+    // members), so a nonisolated deinit is safe and sidesteps the buggy hop.
+    nonisolated deinit {}
+
     // MARK: - Foreground subscription bridge
 
     /// Bridges into the `@MainActor`-isolated ForegroundRelaySubscription. Called
