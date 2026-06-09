@@ -40,4 +40,32 @@ final class LightSignerProcessRequestTests: XCTestCase {
         XCTAssertFalse(result!.contains("wss://"), "switch_relays result must not contain any wss:// URL")
         XCTAssertFalse(result!.contains(SharedConstants.relayURL), "switch_relays result must not contain SharedConstants.relayURL")
     }
+
+    /// NIP-46 `logout` must return the literal `"ack"` per Amber #460 and the
+    /// nips#2373 proposal (params `[]`, result `"ack"`).
+    func testLogoutReturnsAck() {
+        let privateKey = randomKey()
+        let (result, error) = LightSigner.processRequest(
+            method: "logout",
+            params: [],
+            privateKey: privateKey
+        )
+        XCTAssertEqual(result, "ack", "logout must return the string \"ack\"")
+        XCTAssertNil(error)
+    }
+
+    /// `describe` must advertise `logout` so capability-probing clients know
+    /// Clave honors session teardown.
+    func testDescribeAdvertisesLogout() {
+        let privateKey = randomKey()
+        let (result, error) = LightSigner.processRequest(
+            method: "describe",
+            params: [],
+            privateKey: privateKey
+        )
+        XCTAssertNil(error)
+        XCTAssertNotNil(result)
+        XCTAssertTrue(result!.contains("\"logout\""),
+                      "describe array must include \"logout\"")
+    }
 }
