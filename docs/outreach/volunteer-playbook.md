@@ -61,9 +61,12 @@ Use these as written or lightly adapted. Where a template says **[escalate]**, s
 > Same idea, different platform: Amber is the Android signer, Clave is the iOS one. We think Amber is great — both apps implement the same open standard (NIP-46), so clients that support one generally support the other.
 
 **"Does it work with [client X]?"**
-> If the client is **Nostur or fevela.me**: "Yes — verified working."
+> If the client is on the verified list — **Nostur, fevela.me, Spectr, Primal (web), Coracle, Jumble, noStrudel, zap.cooking, YakiHonne**: "Yes — verified working."
 > Anything else: "Best place to check is our live compatibility matrix: github.com/DocNR/clave/blob/main/docs/nip46-compatibility.md — and if you try it, tell us what happens, that's exactly the testing we need."
 > Never promise an unlisted client works.
+
+**"Can I use multiple accounts?"**
+> Yes — Clave supports multiple accounts, and with clients that support our multi-account pairing (Spectr today), you pair once and sign in with all your accounts in a single flow. With other clients, you pair each account separately. Either way, every key stays on your phone.
 
 **"It's not working / pairing fails / requests time out."**
 > Sorry about that — two quick things to try: (1) if the app and Clave are on the same iPhone, pair using Clave's bunker code rather than the app's QR/URI — same-device pairing the other way is unreliable on iOS, not just for us. (2) Make sure notifications are enabled for Clave. If it's still stuck, would you open an issue here so we can dig in? github.com/DocNR/clave/issues — include the client name and what you saw.
@@ -144,7 +147,17 @@ Use as-is or lightly adapted. Recruitment posts (marked ⚠️) must keep the th
 
 11. > Open source, MIT, audited before public beta, weekly automated security checks. Not because that makes it perfect — because you shouldn't have to take our word for any of this. github.com/DocNR/clave
 
-12. ⚠️ > Testers wanted: if you use Nostur on iOS, pairing with Clave is verified working end-to-end. Try it, break it, tell us. **Beta — throwaway key only, please.**
+12. ⚠️ > Testers wanted: Clave is verified working with Nostur, Primal (web), Coracle, Jumble, noStrudel, Spectr, fevela.me, zap.cooking, and YakiHonne. Pick your favorite, pair it, try to break it, tell us. **Beta — throwaway key only, please.**
+
+13. > One pairing, all your accounts. Clave's multi-account flow lets you connect a client once and sign in with every identity you run — work npub, personal npub, project npub — each key separate, none of them ever leaving your phone. Live today in Spectr.
+
+## ⏸️ On hold — do not post until the maintainer explicitly says go
+
+The "throwaway key only" guidance is expected to soften as the beta matures. When (and only when) the maintainer gives the go-ahead, this is the transition announcement — until then, every caveat in this playbook stays exactly as written:
+
+> Update on key guidance: since launch we've asked beta testers to use a throwaway key. As of build ___, with [audit/milestone — maintainer fills in], we're comfortable saying Clave is ready for daily-driver use. If you've been waiting to bring your main npub — this is the post. As always: your key never leaves your phone, and the code is open for anyone to verify. github.com/DocNR/clave
+
+After it's posted, the maintainer will tell you which FAQ replies and library posts to update — don't edit them yourself.
 
 ## Weekly rhythm (suggested)
 

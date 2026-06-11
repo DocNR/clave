@@ -17,8 +17,8 @@ Explicit non-goal right now: mass-market growth. Clave is beta and pinned to one
 
 | Channel | Role | Who runs it |
 |---|---|---|
-| **Nostr (brand npub)** | Primary. The audience is literally Nostr users, and posting from a Clave-secured account is the product demo. | Volunteer (day-to-day), maintainer (releases, technical threads) |
-| **X/Twitter** | Reach beyond Nostr — bitcoin/privacy crowd, iOS devs. Cross-post the best 2–3 Nostr posts per week. | Volunteer |
+| **Nostr (brand npub)** | Primary. The audience is literally Nostr users, and posting from a Clave-secured account is the product demo. ✅ npub exists | Volunteer (day-to-day), maintainer (releases, technical threads) |
+| **X/Twitter** | Reach beyond Nostr — bitcoin/privacy crowd, iOS devs. Cross-post the best 2–3 Nostr posts per week. ⚠️ No account yet — create when bandwidth allows; Nostr comes first | Volunteer |
 | **GitHub** (releases, Discussions) | Developer channel. Release notes, interop changelog, `accounts=multi` spec discussion. | Maintainer only |
 | **Stacker News / r/nostr** | Occasional long-form: launch-style posts, architecture write-ups. Once or twice a month max. | Maintainer drafts, volunteer can repost |
 | **Nostr dev group chats** (Telegram/SimpleX) | Interop coordination with client devs. Technical, relationship-driven. | Maintainer only |
@@ -50,15 +50,19 @@ Rule of thumb: education and community posts can run on the volunteer's own judg
 
 ## First 30 days
 
-**Week 1 — foundation.** Set up brand npub + Clave pairing for the volunteer (the dogfood story above). Publish a pinned "what is Clave" thread (talking-points doc has the copy). Volunteer practices with 2–3 education posts.
+Already in place: brand npub, public TestFlight invite link, clave.casa as the link-in-bio destination. Still needed: the volunteer's Clave pairing, an X account (optional, later), and a docs refresh (below).
 
-**Week 2 — beta recruitment.** TestFlight call-to-action posts — every single one carries the throwaway-nsec caveat, no exceptions. Target Nostur users specifically ("verified ✅"). Short screen recording of bunker pairing → first signed note.
+**Week 0 prerequisite — refresh the public docs outreach points to.** The README's verified list ("Nostur, fevela.me") and the compatibility matrix (statuses from build ~29; app is at build 99) undersell the current state — nine clients are verified, multi-account has shipped. Posts will link to these docs; they need to agree with the posts before the recruitment push.
 
-**Week 3 — education series.** "Key hygiene week": one post per day on a single idea (key in N apps = N attack surfaces; keys can't rotate; what a remote signer is; what the proxy can and can't see; how to check per-client permissions). Honest, no FUD about specific clients.
+**Week 1 — foundation.** Set up the volunteer's Clave pairing to the brand npub (the dogfood story above). Publish a pinned "what is Clave" thread (talking-points doc has the copy). Volunteer practices with 2–3 education posts.
 
-**Week 4 — developer outreach.** Maintainer publishes an `accounts=multi` write-up (Stacker News or GitHub Discussion); volunteer amplifies. Post the interop-issue template link: "found a client that doesn't pair? Tell us, we triage signer-side vs client-side honestly." The four-bucket triage taxonomy from the compatibility doc is genuinely differentiating — most projects blame the other side; you publish the analysis.
+**Week 2 — beta recruitment.** TestFlight call-to-action posts — every single one carries the throwaway-nsec caveat, no exceptions. Lead with the breadth of the verified-client list (nine clients people actually use). Short screen recording of bunker pairing → first signed note.
 
-After day 30: settle into the steady cadence, one campaign per month (next candidates: per-client demo series, multi-account launch when the NIP draft files, self-hosting story when `docs/SELF-HOSTING.md` lands).
+**Week 3 — multi-account.** Headline campaign: "one pairing, all your accounts." Demo video of the multi-account picker with Spectr; consumer posts from the library; maintainer publishes the `accounts=multi` write-up for devs (Stacker News or GitHub Discussion) and the volunteer amplifies.
+
+**Week 4 — education series + dev outreach.** "Key hygiene week": one post per day on a single idea (key in N apps = N attack surfaces; keys can't rotate; what a remote signer is; what the proxy can and can't see; how to check per-client permissions). Close with the interop-issue call: "found a client that doesn't pair? Tell us, we triage signer-side vs client-side honestly" — the four-bucket triage taxonomy is genuinely differentiating; most projects blame the other side, you publish the analysis.
+
+After day 30: settle into the steady cadence, one campaign per month (next candidates: per-client demo series, NIP-draft filing for `accounts=multi`, the main-key-readiness announcement when the maintainer calls it, self-hosting story when `docs/SELF-HOSTING.md` lands).
 
 ## What success looks like
 
