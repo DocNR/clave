@@ -12,6 +12,7 @@ Variations by audience:
 - **For Android-familiar users:** "Amber, for iOS. Same idea — your key lives in one signer app, everything else connects to it — built around iOS's push system instead of Android's background services."
 - **For developers:** "An iOS NIP-46 remote signer that works with the app closed: APNs wakes a Notification Service Extension for ~30 seconds to decrypt, check permissions, sign, and respond. No silent-audio hacks, no foreground requirement."
 - **For privacy folks:** "Open source (MIT), audited, end-to-end encrypted. The push payload is content-free — the server can't read your requests and can't sign as you, because it never has your key."
+- **For multi-account users:** "Run more than one Nostr identity? Pair an app with Clave once and sign in with all your accounts in a single flow — each one stays a separate key, none of them ever leave your phone."
 
 ## The problem (why anyone should care)
 
@@ -38,6 +39,8 @@ Slightly more technical, still accessible:
 - **The key never leaves the device.** iOS Keychain, this-device-only flag — not iCloud-synced, not in backups.
 - **The server can't cheat.** The proxy never holds any key, can't decrypt requests (end-to-end NIP-44 encryption), and can't even register a push token for a pubkey it doesn't own (NIP-98 authenticated registration).
 - **Per-app permissions.** Full/Medium/Low trust per client, per-event-kind overrides, sensitive actions (profile changes, contact list, deletions) require explicit approval. Activity log for everything. One-tap unpair.
+- **Multi-account pairing.** Pair a client once and bring all your accounts in — one approval flow, one signer session per account. Clave introduced this as an open extension (`accounts=multi`), validated end-to-end with Spectr, with a NIP draft planned so any signer or client can adopt it.
+- **Works with the clients people actually use.** Verified: Nostur, fevela.me, Spectr, Primal (web), Coracle, Jumble, noStrudel, zap.cooking, YakiHonne.
 - **Honest interop tracking.** We publish a per-client compatibility matrix and classify every failure as signer-side, client-side, library-shared, or spec-ambiguity — including when the bug is ours.
 - **We dogfood it:** the official Clave account is itself operated through Clave — the person posting has never seen its key. *(Post this only once the pairing in the social plan is actually set up.)*
 
@@ -48,7 +51,7 @@ State these proactively — credibility is the asset:
 - **Beta.** TestFlight only. **Use a throwaway nsec, not your main key.** This caveat goes on every recruitment post, verbatim, no exceptions.
 - **The proxy sees metadata.** It knows which pubkeys have registered devices and when an encrypted request arrived for them. It cannot read contents or sign anything — but "the server sees nothing" would be a false claim. Say "the server sees that a request arrived, never what's in it."
 - **There is currently one proxy and one pinned relay for bunker pairing** (`relay.powr.build`). If it's down, push-wake signing is down. Self-hosting is possible but not yet fully documented; multi-relay support is backlogged.
-- **Client support varies.** Verified: Nostur, fevela.me. Others work with caveats — point people to `docs/nip46-compatibility.md` rather than promising "works with everything."
+- **Client support varies.** Nine clients are verified (list above), but per-client caveats exist — point people to `docs/nip46-compatibility.md` rather than promising "works with everything," and never vouch for a client that isn't on the list.
 - **Same-device pairing on iOS: use the bunker code.** Pasting a client's nostrconnect URI into Clave on the same iPhone is unreliable for reasons outside any signer's control (iOS freezes the client's connection when backgrounded). Bunker flow avoids it entirely.
 
 ## Differentiation (compare without trash-talking)
