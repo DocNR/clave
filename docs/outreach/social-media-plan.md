@@ -1,0 +1,77 @@
+# Clave social media & outreach plan
+
+_Audience: maintainer. Companion docs: [talking-points.md](talking-points.md) (message reference for anyone posting) and [volunteer-playbook.md](volunteer-playbook.md) (the doc you hand to the volunteer)._
+
+## Goals (beta phase)
+
+In priority order:
+
+1. **Grow the TestFlight beta** with the right testers — people who understand "throwaway nsec only" and will file useful reports.
+2. **Educate on NIP-46 / key hygiene** so the market for a signer exists. Most Nostr users still paste their nsec into clients; they don't know there's a problem to solve.
+3. **Recruit client developers** — every row added to `docs/nip46-compatibility.md` is worth more than a hundred likes. The `accounts=multi` extension also needs client adoption before the NIP draft.
+4. **Build trust in the security posture** by being radically honest: open source, audited, but beta — and the proxy's metadata visibility stated plainly.
+
+Explicit non-goal right now: mass-market growth. Clave is beta and pinned to one relay for bunker flow; a viral spike of normies pasting their main nsec in would be a disaster, not a win.
+
+## Channels
+
+| Channel | Role | Who runs it |
+|---|---|---|
+| **Nostr (brand npub)** | Primary. The audience is literally Nostr users, and posting from a Clave-secured account is the product demo. | Volunteer (day-to-day), maintainer (releases, technical threads) |
+| **X/Twitter** | Reach beyond Nostr — bitcoin/privacy crowd, iOS devs. Cross-post the best 2–3 Nostr posts per week. | Volunteer |
+| **GitHub** (releases, Discussions) | Developer channel. Release notes, interop changelog, `accounts=multi` spec discussion. | Maintainer only |
+| **Stacker News / r/nostr** | Occasional long-form: launch-style posts, architecture write-ups. Once or twice a month max. | Maintainer drafts, volunteer can repost |
+| **Nostr dev group chats** (Telegram/SimpleX) | Interop coordination with client devs. Technical, relationship-driven. | Maintainer only |
+
+### Run the brand account through Clave itself
+
+Strongly recommended — this is both the best guardrail and the best marketing story:
+
+1. Create a dedicated **brand npub** (not your personal npub, never the volunteer's key). You hold the nsec in your own Clave install.
+2. The volunteer pairs their Nostr client to your Clave via `bunker://` with **Medium trust**.
+3. Result: the volunteer can post kind-1 notes and replies, but **never sees the key**, can't change the profile (kind 0), can't touch the contact list (kind 3), can't delete events (kind 5) — those are protected kinds that ping you for approval. You get a full audit trail in the activity log, and you can unpair them in one tap if anything goes wrong.
+
+That arrangement *is* the pitch: "our community manager posts from the official account daily and has never seen its private key." Post about it.
+
+(Practical caveat: while bunker flow is pinned to `wss://relay.powr.build`, the volunteer's client needs to support bunker pairing — Nostur is verified. Test the pairing yourselves before handing it over.)
+
+## Cadence & content mix
+
+Realistic for one part-time volunteer: **3–5 Nostr posts/week**, 2–3 cross-posted to X, plus reply engagement. Don't over-commit; a steady drip beats a two-week burst followed by silence.
+
+| Pillar | Share | Examples |
+|---|---|---|
+| **Education** (NIP-46, key hygiene, "why signers") | ~40% | "Your nsec can't be rotated like a password" series; plain-language NIP-46 explainers; the notary analogy |
+| **Product** (features, releases, how-tos) | ~25% | Pairing demo videos (Nostur, fevela.me), release highlights, permission-model walkthroughs, multi-account picker demo |
+| **Community & interop** | ~20% | New verified clients, shout-outs to client devs who fix NIP-46 bugs, compatibility-matrix updates, calls for testers of specific clients |
+| **Engagement** | ~15% | Replies, zapping good answers, boosting ecosystem content (Amber, NIP discussions), polls ("which client should we verify next?") |
+
+Rule of thumb: education and community posts can run on the volunteer's own judgment from the playbook; product claims and anything technical get maintainer review first (the playbook's green/yellow/red matrix covers this).
+
+## First 30 days
+
+**Week 1 — foundation.** Set up brand npub + Clave pairing for the volunteer (the dogfood story above). Publish a pinned "what is Clave" thread (talking-points doc has the copy). Volunteer practices with 2–3 education posts.
+
+**Week 2 — beta recruitment.** TestFlight call-to-action posts — every single one carries the throwaway-nsec caveat, no exceptions. Target Nostur users specifically ("verified ✅"). Short screen recording of bunker pairing → first signed note.
+
+**Week 3 — education series.** "Key hygiene week": one post per day on a single idea (key in N apps = N attack surfaces; keys can't rotate; what a remote signer is; what the proxy can and can't see; how to check per-client permissions). Honest, no FUD about specific clients.
+
+**Week 4 — developer outreach.** Maintainer publishes an `accounts=multi` write-up (Stacker News or GitHub Discussion); volunteer amplifies. Post the interop-issue template link: "found a client that doesn't pair? Tell us, we triage signer-side vs client-side honestly." The four-bucket triage taxonomy from the compatibility doc is genuinely differentiating — most projects blame the other side; you publish the analysis.
+
+After day 30: settle into the steady cadence, one campaign per month (next candidates: per-client demo series, multi-account launch when the NIP draft files, self-hosting story when `docs/SELF-HOSTING.md` lands).
+
+## What success looks like
+
+Track monthly, keep it lightweight:
+
+- TestFlight tester count and weekly-active signers (proxy `/health` gives unique_pubkeys)
+- Verified rows in the compatibility matrix (the single best metric)
+- GitHub: stars, interop issues filed by outsiders, first-time contributors
+- Nostr: follower count on brand npub, zaps/replies per post (vanity-adjacent, weight it least)
+
+## Risks this plan manages
+
+- **Beta over-promotion** → every recruitment post carries the throwaway-nsec caveat; growth is deliberately capped to testers.
+- **Security-claim inflation** → the talking-points doc has an explicit "never say" list; volunteer escalates all security questions beyond the approved FAQ.
+- **Vulnerability reports arriving via social DMs** → playbook has a verbatim redirect-to-SECURITY.md template; volunteer never discusses publicly.
+- **Volunteer account compromise** → volunteer never holds the brand key (Clave pairing model); blast radius is unpair-and-done.
