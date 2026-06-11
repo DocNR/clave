@@ -27,10 +27,13 @@ Your nsec never leaves the device. You control which clients can sign which even
 What works end-to-end:
 
 - **Both pairing flows** — `bunker://` (Clave generates URI) and `nostrconnect://` (client generates URI, Clave approves)
+- **Multiple accounts** — hold several keys, switch accounts in place, and pair a client with many accounts in one flow via the opt-in `accounts=multi` nostrconnect extension (see [docs/integrations.md](docs/integrations.md))
 - **Per-client permissions** — Full / Medium / Low trust with per-kind overrides; protected kinds (0, 3, 5, 10002, 30078) require approval on Medium trust
-- **NIP-46 methods:** `connect`, `sign_event`, `get_public_key`, `ping`, `describe`, `switch_relays`, `nip04_encrypt`, `nip04_decrypt`, `nip44_encrypt`, `nip44_decrypt`
+- **Context-aware approvals (NIP-44 v3)** — v3 encrypt/decrypt requests carry a `(kind, scope)` context bound into the MAC, so approval prompts show what an app is actually touching; "always allow" grants are stored per `(method, kind, scope)`
+- **NIP-46 methods:** `connect`, `sign_event`, `get_public_key`, `ping`, `describe`, `switch_relays`, `logout`, `nip04_encrypt`, `nip04_decrypt`, `nip44_encrypt`, `nip44_decrypt`, `nip44v3_encrypt`, `nip44v3_decrypt`
+- **Incoming signature verification** — every incoming request's signature is verified before dispatch
 - **Activity log + client detail view** — rename, change trust, review per-client history, unpair
-- **Verified ✅:** Nostur, fevela.me. Several other clients work with caveats — see [docs/nip46-compatibility.md](docs/nip46-compatibility.md) for the full per-client matrix, library-family notes, and triage guide.
+- **Verified ✅:** Nostur, Primal (web), Coracle, Jumble, noStrudel, Spectr, fevela.me, zap.cooking, YakiHonne — see [docs/nip46-compatibility.md](docs/nip46-compatibility.md) for per-client caveats, library-family notes, and the triage guide.
 
 Known limitations:
 
