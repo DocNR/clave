@@ -19,7 +19,9 @@ struct ClientDetailView: View {
     let pubkey: String
 
     @Environment(AppState.self) private var appState
+    @Environment(\.scenePhase) private var scenePhase
     @State private var permissions: ClientPermissions?
+    @State private var recentActivity: [ActivityEntry] = []
     @State private var selectedTrust: TrustLevel = .medium
     @State private var kindOverrides: [Int: Bool] = [:]
     @State private var showRename = false
@@ -80,7 +82,27 @@ struct ClientDetailView: View {
                 }
             }
         }
-        .onAppear(perform: loadPermissions)
+        .onAppear {
+            loadPermissions()
+            refreshActivity()
+        }
+        // Recent Activity reads SharedStorage directly, which SwiftUI can't
+        // observe — without explicit triggers the list goes stale while this
+        // view is on screen (HomeView/ActivityView already carry the same
+        // trio). Coverage: .signingCompleted = L1 auto-sign + foreground push;
+        // .pendingRequestsUpdated = in-app approve/deny + TTL expiry (those
+        // paths log activity without posting .signingCompleted); scenePhase
+        // .active = NSE writes from the other process, where in-process
+        // notifications never arrive.
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { refreshActivity() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .signingCompleted)) { _ in
+            refreshActivity()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .pendingRequestsUpdated)) { _ in
+            refreshActivity()
+        }
         .sheet(isPresented: $showConnectionInfo) {
             if let perms = permissions {
                 ConnectionInfoSheet(perms: perms)
@@ -488,7 +510,7 @@ struct ClientDetailView: View {
                 .font(.headline)
                 .padding(.leading, 4)
 
-            let entries = clientActivityEntries
+            let entries = recentActivity
             if entries.isEmpty {
                 Text("No activity yet.")
                     .font(.subheadline)
@@ -520,12 +542,12 @@ struct ClientDetailView: View {
         }
     }
 
-    private var clientActivityEntries: [ActivityEntry] {
+    private func refreshActivity() {
         // Task 7: scope to current account's activity. The client we're
         // viewing may also be paired with another account, but this
         // detail view is scoped to (current signer, this client) — only
         // show activity that THIS account had with this client.
-        Array(
+        recentActivity = Array(
             SharedStorage.getActivityLog(for: appState.signerPubkeyHex)
                 .filter { $0.clientPubkey == pubkey }
                 .sorted { $0.timestamp > $1.timestamp }
