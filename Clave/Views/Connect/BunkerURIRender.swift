@@ -7,16 +7,27 @@ import SwiftUI
 /// URI without switching the active account.
 ///
 /// Used by `ConnectTabView` as a navigation destination after the account picker
-/// resolves the signer (or auto-skips for single-account users).
+/// resolves the signer (or auto-skips for single-account users). The signer can
+/// also be swapped in place: the "Sharing as @…" header re-presents the same
+/// single-mode picker, so multi-account users don't have to pop back and
+/// re-run the bunker flow to share a different account's URI.
 struct BunkerURIRender: View {
 
     @Environment(AppState.self) private var appState
 
-    let signerPubkey: String
+    /// The account whose bunker URI is rendered. Seeded from the caller's
+    /// pick but held as local state so the header's account switcher can
+    /// retarget the view without involving the parent's navigation state.
+    @State private var signerPubkey: String
 
     @State private var showQR = false
     @State private var copiedBunker = false
     @State private var showCapAlert = false
+    @State private var showAccountPicker = false
+
+    init(signerPubkey: String) {
+        _signerPubkey = State(initialValue: signerPubkey)
+    }
 
     // MARK: - Computed
 
@@ -66,6 +77,17 @@ struct BunkerURIRender: View {
             .sheet(isPresented: $showQR) {
                 QRCodeView(content: bunkerURI)
             }
+            .sheet(isPresented: $showAccountPicker) {
+                ConnectAccountPicker(mode: .single, parsedURI: nil) { pubkeys in
+                    showAccountPicker = false
+                    if let picked = pubkeys.first, picked != signerPubkey {
+                        signerPubkey = picked
+                        // Drop the transient "Copied" confirmation — it
+                        // referred to the previous account's URI.
+                        copiedBunker = false
+                    }
+                }
+            }
             .alert("Connection limit reached", isPresented: $showCapAlert) {
                 Button("OK", role: .cancel) {}
             } message: {
@@ -79,23 +101,41 @@ struct BunkerURIRender: View {
     /// Visual reminder of which account this bunker URI signs for. Helps
     /// when the user navigates here from the picker — the URI itself is
     /// opaque hex, so a labelled avatar makes the binding obvious.
+    ///
+    /// When more than one account exists the card doubles as the account
+    /// switcher: tapping re-presents the single-mode picker and rebinds
+    /// the whole view to the picked signer. Single-account users get the
+    /// same card as static context (nothing to switch to).
     @ViewBuilder
     private var accountHeader: some View {
         if let account = appState.accounts.first(where: { $0.pubkeyHex == signerPubkey }) {
-            HStack(spacing: 14) {
-                accountAvatar(for: account, size: 48)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Sharing as @\(account.displayLabel)")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(.primary)
-                    Text(truncatedNpub(account.pubkeyHex))
-                        .font(.system(.caption2, design: .monospaced))
-                        .foregroundStyle(.secondary)
+            let canSwitch = appState.accounts.count > 1
+            Button {
+                showAccountPicker = true
+            } label: {
+                HStack(spacing: 14) {
+                    accountAvatar(for: account, size: 48)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Sharing as @\(account.displayLabel)")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(.primary)
+                        Text(truncatedNpub(account.pubkeyHex))
+                            .font(.system(.caption2, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if canSwitch {
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    }
                 }
-                Spacer()
+                .padding(12)
+                .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
             }
-            .padding(12)
-            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
+            .buttonStyle(.plain)
+            .disabled(!canSwitch)
+            .accessibilityHint(canSwitch ? "Switches the account this bunker code is for" : "")
         }
     }
 
