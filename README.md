@@ -22,7 +22,7 @@ Your nsec never leaves the device. You control which clients can sign which even
 
 ## Status
 
-**Beta.** TestFlight external beta live — use a throwaway nsec for now, not your main key.
+**Beta.** TestFlight external beta live, with months of real-world use behind it. Clave holds your real key the way any signer does — the point is that it becomes the *single* place your key lives, instead of the many copies you create by pasting your nsec into every client. Treat that decision with the same care you'd give any app you trust with your nsec; an independent third-party security audit is on the roadmap (it depends on funding and time), and until then the signing path is fully open source and has had an internal audit. New to it and cautious? Pairing a secondary key first is a perfectly reasonable way to kick the tires.
 
 What works end-to-end:
 
