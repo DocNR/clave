@@ -41,8 +41,12 @@ Privately, please — not via a public GitHub issue. See [SECURITY.md](SECURITY.
 **Which Nostr clients work with Clave?**
 Verified working today: Nostur, Primal (web), Coracle, Jumble, noStrudel, Jank, fevela.me, zap.cooking, and YakiHonne. Others may work too — the live, honest compatibility matrix (including known per-client quirks) is at [docs/nip46-compatibility.md](docs/nip46-compatibility.md). If you try a client that isn't listed, tell us what happens.
 
-**Pairing isn't working — what should I check?**
-Two common fixes: (1) If the client app and Clave are on the *same* iPhone, pair using Clave's **bunker code** (Connect → copy or scan the QR) rather than pasting the client's URI into Clave — same-device pairing the other direction is unreliable on iOS for reasons no signer can fully fix. (2) Make sure notifications are enabled for Clave. If it's still stuck, [open an issue](https://github.com/DocNR/clave/issues) with the client name and what you saw.
+**My Nostr app won't connect to Clave — what should I check?**
+A few things to try, in order:
+
+1. **Start the connection from Clave, not from the other app.** Open Clave, tap **Connect**, and copy the code it shows you (or scan its QR code). Then paste or scan that into your Nostr app, usually under an option like "log in with a remote signer," "connect bunker," or "Nostr Connect." Going this direction is the most reliable — especially when Clave and your Nostr app are on the *same* iPhone, where starting from the other app tends to fail for technical reasons no signer can fully work around.
+2. **Make sure Clave is allowed to send notifications.** Clave wakes up to sign when it receives a notification, so if notifications are switched off it can't respond. Open **iOS Settings → Notifications → Clave** and turn them on.
+3. **Still stuck?** [Tell us what happened](https://github.com/DocNR/clave/issues) — include the name of the app you were trying to connect and what you saw on screen. That's exactly what we need to help.
 
 **Can I use more than one account?**
 Yes. Clave holds multiple keys and lets you switch between them. With clients that support our multi-account pairing — [Jank](https://jank.army) today — you pair once and sign in with all your accounts in a single flow; with other clients you pair each account separately. Either way, every key stays on your phone.
