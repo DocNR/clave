@@ -74,7 +74,7 @@ The standard NIP-46 client library pattern is "subscribe, resolve on first match
 - For each received ack: validate `echoed_secret` matches the URI secret. Parse optional `name` / `picture` / `total`. Store the `(signer_pk, name, picture)` tuple as one of the user's accounts.
 - On `count == total` (auto-finalize) OR window expiry OR user-tapped Done: close the subscription and surface the resulting accounts list to the user.
 
-A reference implementation lives in Spectr at `src/providers/NostrProvider/login-flows.ts` (function `nostrConnectionLoginMulti`). Spectr targets `nostr-tools` underneath; the accumulator overrides the library's first-ack-completes default.
+A reference implementation lives in the Spectr codebase (shipped as the **Jank** app, https://jank.army) at `src/providers/NostrProvider/login-flows.ts` (function `nostrConnectionLoginMulti`). Spectr targets `nostr-tools` underneath; the accumulator overrides the library's first-ack-completes default.
 
 ### Show progress while listening
 

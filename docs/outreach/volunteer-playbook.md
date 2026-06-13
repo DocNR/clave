@@ -61,12 +61,12 @@ Use these as written or lightly adapted. Where a template says **[escalate]**, s
 > Same idea, different platform: Amber is the Android signer, Clave is the iOS one — and we think Amber is great. The deeper difference is *how* they wake up to sign. Amber uses NIP-55, Android's app-to-app intent system, to pass requests between a client and the signer right on the device. iOS doesn't have that — its app-to-app hand-offs are unreliable and it suspends background apps — so Clave had to take a different route (a push notification that wakes a small signing extension). Both speak the same open standard (NIP-46), so clients that support one generally support the other.
 
 **"Does it work with [client X]?"**
-> If the client is on the verified list — **Nostur, fevela.me, Spectr, Primal (web), Coracle, Jumble, noStrudel, zap.cooking, YakiHonne**: "Yes — verified working."
+> If the client is on the verified list — **Nostur, fevela.me, Jank, Primal (web), Coracle, Jumble, noStrudel, zap.cooking, YakiHonne**: "Yes — verified working."
 > Anything else: "Best place to check is our live compatibility matrix: github.com/DocNR/clave/blob/main/docs/nip46-compatibility.md — and if you try it, tell us what happens, that's exactly the testing we need."
 > Never promise an unlisted client works.
 
 **"Can I use multiple accounts?"**
-> Yes — Clave supports multiple accounts, and with clients that support our multi-account pairing (Spectr today, testable at https://jank.army), you pair once and sign in with all your accounts in a single flow. With other clients, you pair each account separately. Either way, every key stays on your phone.
+> Yes — Clave supports multiple accounts, and with clients that support our multi-account pairing (Jank today, at https://jank.army), you pair once and sign in with all your accounts in a single flow. With other clients, you pair each account separately. Either way, every key stays on your phone.
 
 **"It's not working / pairing fails / requests time out."**
 > Sorry about that — two quick things to try: (1) if the app and Clave are on the same iPhone, pair using Clave's bunker code rather than the app's QR/URI — same-device pairing the other way is unreliable on iOS, not just for us. (2) Make sure notifications are enabled for Clave. If it's still stuck, would you open an issue here so we can dig in? github.com/DocNR/clave/issues — include the client name and what you saw.
@@ -147,9 +147,9 @@ Use as-is or lightly adapted. Recruitment posts (marked ⚠️) should keep the 
 
 11. > Open source, MIT, internally audited, weekly automated security checks — and an independent third-party audit on the roadmap. We tell you exactly where that stands because you shouldn't have to take our word for any of it. github.com/DocNR/clave
 
-12. ⚠️ > Testers wanted: Clave is verified working with Nostur, Primal (web), Coracle, Jumble, noStrudel, Spectr, fevela.me, zap.cooking, and YakiHonne. Pick your favorite, pair it, try to break it, tell us what happens. Still TestFlight beta — go in informed, and if you're cautious, a secondary key is a fine way to start.
+12. ⚠️ > Testers wanted: Clave is verified working with Nostur, Primal (web), Coracle, Jumble, noStrudel, Jank, fevela.me, zap.cooking, and YakiHonne. Pick your favorite, pair it, try to break it, tell us what happens. Still TestFlight beta — go in informed, and if you're cautious, a secondary key is a fine way to start.
 
-13. > One pairing, all your accounts. Clave's multi-account flow lets you connect a client once and sign in with every identity you run — work npub, personal npub, project npub — each key separate, none of them ever leaving your phone. Live today in Spectr (https://jank.army).
+13. > One pairing, all your accounts. Clave's multi-account flow lets you connect a client once and sign in with every identity you run — work npub, personal npub, project npub — each key separate, none of them ever leaving your phone. Live today in Jank (https://jank.army).
 
 ## ⏸️ On hold — do not post until the maintainer explicitly says go
 
