@@ -42,8 +42,8 @@ Slightly more technical, still accessible:
 - **The key never leaves the device.** iOS Keychain, this-device-only flag — not iCloud-synced, not in backups.
 - **The server can't cheat.** The proxy never holds any key, can't decrypt requests (end-to-end NIP-44 encryption), and can't even register a push token for a pubkey it doesn't own (NIP-98 authenticated registration).
 - **Per-app permissions.** Full/Medium/Low trust per client, per-event-kind overrides, sensitive actions (profile changes, contact list, deletions) require explicit approval. Activity log for everything. One-tap unpair.
-- **Multi-account pairing.** Pair a client once and bring all your accounts in — one approval flow, one signer session per account. Clave introduced this as an open extension (`accounts=multi`), validated end-to-end with Spectr (a full-featured Nostr client, testable at https://jank.army), with a NIP draft planned so any signer or client can adopt it.
-- **Works with the clients people actually use.** Verified: Nostur, fevela.me, Spectr, Primal (web), Coracle, Jumble, noStrudel, zap.cooking, YakiHonne.
+- **Multi-account pairing.** Pair a client once and bring all your accounts in — one approval flow, one signer session per account. Clave introduced this as an open extension (`accounts=multi`), validated end-to-end with Jank (a full-featured Nostr client at https://jank.army), with a NIP draft planned so any signer or client can adopt it.
+- **Works with the clients people actually use.** Verified: Nostur, fevela.me, Jank, Primal (web), Coracle, Jumble, noStrudel, zap.cooking, YakiHonne.
 - **Honest interop tracking.** We publish a per-client compatibility matrix and classify every failure as signer-side, client-side, library-shared, or spec-ambiguity — including when the bug is ours.
 - **We dogfood it:** the official Clave account is itself operated through Clave — the person posting has never seen its key. *(Post this only once the pairing in the social plan is actually set up.)*
 

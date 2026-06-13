@@ -33,7 +33,7 @@ What works end-to-end:
 - **NIP-46 methods:** `connect`, `sign_event`, `get_public_key`, `ping`, `describe`, `switch_relays`, `logout`, `nip04_encrypt`, `nip04_decrypt`, `nip44_encrypt`, `nip44_decrypt`, `nip44v3_encrypt`, `nip44v3_decrypt`
 - **Incoming signature verification** — every incoming request's signature is verified before dispatch
 - **Activity log + client detail view** — rename, change trust, review per-client history, unpair
-- **Verified ✅:** Nostur, Primal (web), Coracle, Jumble, noStrudel, Spectr, fevela.me, zap.cooking, YakiHonne — see [docs/nip46-compatibility.md](docs/nip46-compatibility.md) for per-client caveats, library-family notes, and the triage guide.
+- **Verified ✅:** Nostur, Primal (web), Coracle, Jumble, noStrudel, Jank, fevela.me, zap.cooking, YakiHonne — see [docs/nip46-compatibility.md](docs/nip46-compatibility.md) for per-client caveats, library-family notes, and the triage guide.
 
 Known limitations:
 

@@ -60,7 +60,7 @@ Already in place: brand npub, public TestFlight invite link, clave.casa as the l
 
 **Week 2 — beta recruitment.** TestFlight call-to-action posts — each one carries the honest caveats (still beta, independent audit on the roadmap) in the informed-choice framing, not a throwaway-key scold. Lead with the breadth of the verified-client list (nine clients people actually use). Short screen recording of bunker pairing → first signed note.
 
-**Week 3 — multi-account.** Headline campaign: "one pairing, all your accounts." Demo video of the multi-account picker with Spectr; consumer posts from the library; maintainer publishes the `accounts=multi` write-up for devs (Stacker News or GitHub Discussion) and the volunteer amplifies.
+**Week 3 — multi-account.** Headline campaign: "one pairing, all your accounts." Demo video of the multi-account picker with Jank (jank.army); consumer posts from the library; maintainer publishes the `accounts=multi` write-up for devs (Stacker News or GitHub Discussion) and the volunteer amplifies.
 
 **Week 4 — education series + dev outreach.** "Key hygiene week": one post per day on a single idea (key in N apps = N attack surfaces; keys can't rotate; what a remote signer is; what the proxy can and can't see; how to check per-client permissions). Close with the interop-issue call: "found a client that doesn't pair? Tell us, we triage signer-side vs client-side honestly" — the four-bucket triage taxonomy is genuinely differentiating; most projects blame the other side, you publish the analysis.
 
