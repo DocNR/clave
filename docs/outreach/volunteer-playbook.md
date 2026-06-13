@@ -58,7 +58,7 @@ Use these as written or lightly adapted. Where a template says **[escalate]**, s
 > Fair question. iOS suspends background apps, so a signer needs *something* to wake it — Apple's push system is the only reliable mechanism, and that requires a small relay-watching server. It's designed to know as little as possible: it sees that an encrypted request arrived for you, never what's inside. The code is open source and you can run your own. We'd rather be honest about that trade-off than pretend it isn't there.
 
 **"How is this different from Amber?"**
-> Same idea, different platform: Amber is the Android signer, Clave is the iOS one. We think Amber is great — both apps implement the same open standard (NIP-46), so clients that support one generally support the other.
+> Same idea, different platform: Amber is the Android signer, Clave is the iOS one — and we think Amber is great. The deeper difference is *how* they wake up to sign. Amber uses NIP-55, Android's app-to-app intent system, to pass requests between a client and the signer right on the device. iOS doesn't have that — its app-to-app hand-offs are unreliable and it suspends background apps — so Clave had to take a different route (a push notification that wakes a small signing extension). Both speak the same open standard (NIP-46), so clients that support one generally support the other.
 
 **"Does it work with [client X]?"**
 > If the client is on the verified list — **Nostur, fevela.me, Spectr, Primal (web), Coracle, Jumble, noStrudel, zap.cooking, YakiHonne**: "Yes — verified working."
@@ -66,7 +66,7 @@ Use these as written or lightly adapted. Where a template says **[escalate]**, s
 > Never promise an unlisted client works.
 
 **"Can I use multiple accounts?"**
-> Yes — Clave supports multiple accounts, and with clients that support our multi-account pairing (Spectr today), you pair once and sign in with all your accounts in a single flow. With other clients, you pair each account separately. Either way, every key stays on your phone.
+> Yes — Clave supports multiple accounts, and with clients that support our multi-account pairing (Spectr today, testable at https://jank.army), you pair once and sign in with all your accounts in a single flow. With other clients, you pair each account separately. Either way, every key stays on your phone.
 
 **"It's not working / pairing fails / requests time out."**
 > Sorry about that — two quick things to try: (1) if the app and Clave are on the same iPhone, pair using Clave's bunker code rather than the app's QR/URI — same-device pairing the other way is unreliable on iOS, not just for us. (2) Make sure notifications are enabled for Clave. If it's still stuck, would you open an issue here so we can dig in? github.com/DocNR/clave/issues — include the client name and what you saw.
@@ -74,7 +74,7 @@ Use these as written or lightly adapted. Where a template says **[escalate]**, s
 > If they report back that it still fails, or the question gets technical: **[escalate]**.
 
 **"Is it safe? Has it been audited?"**
-> It's open source (MIT) and had a full security audit before the public beta, with ongoing automated checks. That said — it's a **beta**, which is why we ask testers to use a throwaway key, not their main one. We'd rather under-promise here.
+> It's open source (MIT), has had an internal security audit and automated weekly checks, and has been in real-world use for months. An *independent third-party* audit is on the roadmap — it costs real money and time, so we're not going to claim it's done before it is. Honest version: Clave holds your key like any signer does; the win is that it's one app holding it instead of a dozen apps you've pasted your nsec into. We'd rather tell you the trade-off than promise it's bulletproof.
 
 **"When is it on the App Store?" / "When will feature X ship?"**
 > No date to announce — it's on TestFlight while we work through the beta. Follow here and you'll see it the moment that changes.
@@ -84,7 +84,7 @@ Use these as written or lightly adapted. Where a template says **[escalate]**, s
 > Android already has a great signer — Amber. Clave exists because iOS didn't have an equivalent: iOS's background restrictions needed a different architecture (push-based wake-up). One platform, done well.
 
 **"Can I use my real/main nsec?"**
-> Please don't yet — Clave is in beta, and we ask all testers to use a throwaway key. When we're confident enough to change that advice, it'll be announced clearly.
+> You can. The way to think about it: putting your key in Clave deserves the same caution you'd give any app you trust with your nsec — the difference is Clave is *one* place holding it instead of every client you've ever pasted your key into. That's the whole point of a signer: shrink your key's exposure from many apps down to one. It's still TestFlight beta and an independent audit is still on the roadmap, so go in informed. If you're cautious, starting with a secondary key is totally reasonable — just not something we'll scold you about.
 
 **"What data do you collect?"**
 > The proxy stores which pubkeys have a registered device token, and sees when an encrypted request arrives for one. It can't read request contents (end-to-end encrypted) and holds no keys. There are no analytics or trackers in the app. The full security model is public: github.com/DocNR/clave#security-model
@@ -122,17 +122,17 @@ Maintainer contact: _(fill in: Nostr npub + a faster back-channel, e.g. Signal/S
 
 ## Ready-to-post library
 
-Use as-is or lightly adapted. Recruitment posts (marked ⚠️) must keep the throwaway-key line word-for-word.
+Use as-is or lightly adapted. Recruitment posts (marked ⚠️) should keep the "still beta / informed-choice" framing — don't strip the caveat down to a bare "try it," and don't inflate it into a security guarantee.
 
 1. > Your Nostr key isn't a password. Passwords get reset; your nsec can't be. Every app you paste it into is another copy of the one secret you can never change. That's the problem remote signers exist to fix.
 
 2. > Think of Clave as a notary living in your iPhone. Apps bring documents to be stamped — the notary checks who's asking, stamps it, hands it back. Nobody ever borrows the stamp. 🔏
 
-3. ⚠️ > Clave is in open beta on TestFlight — an iOS signer that keeps your Nostr key in the Keychain while your apps sign through it. **It's beta: please use a throwaway key, not your main nsec.** Link in profile.
+3. ⚠️ > Clave is in open beta on TestFlight — an iOS signer that keeps your Nostr key in the Keychain while your apps sign through it. Think of it the way you'd think about any app you trust with your nsec, except this one replaces the dozen others holding copies. Still beta, independent audit on the roadmap — go in informed. Link in profile.
 
 4. > "Doesn't the push server see my stuff?" It sees that an encrypted request arrived for you. It can't read it, can't sign anything, never touches a key. We'd rather explain the trade-off than pretend there isn't one. Full security model is public: github.com/DocNR/clave#security-model
 
-5. > Android has had this for years: Amber holds your key, every app signs through it. Clave is that, for iOS — built on push notifications because iOS kills background apps. Same open standard (NIP-46), so the ecosystem works across both.
+5. > Android has had this for years: Amber holds your key, every app signs through it via NIP-55 intents. iOS has no equivalent — app-to-app hand-offs are unreliable and background apps get suspended — so Clave does the same job a different way: a push notification wakes a tiny signing extension. Same open standard (NIP-46), so the ecosystem works across both.
 
 6. > Pairing tip: if your Nostr app and Clave are on the same iPhone, use Clave's bunker code (Connect → copy/QR) instead of pasting the app's URI into Clave. Same-device pairing the other direction fights iOS itself — bunker flow sidesteps it.
 
@@ -145,19 +145,21 @@ Use as-is or lightly adapted. Recruitment posts (marked ⚠️) must keep the th
 
 10. > What's NIP-46, in one breath: an open standard where apps ask a separate signer for signatures instead of holding your key themselves. Clave on iOS, Amber on Android, others in browsers — one standard, your key in one place.
 
-11. > Open source, MIT, audited before public beta, weekly automated security checks. Not because that makes it perfect — because you shouldn't have to take our word for any of this. github.com/DocNR/clave
+11. > Open source, MIT, internally audited, weekly automated security checks — and an independent third-party audit on the roadmap. We tell you exactly where that stands because you shouldn't have to take our word for any of it. github.com/DocNR/clave
 
-12. ⚠️ > Testers wanted: Clave is verified working with Nostur, Primal (web), Coracle, Jumble, noStrudel, Spectr, fevela.me, zap.cooking, and YakiHonne. Pick your favorite, pair it, try to break it, tell us. **Beta — throwaway key only, please.**
+12. ⚠️ > Testers wanted: Clave is verified working with Nostur, Primal (web), Coracle, Jumble, noStrudel, Spectr, fevela.me, zap.cooking, and YakiHonne. Pick your favorite, pair it, try to break it, tell us what happens. Still TestFlight beta — go in informed, and if you're cautious, a secondary key is a fine way to start.
 
-13. > One pairing, all your accounts. Clave's multi-account flow lets you connect a client once and sign in with every identity you run — work npub, personal npub, project npub — each key separate, none of them ever leaving your phone. Live today in Spectr.
+13. > One pairing, all your accounts. Clave's multi-account flow lets you connect a client once and sign in with every identity you run — work npub, personal npub, project npub — each key separate, none of them ever leaving your phone. Live today in Spectr (https://jank.army).
 
 ## ⏸️ On hold — do not post until the maintainer explicitly says go
 
-The "throwaway key only" guidance is expected to soften as the beta matures. When (and only when) the maintainer gives the go-ahead, this is the transition announcement — until then, every caveat in this playbook stays exactly as written:
+The next big trust milestone is the **independent third-party security audit** (on the roadmap; it depends on funding and time). When — and only when — that audit completes and the maintainer gives the go-ahead, this is the announcement. Until then, never imply the third-party audit has happened.
 
-> Update on key guidance: since launch we've asked beta testers to use a throwaway key. As of build ___, with [audit/milestone — maintainer fills in], we're comfortable saying Clave is ready for daily-driver use. If you've been waiting to bring your main npub — this is the post. As always: your key never leaves your phone, and the code is open for anyone to verify. github.com/DocNR/clave
+> Big one: Clave has now completed an independent third-party security audit by [firm — maintainer fills in]. The report is public at [link]. Open source from day one, internally audited, in real-world use for months, and now externally reviewed too. Your key has always stayed on your phone — now there's one more set of eyes confirming the how. github.com/DocNR/clave
 
-After it's posted, the maintainer will tell you which FAQ replies and library posts to update — don't edit them yourself.
+After it's posted, the maintainer will tell you which FAQ replies and library posts to update (the "independent audit on the roadmap" wording becomes "independently audited") — don't edit them yourself.
+
+> **Note on key guidance:** the earlier "throwaway key only" rule has been retired. Current guidance is the informed-choice framing throughout this doc — Clave holds your real key like any signer, the benefit is one attack surface instead of many. If the maintainer ever wants to tighten this back up (e.g. a security concern surfaces), that's a 🔴 red-zone change — don't soften or harden the key messaging on your own initiative.
 
 ## Weekly rhythm (suggested)
 

@@ -6,12 +6,14 @@ _Audience: maintainer. Companion docs: [talking-points.md](talking-points.md) (m
 
 In priority order:
 
-1. **Grow the TestFlight beta** with the right testers — people who understand "throwaway nsec only" and will file useful reports.
+1. **Grow the TestFlight beta** with the right testers — people who understand the trade-off (one signer holding your key beats N clients holding copies) and will file useful reports.
 2. **Educate on NIP-46 / key hygiene** so the market for a signer exists. Most Nostr users still paste their nsec into clients; they don't know there's a problem to solve.
 3. **Recruit client developers** — every row added to `docs/nip46-compatibility.md` is worth more than a hundred likes. The `accounts=multi` extension also needs client adoption before the NIP draft.
-4. **Build trust in the security posture** by being radically honest: open source, audited, but beta — and the proxy's metadata visibility stated plainly.
+4. **Build trust in the security posture** by being radically honest: open source, internally audited (independent third-party audit on the roadmap), in real-world use for months, still TestFlight beta — and the proxy's metadata visibility stated plainly.
 
-Explicit non-goal right now: mass-market growth. Clave is beta and pinned to one relay for bunker flow; a viral spike of normies pasting their main nsec in would be a disaster, not a win.
+Explicit non-goal right now: mass-market growth. Clave is still beta and pinned to one relay for bunker flow; chasing a viral spike of non-technical users before the App Store release and the third-party audit would outrun what the infrastructure and support can absorb.
+
+Note on key guidance: the messaging across these docs has moved off the old "throwaway key only" rule to an **informed-choice framing** — Clave holds your real key like any signer does, and the win is one attack surface instead of many. Recruitment posts still name the honest caveats (beta, independent audit pending); they just no longer scold testers into a throwaway key.
 
 ## Channels
 
@@ -56,13 +58,13 @@ Already in place: brand npub, public TestFlight invite link, clave.casa as the l
 
 **Week 1 — foundation.** Set up the volunteer's Clave pairing to the brand npub (the dogfood story above). Publish a pinned "what is Clave" thread (talking-points doc has the copy). Volunteer practices with 2–3 education posts.
 
-**Week 2 — beta recruitment.** TestFlight call-to-action posts — every single one carries the throwaway-nsec caveat, no exceptions. Lead with the breadth of the verified-client list (nine clients people actually use). Short screen recording of bunker pairing → first signed note.
+**Week 2 — beta recruitment.** TestFlight call-to-action posts — each one carries the honest caveats (still beta, independent audit on the roadmap) in the informed-choice framing, not a throwaway-key scold. Lead with the breadth of the verified-client list (nine clients people actually use). Short screen recording of bunker pairing → first signed note.
 
 **Week 3 — multi-account.** Headline campaign: "one pairing, all your accounts." Demo video of the multi-account picker with Spectr; consumer posts from the library; maintainer publishes the `accounts=multi` write-up for devs (Stacker News or GitHub Discussion) and the volunteer amplifies.
 
 **Week 4 — education series + dev outreach.** "Key hygiene week": one post per day on a single idea (key in N apps = N attack surfaces; keys can't rotate; what a remote signer is; what the proxy can and can't see; how to check per-client permissions). Close with the interop-issue call: "found a client that doesn't pair? Tell us, we triage signer-side vs client-side honestly" — the four-bucket triage taxonomy is genuinely differentiating; most projects blame the other side, you publish the analysis.
 
-After day 30: settle into the steady cadence, one campaign per month (next candidates: per-client demo series, NIP-draft filing for `accounts=multi`, the main-key-readiness announcement when the maintainer calls it, self-hosting story when `docs/SELF-HOSTING.md` lands).
+After day 30: settle into the steady cadence, one campaign per month (next candidates: per-client demo series, NIP-draft filing for `accounts=multi`, the independent third-party audit announcement when it completes, self-hosting story when `docs/SELF-HOSTING.md` lands).
 
 ## What success looks like
 
@@ -75,7 +77,7 @@ Track monthly, keep it lightweight:
 
 ## Risks this plan manages
 
-- **Beta over-promotion** → every recruitment post carries the throwaway-nsec caveat; growth is deliberately capped to testers.
-- **Security-claim inflation** → the talking-points doc has an explicit "never say" list; volunteer escalates all security questions beyond the approved FAQ.
+- **Beta over-promotion** → recruitment posts carry the honest caveats (still beta, independent audit on the roadmap) in informed-choice framing; growth is deliberately paced ahead of the App Store release.
+- **Security-claim inflation** → the talking-points doc has an explicit "never say" list (including: never imply the independent third-party audit has happened, never give a flat "safe for your main key" guarantee); volunteer escalates all security questions beyond the approved FAQ.
 - **Vulnerability reports arriving via social DMs** → playbook has a verbatim redirect-to-SECURITY.md template; volunteer never discusses publicly.
 - **Volunteer account compromise** → volunteer never holds the brand key (Clave pairing model); blast radius is unpair-and-done.
