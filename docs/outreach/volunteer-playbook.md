@@ -151,6 +151,15 @@ Use as-is or lightly adapted. Recruitment posts (marked ⚠️) should keep the 
 
 13. > One pairing, all your accounts. Clave's multi-account flow lets you connect a client once and sign in with every identity you run — work npub, personal npub, project npub — each key separate, none of them ever leaving your phone. Live today in Jank (https://jank.army).
 
+14. > "But where does my key actually go?" — the question we get most about Clave. So we wrote a plain-language FAQ. A preview:
+   >
+   > • Is my key on your server? No. Your nsec never leaves your iPhone. Our server just nudges your phone "you've got a request" — it can't read anything or sign as you.
+   > • Why iOS only? Android has Amber; iOS had no equivalent, because Apple's background rules block the way Amber works. Clave is built around them.
+   > • Should I use my main key? Your call — the honest version is in the FAQ. The short of it: it's one app holding your key instead of the dozen you've pasted it into.
+   >
+   > Full FAQ, no jargon → github.com/DocNR/clave/blob/main/FAQ.md
+   _(Swap the link for clave.casa/faq if/when the FAQ is hosted on the site. Shorter X variant in the chat handoff.)_
+
 ## ⏸️ On hold — do not post until the maintainer explicitly says go
 
 The next big trust milestone is the **independent third-party security audit** (on the roadmap; it depends on funding and time). When — and only when — that audit completes and the maintainer gives the go-ahead, this is the announcement. Until then, never imply the third-party audit has happened.
