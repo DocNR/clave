@@ -2,6 +2,8 @@
 
 **iOS NIP-46 remote signer. Your Nostr private key stays in the iPhone Keychain — clients sign events via encrypted push, without the app being open.**
 
+> **New to Clave?** The [FAQ](FAQ.md) answers the common questions in plain language — what it is, whether your key is safe, which clients work, and how to get started.
+
 ## What it solves
 
 Every Nostr app you use needs to sign events as you. The usual options are all bad:
