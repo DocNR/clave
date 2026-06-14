@@ -440,13 +440,26 @@ enum LightSigner {
                                                pendingRequestId: queuedRequestId,
                                                v3Kind: v3Kind, v3Scope: v3Scope)
                     logAndTrack(result: result, signerPubkey: signerPubkey, clientName: clientName)
-                    try await sendErrorResponse(
-                        requestId: requestId, error: "Permission denied — open Clave to approve",
-                        privateKey: privateKey, senderPubkeyData: senderPubkeyData,
-                        senderPubkey: senderPubkey, isNip04: isNip04,
-                        responseRelays: responseRelays,
-                        responseRelayUrl: responseRelayUrl
-                    )
+                    // NIP-46: do NOT send any response while approval is still
+                    // pending. A populated `error` field means the request
+                    // failed *terminally* — NIP-46 §"Response Events": "its
+                    // presence indicates an error with the request" — so every
+                    // compliant client (verified against nostr-tools'
+                    // BunkerSigner) rejects and stops listening the instant it
+                    // arrives. Emitting a terminal error here, at prompt-time
+                    // before the user has decided, was the low-trust signing
+                    // bug: the user's later approval had no pending request left
+                    // on the client to satisfy. Hold the request open instead —
+                    // the only non-terminal "needs approval" signals in NIP-46
+                    // are an Auth Challenge (`result: "auth_url"`) or simply no
+                    // response yet; we use the latter (in-app prompt, like Amber
+                    // / nsec.app) and respond exactly once when the user acts:
+                    //   approve → {id, result: <signed_event>}  — performApprove
+                    //             replays this event with skipProtection: true
+                    //   deny    → {id, error: "user rejected"}   — sendDenyResponse
+                    // The request is already persisted (queuePendingRequest
+                    // above), so it survives backgrounding / cold launch until
+                    // the user decides.
                     return result
                 }
             }
@@ -958,6 +971,58 @@ enum LightSigner {
             _ = try? await relay.publishEvent(event: eventDict)
             relay.disconnect()
         }
+    }
+
+    /// Send a NIP-46 rejection — `{ id, result: "", error: "user rejected" }`
+    /// — for a request the user explicitly denied in the approval UI.
+    ///
+    /// The JSON-RPC request id, sender pubkey, and encryption mode are
+    /// recovered by decrypting the stored request event (the same inspection
+    /// `peekMethod` does for an inbound 24133) because `PendingRequest`
+    /// persists only the raw, still-encrypted request event — not the inner
+    /// id the client correlates its pending request on.
+    ///
+    /// This is the *correct* use of the `error` field: it fires only after a
+    /// terminal user decision, unlike the prompt-time error removed from
+    /// `handleRequest`. Best-effort and non-throwing — a missing key, an
+    /// undecryptable payload, or a relay drop just means no rejection reaches
+    /// the client, which then falls back to its own timeout. Silence is a
+    /// spec-sanctioned outcome (NIP-46 clients hold a request pending until a
+    /// response arrives or they time out); a stray terminal error would not be.
+    static func sendRejection(
+        privateKey: Data,
+        requestEventJSON: String,
+        responseRelayUrl: String?
+    ) async {
+        guard let data = requestEventJSON.data(using: .utf8),
+              let event = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let senderPubkey = event["pubkey"] as? String,
+              let encryptedContent = event["content"] as? String,
+              let senderPubkeyData = Data(hexString: senderPubkey) else {
+            return
+        }
+        guard let plaintext = try? LightCrypto.decrypt(
+                privateKey: privateKey,
+                publicKey: senderPubkeyData,
+                payload: encryptedContent
+              ),
+              let plaintextData = plaintext.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: plaintextData) as? [String: Any],
+              let requestId = json["id"] as? String else {
+            return
+        }
+        // Respond with the same encryption family the client used (matches the
+        // detection in handleRequest above).
+        let isNip04 = encryptedContent.contains("?iv=")
+        try? await sendErrorResponse(
+            requestId: requestId,
+            error: "user rejected",
+            privateKey: privateKey,
+            senderPubkeyData: senderPubkeyData,
+            senderPubkey: senderPubkey,
+            isNip04: isNip04,
+            responseRelayUrl: responseRelayUrl
+        )
     }
 
     /// Build the `result` field for a NIP-46 `connect` ack.
