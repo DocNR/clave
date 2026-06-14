@@ -1,6 +1,6 @@
 # NIP-46 Client Compatibility (Clave)
 
-_Last updated: 2026-05-07 — statuses reflect Clave build 29 unless noted otherwise. iOS same-device timing section verified on build 66._
+_Last updated: 2026-06-14 — statuses reflect Clave build 29 unless noted otherwise. iOS same-device timing section verified on build 66._
 
 This document tracks how Nostr clients interoperate with Clave's NIP-46 signer. It is **Clave-centric**: every status row reflects what we have actually tested against Clave specifically. Other NIP-46 signers (Amber, nsec.app, etc.) may behave differently with the same client.
 
@@ -338,6 +338,7 @@ Open a PR that:
 
 | Date | Change |
 |---|---|
+| 2026-06-14 | Clave signer now reads optional client metadata (`name`/`url`/`image`) from a 4th `connect` param so `bunker://` pairings can show a real name instead of a generic label — a proposed NIP-46 extension symmetric with `nostrconnect://`. Integration details in [`docs/integrations.md`](integrations.md#client-metadata-in-bunker-connect-proposed-nip-46-extension). Reference implementations: Clave (signer) + Jank (client). |
 | 2026-05-07 | Added "iOS same-device pairing" section (recommends `bunker://` for same-device iOS, explains the nostrconnect WebSocket suspension constraint). Added "Improving post-pair delivery reliability for Clave-paired clients" section (recommends `wss://relay.powr.build/` in nostrconnect URI relay sets for client→Clave wake-up). Clave-side handshake protection in [PR #26](https://github.com/DocNR/clave/pull/26) / build 62; verified on build 66 against [noStrudel](https://nostrudel.ninja) and [Jumble](https://github.com/CodyTseng/jumble). |
 | 2026-04-29 | Initial publication. Build 29. |
 
