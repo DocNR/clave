@@ -158,6 +158,14 @@ extension AppState {
     func denyPendingRequest(_ request: PendingRequest) {
         Self.performDeny(request)
         advanceChainPosition()
+        // Tell the client its request was rejected so it shows a clean
+        // rejection instead of hanging — NIP-46 clients keep a request
+        // pending until a response arrives. Fire-and-forget so the alert
+        // chain UI doesn't block on the relay round-trip; the running app
+        // stays alive to finish the publish. (The lock-screen deny path
+        // awaits this instead — see `handlePendingApprovalAction` — because
+        // that process may be suspended before a detached send completes.)
+        Task { await Self.sendDenyResponse(request) }
     }
 
     /// Synchronously refresh `pendingRequests` from `SharedStorage`,
@@ -202,6 +210,11 @@ extension AppState {
             _ = await performApprove(request)
         case PendingApprovalCategory.denyActionId:
             performDeny(request)
+            // Awaited (not fire-and-forget) on the lock-screen path: this
+            // handler runs from AppDelegate's notification-action callback,
+            // and the process may be suspended the moment it returns, so the
+            // rejection publish has to complete before we hand control back.
+            await sendDenyResponse(request)
         default:
             break
         }
@@ -267,6 +280,38 @@ extension AppState {
 
     static func performDeny(_ request: PendingRequest) {
         performRemovePending(request)
+    }
+
+    /// Resolve the denied request's signer key and dispatch the NIP-46
+    /// `{ error: "user rejected" }` rejection on the wire. Both the in-app
+    /// deny (`denyPendingRequest`) and the lock-screen deny action funnel
+    /// through here so the rejection is identical regardless of entry point.
+    ///
+    /// Key resolution mirrors `performApprove`: prefer the request's own
+    /// `signerPubkeyHex` (so we sign as the account that received the request
+    /// even if the active account has since switched — identity must not
+    /// drift between request and response), falling back to the current
+    /// account for legacy rows. Best-effort: returns silently if the key is
+    /// unavailable, leaving the client to fall back to its own timeout.
+    static func sendDenyResponse(_ request: PendingRequest) async {
+        let signer: String
+        if !request.signerPubkeyHex.isEmpty {
+            signer = request.signerPubkeyHex
+        } else {
+            signer = SharedConstants.sharedDefaults.string(
+                forKey: SharedConstants.currentSignerPubkeyHexKey
+            ) ?? ""
+        }
+        guard !signer.isEmpty,
+              let nsec = SharedKeychain.loadNsec(for: signer),
+              let privateKey = try? Bech32.decodeNsec(nsec) else {
+            return
+        }
+        await LightSigner.sendRejection(
+            privateKey: privateKey,
+            requestEventJSON: request.requestEventJSON,
+            responseRelayUrl: request.responseRelayUrl
+        )
     }
 
     private static func performRemovePending(_ request: PendingRequest) {
