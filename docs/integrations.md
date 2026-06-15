@@ -106,6 +106,59 @@ The single-account flow is bit-preserved across the Phase 2 upgrade — clients 
 
 This extension is not yet a formal NIP. A draft will be filed after Phase 2 ships and Spectr validates end-to-end. The shape documented above is the wire contract Clave commits to; clients integrating against this doc target the production Clave protocol.
 
+## Client metadata in bunker `connect` (proposed NIP-46 extension)
+
+> **Status: proposed.** A NIP-46 PR adding this param is in review (see [Spec status](#spec-status) below). Clave's signer already reads the shape described here, so clients can adopt it now and degrade gracefully on signers that don't.
+
+In the `nostrconnect://` flow the client advertises its identity in the URI (`name`, `url`, `image`). The `bunker://` flow has no equivalent — the client only sends a `connect` request — so bunker-paired connections arrive at the signer with no name and show a generic label. This extension closes that asymmetry by letting the client attach the same three fields to its `connect` request.
+
+### Wire format
+
+Add an optional 4th parameter to the `connect` request — a JSON-stringified object mirroring the `nostrconnect://` metadata fields:
+
+```json
+{
+  "id": "<random>",
+  "method": "connect",
+  "params": [
+    "<signer_pubkey>",
+    "<secret>",
+    "<perms>",
+    "{\"name\":\"Jank\",\"url\":\"https://jank.army\",\"image\":\"https://jank.army/icon.png\"}"
+  ]
+}
+```
+
+- **`params[3]` is a JSON _string_** (`JSON.stringify({...})`), not a nested object. Every element of `params` must stay a string — Clave decodes `params` as `string[]` and discards the whole array if any element is an object.
+- **Keys are `name`, `url`, `image`** — the same names as the `nostrconnect://` query parameters (note `image`, not `imageURL`/`picture`).
+- All three fields optional; omit them or send empty strings (Clave treats empty strings as absent).
+- **Keep the perms slot.** To send metadata without requesting permissions, pass an empty string for `params[2]` so metadata occupies the fourth position.
+
+### Signer behavior (Clave)
+
+- Clave captures the metadata into the connection's `(name, url, image)` **at first pair** and uses `name` as the connection label.
+- **Re-pair does not overwrite** stored metadata — the in-app connection name is user-editable and is the source of truth, so a reconnect can't clobber a rename. To refresh metadata, unpair and pair again.
+- The metadata is **client-supplied and unauthenticated** (the client pubkey in a bunker pairing is an ephemeral throwaway). Clave treats it as a display hint only and never uses it for trust / auto-sign decisions; clients should expect any signer to do the same.
+
+### Backwards compatibility
+
+| Signer | Client `connect` | Result |
+|---|---|---|
+| Clave (with this change) | 3-param `connect` | Today's behavior — connection is unnamed until the user labels it |
+| Clave (with this change) | 4-param `connect` | Connection labeled with the client's `name` at first pair |
+| Signers without this change | 4-param `connect` | Extra param ignored; pairing proceeds normally |
+
+The change is additive and adds no round-trip — the metadata rides on the existing `connect` request, so it can't extend or stall the handshake.
+
+### Reference implementations
+
+- **Signer:** Clave (this repo) — `Shared/LightSigner.swift`, function `extractConnectMetadata`.
+- **Client:** Jank (https://jank.army).
+
+### Spec status
+
+Filed as a proposed NIP-46 extension (optional 4th `connect` param). Until it merges, the shape above is what Clave's signer reads; it may change to track review feedback, but any change stays backward-compatible — unknown or extra params are ignored on both sides.
+
 ## Reporting interop issues
 
 For questions or compatibility issues, see `docs/nip46-compatibility.md` for known per-client quirks, or open a NIP-46 interop issue:

@@ -171,8 +171,13 @@ enum LightSigner {
         let v3Kind: UInt32? = isV3Method && params.count > 1 ? UInt32(params[1]) : nil
         let v3Scope: String? = isV3Method && params.count > 2 ? params[2] : nil
 
-        // Extract client name for connect
-        let clientName = (method == "connect" && !params.isEmpty) ? extractConnectName(params: params) : nil
+        // Extract client metadata for connect. The optional 4th connect param
+        // is a JSON-stringified {name, url, image} object mirroring the
+        // nostrconnect:// URI metadata fields — see extractConnectMetadata.
+        let connectMetadata = (method == "connect" && !params.isEmpty)
+            ? extractConnectMetadata(params: params)
+            : ConnectMetadata.empty
+        let clientName = connectMetadata.name
 
         // --- Per-client permission checks ---
         if method == "connect" {
@@ -232,9 +237,9 @@ enum LightSigner {
                         trustLevel: .medium,
                         kindOverrides: [:],
                         methodPermissions: ClientPermissions.defaultMethodPermissions,
-                        name: clientName,
-                        url: nil,
-                        imageURL: nil,
+                        name: connectMetadata.name,
+                        url: connectMetadata.url,
+                        imageURL: connectMetadata.imageURL,
                         connectedAt: Date().timeIntervalSince1970,
                         lastSeen: Date().timeIntervalSince1970,
                         requestCount: 0,
@@ -262,6 +267,12 @@ enum LightSigner {
                     )
                     logger.notice("[LightSigner] New client paired with valid secret (row created, relay=\(SharedConstants.relayURL, privacy: .public))")
                 } else {
+                    // Re-pair of an existing (signer, client) row: deliberately
+                    // do NOT overwrite name/url/imageURL from connectMetadata.
+                    // The in-app connection name is user-editable and is the
+                    // source of truth; a reconnect must not clobber a rename.
+                    // First-pair metadata is captured above when the row is
+                    // created.
                     logger.notice("[LightSigner] Existing client re-paired with valid secret")
                 }
                 _ = SharedStorage.rotateBunkerSecret(for: signerPubkey)
@@ -885,10 +896,53 @@ enum LightSigner {
         return kind
     }
 
-    private static func extractConnectName(params: [String]) -> String? {
-        // connect params: [pubkey, secret?, perms?] — name might be in the URI or absent
-        // The client name comes from the nostrconnect URI which isn't in params directly
-        nil
+    /// Client-supplied metadata from a NIP-46 `connect` request.
+    ///
+    /// All fields optional and **unauthenticated** — the client pubkey in a
+    /// bunker pairing is an ephemeral throwaway, so a caller can claim any
+    /// `name`/`url`/`image`. Treat as a display hint only: the user-editable
+    /// connection name in Clave's UI is the source of truth and overrides
+    /// this. Never gate trust/auto-sign decisions on these values.
+    struct ConnectMetadata {
+        let name: String?
+        let url: String?
+        let imageURL: String?
+
+        static let empty = ConnectMetadata(name: nil, url: nil, imageURL: nil)
+    }
+
+    /// Parse the optional client-metadata object from a `connect` request.
+    ///
+    /// Standard NIP-46 connect params are
+    /// `[remote-signer-pubkey, optional-secret, optional-perms]`. This reads an
+    /// OPTIONAL 4th param: a JSON-stringified object
+    /// `{"name": "...", "url": "...", "image": "..."}` mirroring the three
+    /// metadata fields a client already puts in a `nostrconnect://` URI (see
+    /// `NostrConnectParser`). It closes the asymmetry where bunker pairings
+    /// arrive nameless because the bunker handshake gives the client nowhere
+    /// to describe itself.
+    ///
+    /// The 4th param is a JSON *string*, not a nested object, so the whole
+    /// params array stays `[String]` on the wire. A nested object would fail
+    /// the `as? [String]` decode in `handleRequest`, dropping the metadata
+    /// (and anything after it).
+    ///
+    /// Fully backward compatible: clients that send the standard 3 params (the
+    /// vast majority today) yield `.empty`, preserving the prior nameless
+    /// behavior. Empty or malformed JSON degrades to `.empty` rather than
+    /// throwing. The `image` key maps to `imageURL` to match the
+    /// nostrconnect:// URI parameter name.
+    static func extractConnectMetadata(params: [String]) -> ConnectMetadata {
+        guard params.count >= 4, !params[3].isEmpty,
+              let data = params[3].data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return .empty
+        }
+        func field(_ key: String) -> String? {
+            guard let value = obj[key] as? String, !value.isEmpty else { return nil }
+            return value
+        }
+        return ConnectMetadata(name: field("name"), url: field("url"), imageURL: field("image"))
     }
 
     /// `signerPubkey` is threaded from `handleRequest` so the activity entry
