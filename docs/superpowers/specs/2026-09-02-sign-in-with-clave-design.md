@@ -362,25 +362,30 @@ popup, NOT a banner — the phone must be locked/backgrounded *before* `sign_eve
 exercise the lock-screen leg; (c) the proxy on the Dell was verified healthy during the runs
 (`clave-proxy` up, every push `[APNs] 200 OK`), ruling the push pipeline out as a cause.
 
-**NEW on-device finding (contradicts the spec's "zero iOS diffs" premise for existing-user
-Flow A) — the Universal Link entry path does not surface the approval on the shipped build.**
-Tapping `https://clave.casa/connect/?uri=<nc>` (from the Camera app) **opened Clave but no
-approval sheet appeared and the bell inbox stayed empty** — reproduced both cold-launch and
-warm (Clave backgrounded). The *same* inner `nostrconnect://` URI, scanned via Clave's in-app
-Connect scanner, completes the full handshake (that is how test 2 passed). The pure routing +
-parser handle the exact link correctly when exercised directly (compiled `DeeplinkRouter` +
-`NostrConnectParser` off the branch: `accountCount=1 → .approve`, `2 → .pickAccount`,
-`0 → .ignore`; parser returns all fields). So the defect is in the **on-device delivery of the
-Universal Link into the routing chain** (`onOpenURL` → `.deeplinkReceived` post → AppState
-observer → `pendingNostrconnectURI` → HomeView `.onChange` → sheet), **not** in the parser or
-router. Root cause not yet isolated on-device (candidates: AASA association for `/connect` on
-the deployed clave.casa vs. the `onOpenURL`/NotificationCenter delivery chain). **Impact:** the
-May-2026 "Universal Link handoff" that Flow A step 1 and Flow C step 2 both depend on appears
-broken in production; the DeeplinkRouter stash-and-replay work (Phase 1) shares this exact
-delivery chain and must root-cause it (capture the `[Deeplink] received` os_log line on device,
-or reproduce via the iOS Simulator with `xcrun simctl openurl`). This is a **repair**, not a
-fork, and does **not** block STEP 2 (the probe did not prompt), but it is now the top on-device
-gate for Phase 1. Filed as a distinct BACKLOG item under the gates entry.
+**NEW finding — the deeplink→ApprovalSheet path drops the sheet on a presentation race; this
+was the "Universal Link opens but no ApprovalSheet" symptom, and it is now ROOT-CAUSED + FIXED
+(2026-09-02, on the Phase-1 branch).** The symptom (tapping `https://clave.casa/connect/?uri=`
+opens Clave but no approval sheet appears, inbox empty) was first read as a *delivery* failure.
+Instrumented on the iOS Simulator (`xcrun simctl openurl` of the `clave://connect?uri=` form
+into a freshly-built app) it is NOT delivery: the `[Deeplink] received` os_log fires, the router
+returns the right outcome, `pendingNostrconnectURI` is set, and `deeplinkApprovalURI`
+(`.sheet(item:)` binding) is set — all confirmed in the logs — yet UIKit silently **drops the
+sheet presentation** because the binding is set while another presentation is animating in (the
+cold-launch onboarding→MainTabView root swap, or the launch-time notification-permission alert).
+Once the binding is left non-nil with no visible sheet, later triggers no-op. **Fix:** defer the
+`.sheet(item:)` assignment past the transition (`HomeView.presentPendingConnectIfNeeded` →
+`DispatchQueue.main.asyncAfter(+0.6s)`), plus drain `pendingNostrconnectURI` in `onAppear` as
+well as `onChange` (a value set before the view mounts never fires `.onChange`). **This fix
+covers both the new-user replay AND the pre-existing shipped Universal-Link existing-user flow**
+— same code path. Verified end-to-end on the sim: `clave://connect` cold-launch → 0-account
+stash → onboarding banner (domain-first "clave.casa", "Signin PoC · unverified") → Generate Key
+→ promote → ApprovalSheet presents → Approve → partner-sim received **connect ack + promptless
+resume probe + verified kind:1 signature**. (Note: the sim cannot receive real APNs, so the
+lock-screen background-signing leg is not exercised there — that was already verified on the
+shipped build on a real phone in test 2; the sim's foreground relay subscription surfaced the
+sign request in-app instead.) The AASA-association hypothesis is discarded. Remaining real-
+device confirmation: the same flow on a physical phone (to cover APNs + the actual `https`
+Universal Link, which `simctl` routes as a scheme).
 
 Remaining device gates (unchanged, still open): test 2's zero-account stash→generate/import→
 replay path (needs the Phase-1 iOS diff), partner-killed-during-install + re-fire re-ack timing

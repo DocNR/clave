@@ -435,9 +435,19 @@ struct HomeView: View {
     /// `.onChange` (catches a value set while mounted). Presenting clears the
     /// value so the two callers can never double-present the same URI.
     private func presentPendingConnectIfNeeded() {
-        if let uri = appState.pendingNostrconnectURI {
+        guard let uri = appState.pendingNostrconnectURI else { return }
+        // Consume immediately (single replay) so onAppear + onChange can't
+        // both schedule a present.
+        appState.pendingNostrconnectURI = nil
+        // Defer the .sheet(item:) set past the current view transition / any
+        // competing modal. Setting the binding while another presentation is
+        // animating in (the cold-launch onboarding→MainTabView root swap, or
+        // the launch-time notification-permission alert) is silently dropped
+        // by UIKit — this was the pre-existing "Universal Link opens but no
+        // ApprovalSheet" bug. Letting the hierarchy settle first makes the
+        // present reliable (verified on-device via the new-user replay).
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
             deeplinkApprovalURI = uri
-            appState.pendingNostrconnectURI = nil
         }
     }
 
