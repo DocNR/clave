@@ -407,8 +407,14 @@ link, all accounts deleted first, cold launch):** onboarding caller banner → G
 promoted replay → ApprovalSheet → Approve; partner-sim received **connect ack (+61.9s) from a
 brand-new signer `14dbcb4f…`, promptless `get_public_key` in 1.6s, and a verified kind:1
 signature in 13.5s**. That is week-1 test 2's on-device stash→generate→replay→approve gate,
-closed — the full Conduit flow works on the shipped platform. Still open on-device: only the
-APNs lock-screen leg on the TestFlight build carrying both fixes (test 3 of the device run).
+closed — the full Conduit flow works on the shipped platform. **APNs lock-screen leg — PASSED on the same TestFlight 1.1 (104) build (production APNs):**
+fresh pairing at Low Trust → phone locked immediately → `sign_event` arrived as a **lock-screen
+banner** → long-press Approve → partner-sim received the verified kind:1 signature (18.5s, the
+human approve time); ack +59.6s, promptless probe 1.3s. With that, **every on-device gate for
+the Phase-1 stash-and-replay item is closed**: existing-user via the real link, zero-account
+new-user via the real link, and lock-screen signing on a build carrying both fixes. What
+remains for week 1 is outside this item: test 3 (SKOverlay + `canOpenURL` from a scratch
+partner app) and test 4 (Smart App Banner `app-argument` on the real fallback page).
 
 Remaining device gates (unchanged, still open): test 2's zero-account stash→generate/import→
 replay path (needs the Phase-1 iOS diff), partner-killed-during-install + re-fire re-ack timing
