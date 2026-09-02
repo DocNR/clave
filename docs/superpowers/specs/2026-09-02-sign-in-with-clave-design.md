@@ -16,8 +16,10 @@ The concept has been accumulating across both repos since May. Shipped building 
   `nostrconnect://` scheme squat. Fallback page renders QR + install links when Clave is absent.
 - **`clave-casa/docs/integrations.md`** — the plugin v0: a 5-line "Connect with Clave" button
   recipe (vanilla/React/Svelte/Vue).
-- **Protocol extensions**: `accounts=multi` (build ≥80) and the bunker-connect client-metadata
-  4th param `{name,url,image}` (build ~100) — a partner session can carry its own name/icon.
+- **Protocol extensions**: `accounts=multi` (build ≥85 — integrations.md says "build 80", but
+  pbxproj history shows the landing build was 85; fix that doc in the Phase-1 doc pass) and the
+  bunker-connect client-metadata 4th param `{name,url,image}` (build ~100) — a partner session
+  can carry its own name/icon.
 - **Lock-screen Face-ID Approve** (`PENDING_SIGNING_REQUEST` category, `ClaveApp.swift`): the
   Approve action deliberately omits `.foreground` and signs in the background, so post-pairing
   requests are approved from a banner **over the foregrounded partner app** — no app switch.
@@ -85,7 +87,8 @@ ApprovalSheet and the onboarding banner can show who is asking.
   Swift recipe (package later), button assets in `static/brand/`, and an integrations.md
   rewrite that leads with lock-screen approve and the rust-nostr ≤0.44.2 secret-echo warning.
 - **Dissolve, don't solve, the deferred-deep-link problem**: the SDK minted the URI, so it
-  re-mints a fresh secret on every retry/foreground. Nothing must survive the install trip.
+  re-mints a fresh secret on every retry/foreground. On the SDK path nothing must survive the
+  install trip; the `/connect` fallback page is the non-SDK degradation and stashes tab-locally.
 - **Keep the privacy promises**: no broker service, no attribution, no analytics, static-only
   clave.casa, everything device-local.
 
@@ -114,7 +117,7 @@ ApprovalSheet and the onboarding banner can show who is asking.
    `callback=`), persists the client keypair, opens the Universal Link.
 2. Clave: 1 account → ApprovalSheet (already renders caller branding); 2+ → account picker.
 3. Approve → handshake in the existing `UIBackgroundTask` → `callback=` opens the partner app
-   (foreground approvals only), or the user swipes back.
+   (foreground approvals only; `callback=` is Phase 2 — in Phase 1 the user swipes back).
 4. On foreground the SDK reconnects and, if no ack was caught, sends the **resume probe**
    (below). Session live. All later signatures: lock-screen Approve over the partner app.
 
@@ -128,23 +131,33 @@ ApprovalSheet and the onboarding banner can show who is asking.
 
 1. Tap "Sign in with Clave" → SDK probes `canOpenURL("clave://x")`. Not installed →
    **`SKOverlay.AppConfiguration`** presents Clave's App Store sheet *inside the partner app*
-   (validated: SKOverlay works from a native app; it does not work from Safari). EU storefront
-   (`SKStorefront` check) → TestFlight/web fallback until the listing is live there.
-2. Install completes; user dismisses the overlay — they never left the partner app. SDK
-   detects installability (or simply on next foreground) and **re-mints a fresh URI** — new
-   secret, same persisted client keypair (protects the 5-clients-per-account cap) — and opens
-   the Universal Link. No state needed to survive the install: the partner app is the durable
-   anchor.
+   (per Apple's documented SKOverlay contract — native apps only, not invocable from Safari;
+   on-device confirmation is week-1 test 3). EU storefront (`SKStorefront` check) →
+   TestFlight/web fallback until the listing is live there.
+2. Install completes; user dismisses the overlay — they never left the partner app. On next
+   foreground the SDK **re-mints a fresh URI** — new secret, same persisted client keypair
+   (protects the 5-clients-per-account cap) — and opens the Universal Link, *regardless of the
+   `canOpenURL` probe result* (the probe is an optimization; whether it flips to true
+   immediately post-install without a partner relaunch is part of week-1 test 3). No state
+   needed to survive the install: the partner app is the durable anchor.
 3. Clave cold-launches with 0 accounts. `DeeplinkRouter` returns **`.stashForOnboarding`**
    (replacing `.ignore`); AppState persists the parsed URI (UserDefaults, scrubbed after
-   replay, TTL = URI `expiry` or 10 min); `OnboardingView` shows a caller banner — "*Conduit*
-   wants to connect — create or import your key to continue" — rendered domain-first from URI
-   metadata.
+   replay; TTL: Phase 1 always 10 min, URI `expiry=` once Phase 2 lands); `OnboardingView`
+   shows a caller banner — "*Conduit* wants to connect — create or import your key to
+   continue" — under the same domain-first + unverified-metadata rendering rules as
+   ApprovalSheet (brand-new users are the most phishable audience). Stash rules: **single-slot,
+   last-writer-wins** — a newer connect URI replaces and scrubs an older one (secrets are
+   single-use; the loser's partner retry covers it). An expired stash is scrubbed *without*
+   replay at promotion time, and the banner is removed (or swapped to "Return to *Conduit* and
+   tap Sign in again") on expiry.
 4. User taps **Generate New Key** *or pastes an nsec into* **Import Existing Key** (both
    already exist on onboarding step 1). Either way `addAccount` sets `currentAccount`,
    ContentView flips to MainTabView, and the stash is promoted into `pendingNostrconnectURI` —
-   the verified HomeView replay presents ApprovalSheet with the partner's branding.
-5. Approve → callback/swipe back → SDK resume probe → live session.
+   the verified HomeView replay presents ApprovalSheet with the partner's branding. The replay
+   always pairs the account that triggered promotion (`currentAccount` as set by that
+   `addAccount`); it never re-enters the 2+-accounts picker decision, regardless of how many
+   accounts exist by replay time.
+5. Approve → callback (Phase 2) or swipe back → SDK resume probe → live session.
 6. **Profile leg, gated by how the key arrived** (see below).
 7. Degraded path (partner app killed during install, secret expired, user dawdled): the SDK
    treats ack-timeout as *retry, not error* — the second tap re-mints and is now the fast
@@ -167,8 +180,13 @@ of generate vs import — but it inverts the profile leg:
   offer profile setup when none is found; merge-don't-replace when writing over an existing
   event; tolerate profile-less pubkeys indefinitely.
 
-Clave can gate this precisely because `addAccount` knows the creation source; the stash carries
-a `createdDuringFlow` flag set only by the onboarding generate path.
+Clave can gate this precisely because `addAccount` knows the creation source. Normatively:
+`createdDuringFlow` is a Bool on the promoted `pendingNostrconnectURI` payload, **not persisted
+independently** — `addAccount` sets it true at promotion time iff the creation source is the
+onboarding Generate path (false for import and for every non-onboarding route), and
+ApprovalSheet reads it from the in-memory replay object. It dies with the replay: on an SDK
+retry after a failed first replay, write-set consent is NOT offered (accepted loss — the
+partner falls back to individual protected-kind prompts per the fetch-kind:0-first contract).
 
 ## Component changes
 
@@ -178,11 +196,11 @@ a `createdDuringFlow` flag set only by the onboarding generate path.
 |---|---|---|
 | `.stashForOnboarding` outcome replaces the 0-account `.ignore`; parse `clave://connect?uri=` (first handler for the reserved scheme) | `Shared/DeeplinkRouter.swift` + `DeeplinkRouterTests` | S |
 | Persist stash; promote into `pendingNostrconnectURI` when `currentAccount` becomes non-nil; scrub after replay | `AppState.swift`, `AppState+NostrConnect.swift` | S |
-| Caller banner on onboarding step 1 ("create or import your key to continue"), domain-first | `OnboardingView.swift` | S |
+| Caller banner on onboarding step 1 ("create or import your key to continue") — same domain-first + unverified-metadata rules as ApprovalSheet | `OnboardingView.swift` | S |
 | Domain-first ApprovalSheet rendering: registrable domain largest; self-asserted name/icon below with "unverified" treatment; short client-pubkey fingerprint | `ApprovalSheet.swift` | S |
 | `callback=` support: display target in ApprovalSheet; open only after foreground approval; https callbacks should match the metadata `url` registrable domain; never on denial; never from lock-screen signing | `NostrConnectParser.swift`, `ApprovalSheet.swift` | M |
-| Idempotent connect **re-ack window**: a connect re-sent with identical client pubkey + secret within ~10 min of successful pairing gets a silent duplicate ack (already-paired-only; exact match; no new prompt) | `LightSigner.swift` (+ NSE path) | M |
-| Signup write-set consent, gated on `createdDuringFlow` | `ApprovalSheet.swift` | M |
+| Idempotent connect **re-ack window**: a connect re-sent with identical client pubkey + secret within ~10 min of successful pairing gets a silent duplicate ack (already-paired-only; exact match; no new prompt). Triggers only on same-URI redelivery — the `/connect` fallback page's stashed-URI "Open Clave" re-fire, OS redelivery of the same link, and non-SDK clients that re-send connect on reconnect. SDK clients never hit it (fresh secret per retry); their recovery is the resume probe alone | `LightSigner.swift` (+ NSE path) | M |
+| Signup write-set consent, gated on `createdDuringFlow`. The grant is **one-shot and bounded**: it authorizes at most one kind:0 and one kind:10002 publish within ~10 min of pairing; afterwards both kinds revert to protected/individual prompts for this session like any other | `ApprovalSheet.swift` | M |
 | `session_terminated` publish on unpair/delete (web receiver already shipped) | `LightSigner.swift` / unpair paths | M |
 
 ### clave.casa
@@ -193,11 +211,16 @@ a `createdDuringFlow` flag set only by the onboarding generate path.
   `clave://connect?uri=` button (same-domain Universal Links deliberately don't fire, and JS
   can't re-fire one), Smart App Banner meta with `app-argument` templated before parse (it
   delivers only when installed — i.e., it is the *post-install* OPEN affordance, not a
-  through-install channel), platform detection for the install panel.
+  through-install channel), platform detection for the install panel. Stale re-fire handling:
+  the page drops its stash after one re-fire; a re-fired URI whose secret was already redeemed
+  is absorbed by the re-ack window, and an otherwise-dead one surfaces Clave's non-scary "This
+  request expired — return to *Partner* and tap Sign in again" copy instead of a failure alert.
 - `static/sdk/clave-connect.js` (versioned, immutable paths via `_headers`, published SRI
   hashes, connect origin hardcoded to `https://clave.casa` — never partner-configurable) +
-  npm mirror. Core extracted from POWR's vendored ~300-line NIP-46 client (rust-nostr ≤0.44.2
-  clients choke on the spec-compliant echoed-secret ack; every partner needs this).
+  npm mirror. Core extracted from POWR's vendored ~300-line NIP-46 client. (Scope note:
+  rust-nostr ≤0.44.2's echoed-secret bug breaks its *bunker://* connect path; its nostrconnect
+  path reportedly works — see `docs/nip46-compatibility.md`. The vendored core still spares
+  rust-nostr partners the accumulate-window and two-stage-approval quirks.)
 - `static/brand/`: the button assets integrations.md has promised since May.
 - `docs/integrations.md` rewrite: lock-screen Approve as the headline post-pairing UX; the
   resume-probe/re-ack contract; retry-not-error semantics; keypair persistence; fetch-kind:0-
@@ -210,7 +233,10 @@ a `createdDuringFlow` flag set only by the onboarding generate path.
 2. On foreground/`visibilitychange`: reconnect, then **resume probe** — send `get_public_key`
    with the session keypair. Pairing was recorded signer-side during the background handshake,
    so the probe confirms the session even when the ack was lost; it needs no relay storage of
-   ephemerals and no timing window. The signer-side re-ack window is the belt to these braces.
+   ephemerals and no timing window, and it is **prompt-free**: `get_public_key` is always
+   allowed for paired clients and never prompts (`LightSigner.swift:397-402`) — guard that
+   invariant in week-1 test 2. The signer-side re-ack window is the belt to these braces for
+   non-SDK/same-URI-redelivery cases; SDK clients (fresh secret per retry) rely on the probe.
 3. Ack/probe timeout → show "Tap Sign in again"; never surface a scary error for the retry case.
 4. Respect caps (4 accounts/device, 5 clients/account — proxy 409 `pairing_limit`) with
    funnel-friendly copy.
@@ -231,8 +257,11 @@ a `createdDuringFlow` flag set only by the onboarding generate path.
 1. Does `wss://relay.powr.build` store kind:24133 at all? (Decides how much weight re-ack vs.
    resume probe must carry.)
 2. On-device: `clave://connect?uri=` cold-launch → stash → generate/import → replay → approve,
-   including partner-app-killed-during-install.
-3. SKOverlay from a scratch partner app + `canOpenURL` detection; EU-storefront fallback.
+   including partner-app-killed-during-install; regression-check that `get_public_key` from the
+   fresh pairing signs with no prompt (the resume probe depends on it).
+3. SKOverlay from a scratch partner app + `canOpenURL` detection, including whether the probe
+   flips to true immediately post-install without relaunching the partner app; EU-storefront
+   fallback.
 4. Smart App Banner OPEN-with-`app-argument` behavior on the real fallback page.
 
 ## Risks
