@@ -402,9 +402,13 @@ received **connect ack (+160.2s), promptless `get_public_key` in 1.2s, and a ver
 signature in 7.7s** — the first time the Universal Link entry path has ever completed a
 handshake on a device. (The phone-log stream had died during the install, so the
 `[Deeplink] received via onContinueUserActivity` line itself was not captured for that run; the
-completed handshake is the conclusive evidence.) Still open on-device: the zero-account
-new-user path via the real link, and the APNs lock-screen leg on a TestFlight build carrying
-both fixes (dev builds get sandbox APNs).
+completed handshake is the conclusive evidence.) **Zero-account new-user path — PASSED on a physical iPhone (TestFlight 1.1 (104), real `https`
+link, all accounts deleted first, cold launch):** onboarding caller banner → Generate New Key →
+promoted replay → ApprovalSheet → Approve; partner-sim received **connect ack (+61.9s) from a
+brand-new signer `14dbcb4f…`, promptless `get_public_key` in 1.6s, and a verified kind:1
+signature in 13.5s**. That is week-1 test 2's on-device stash→generate→replay→approve gate,
+closed — the full Conduit flow works on the shipped platform. Still open on-device: only the
+APNs lock-screen leg on the TestFlight build carrying both fixes (test 3 of the device run).
 
 Remaining device gates (unchanged, still open): test 2's zero-account stash→generate/import→
 replay path (needs the Phase-1 iOS diff), partner-killed-during-install + re-fire re-ack timing
