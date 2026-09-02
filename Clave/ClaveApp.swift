@@ -12,15 +12,28 @@ struct ClaveApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                // Custom schemes: nostrconnect:// and clave://connect?uri=.
                 .onOpenURL { url in
-                    handleDeeplink(url: url)
+                    handleDeeplink(url: url, via: "onOpenURL")
+                }
+                // Universal Links: https://clave.casa/connect?uri=. iOS delivers
+                // these to the app as an NSUserActivity continuation
+                // (FBSceneManager logs `UIActivityContinuationAction`), NOT as a
+                // URL-open — on-device logs show onOpenURL never fires for them.
+                // Without this handler the link opens Clave and is silently
+                // dropped before the router runs: the shipped "Universal Link
+                // opens but no ApprovalSheet" bug. Both entry points funnel into
+                // the same router, so routing/tests are unchanged.
+                .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { activity in
+                    guard let url = activity.webpageURL else { return }
+                    handleDeeplink(url: url, via: "onContinueUserActivity")
                 }
         }
     }
 
     @MainActor
-    private func handleDeeplink(url: URL) {
-        logger.notice("[Deeplink] received: \(url.absoluteString, privacy: .public)")
+    private func handleDeeplink(url: URL, via entry: String) {
+        logger.notice("[Deeplink] received via \(entry, privacy: .public): \(url.absoluteString, privacy: .public)")
         NotificationCenter.default.post(name: .deeplinkReceived, object: url)
     }
 }

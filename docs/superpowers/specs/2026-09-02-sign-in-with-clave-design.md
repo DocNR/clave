@@ -362,30 +362,49 @@ popup, NOT a banner — the phone must be locked/backgrounded *before* `sign_eve
 exercise the lock-screen leg; (c) the proxy on the Dell was verified healthy during the runs
 (`clave-proxy` up, every push `[APNs] 200 OK`), ruling the push pipeline out as a cause.
 
-**NEW finding — the deeplink→ApprovalSheet path drops the sheet on a presentation race; this
-was the "Universal Link opens but no ApprovalSheet" symptom, and it is now ROOT-CAUSED + FIXED
-(2026-09-02, on the Phase-1 branch).** The symptom (tapping `https://clave.casa/connect/?uri=`
-opens Clave but no approval sheet appears, inbox empty) was first read as a *delivery* failure.
-Instrumented on the iOS Simulator (`xcrun simctl openurl` of the `clave://connect?uri=` form
-into a freshly-built app) it is NOT delivery: the `[Deeplink] received` os_log fires, the router
-returns the right outcome, `pendingNostrconnectURI` is set, and `deeplinkApprovalURI`
-(`.sheet(item:)` binding) is set — all confirmed in the logs — yet UIKit silently **drops the
-sheet presentation** because the binding is set while another presentation is animating in (the
-cold-launch onboarding→MainTabView root swap, or the launch-time notification-permission alert).
-Once the binding is left non-nil with no visible sheet, later triggers no-op. **Fix:** defer the
-`.sheet(item:)` assignment past the transition (`HomeView.presentPendingConnectIfNeeded` →
-`DispatchQueue.main.asyncAfter(+0.6s)`), plus drain `pendingNostrconnectURI` in `onAppear` as
-well as `onChange` (a value set before the view mounts never fires `.onChange`). **This fix
-covers both the new-user replay AND the pre-existing shipped Universal-Link existing-user flow**
-— same code path. Verified end-to-end on the sim: `clave://connect` cold-launch → 0-account
-stash → onboarding banner (domain-first "clave.casa", "Signin PoC · unverified") → Generate Key
-→ promote → ApprovalSheet presents → Approve → partner-sim received **connect ack + promptless
-resume probe + verified kind:1 signature**. (Note: the sim cannot receive real APNs, so the
-lock-screen background-signing leg is not exercised there — that was already verified on the
-shipped build on a real phone in test 2; the sim's foreground relay subscription surfaced the
-sign request in-app instead.) The AASA-association hypothesis is discarded. Remaining real-
-device confirmation: the same flow on a physical phone (to cover APNs + the actual `https`
-Universal Link, which `simctl` routes as a scheme).
+**NEW finding — the "Universal Link opens but no ApprovalSheet" symptom was TWO separate
+bugs; both are now root-caused and fixed (2026-09-02, Phase-1 branch).** An earlier revision of
+this note called it "not a delivery bug" and "AASA hypothesis discarded" — that was wrong, and
+it was wrong because the simulator can only fire the `clave://connect?uri=` *scheme* form
+(`xcrun simctl openurl`), which never exercises a real `https` Universal Link. Corrected
+account:
+
+*Bug 1 — the Universal Link never reached the router (delivery).* On a physical iPhone
+(TestFlight 1.1 (103), `idevicesyslog -p Clave`), tapping the real
+`https://clave.casa/connect/?uri=` link produced **7,952 Clave log lines and zero
+`[Deeplink] received` lines**: `onOpenURL` never fired. The decisive line is
+`FBSceneManager … Received action(s) in scene-update: UIActivityContinuationAction` — iOS hands
+a Universal Link to the app as an **NSUserActivity continuation**, not a URL-open, and
+`ClaveApp` only had `.onOpenURL`. SpringBoard's entitlement serialization and the live AASA
+(200, `application/json`, appID `944AF56S27.dev.nostr.Clave`, `/connect` + `/connect/` with
+`?uri`) both confirm the OS-level routing to Clave was fine — the drop was inside the app.
+**Fix:** `.onContinueUserActivity(NSUserActivityTypeBrowsingWeb)` on the `WindowGroup` content,
+funnelling `activity.webpageURL` into the same `handleDeeplink` → `.deeplinkReceived` → router
+path as the schemes (log line now reads `[Deeplink] received via onOpenURL|onContinueUserActivity`).
+This is why the shipped app's Universal Link has been dead since May regardless of any
+downstream fix.
+
+*Bug 2 — the sheet presentation race.* Once a URL does reach the router, UIKit silently drops
+the `.sheet(item:)` presentation when the binding is set while another presentation is
+animating in (cold-launch onboarding→MainTabView root swap, or the launch-time notification-
+permission alert); the binding is then stuck non-nil with no sheet and later triggers no-op.
+Proven on the sim with the scheme form (router → `pendingNostrconnectURI` → `deeplinkApprovalURI`
+all set, no sheet). **Fix:** consume `pendingNostrconnectURI` immediately and set the sheet item
+via `DispatchQueue.main.asyncAfter(+0.6s)` (`HomeView.presentPendingConnectIfNeeded`), plus
+drain in `onAppear` as well as `onChange` (a value set before mount never fires `.onChange`).
+
+*Verification.* Sim (scheme form, Bug 2 fix): `clave://connect` cold-launch → 0-account stash →
+onboarding banner (domain-first "clave.casa", "Signin PoC · unverified") → Generate Key →
+promote → ApprovalSheet → Approve → partner-sim received connect ack + promptless resume probe
++ verified kind:1 signature. **Physical iPhone (real `https` link, both fixes, dev build off
+the branch, existing 1-account user, cold launch):** ApprovalSheet presented; partner-sim
+received **connect ack (+160.2s), promptless `get_public_key` in 1.2s, and a verified kind:1
+signature in 7.7s** — the first time the Universal Link entry path has ever completed a
+handshake on a device. (The phone-log stream had died during the install, so the
+`[Deeplink] received via onContinueUserActivity` line itself was not captured for that run; the
+completed handshake is the conclusive evidence.) Still open on-device: the zero-account
+new-user path via the real link, and the APNs lock-screen leg on a TestFlight build carrying
+both fixes (dev builds get sandbox APNs).
 
 Remaining device gates (unchanged, still open): test 2's zero-account stash→generate/import→
 replay path (needs the Phase-1 iOS diff), partner-killed-during-install + re-fire re-ack timing
