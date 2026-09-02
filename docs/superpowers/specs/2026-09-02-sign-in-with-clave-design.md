@@ -254,8 +254,13 @@ partner falls back to individual protected-kind prompts per the fetch-kind:0-fir
 
 ## Week-1 empirical tests (gate promises on these)
 
+Tooling ships at `scripts/signin-poc/` (relay probe + partner simulator; run from a laptop —
+CCR container egress blocks relay WebSockets). The partner simulator proves the existing-user
+concept — handshake, promptless resume probe, lock-screen signing — against the shipped App
+Store build with zero iOS diffs; run it before writing any Phase-1 code.
+
 1. Does `wss://relay.powr.build` store kind:24133 at all? (Decides how much weight re-ack vs.
-   resume probe must carry.)
+   resume probe must carry.) → `scripts/signin-poc/relay-ephemeral-probe.mjs`
 2. On-device: `clave://connect?uri=` cold-launch → stash → generate/import → replay → approve,
    including partner-app-killed-during-install; regression-check that `get_public_key` from the
    fresh pairing signs with no prompt (the resume probe depends on it).
