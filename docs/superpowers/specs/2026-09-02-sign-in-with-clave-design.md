@@ -104,9 +104,13 @@ ApprovalSheet and the onboarding banner can show who is asking.
 - **No partner-mintable bunker URIs** (see direction section above).
 - **No signer-side "ack echo loop"** (a 20–30s background-task timing race; strictly dominated
   by the client-initiated recovery below).
-- **No relay-stored-ack assumption** ("poll for the missed ack with a since filter") until the
+- ~~**No relay-stored-ack assumption** ("poll for the missed ack with a since filter") until the
   week-1 empirical test says otherwise — kind:24133 is in the ephemeral range and conforming
-  relays don't store it.
+  relays don't store it.~~ **Updated 2026-09-02:** the week-1 test said otherwise —
+  `relay.powr.build` (and `relay.damus.io`) **do** store and re-serve kind:24133 to a
+  since-filter. Relay replay is now an *additional* recovery rung (see the recovery ladder),
+  not a rejected approach. It stays a bonus rung, not a load-bearing MUST: a partner's relay
+  set may include conforming ephemeral relays, so re-ack + resume probe still carry the design.
 
 ## The flows
 
@@ -265,6 +269,15 @@ in order:
 3. **Window expired or denied** → re-mint a fresh secret; clean new attempt (the fast
    existing-user path).
 
+**Bonus rung (added 2026-09-02 after week-1 test 1): relay replay.** Because `relay.powr.build`
+was empirically shown to retain kind:24133 and re-serve it to a `since` filter, an SDK that
+missed the live ack can also recover it by re-subscribing with `since ≈ handshake_start` on the
+relays known to store it — no re-fire, no user tap. This slots between rungs 1 and 2 when the
+paired relay is `relay.powr.build`/`relay.damus.io`. It is opportunistic only: it must not be
+the sole recovery path (a partner relay set may be all-ephemeral), and it cannot bootstrap an
+ack-never-received handshake any better than the resume probe can (both need the signer pubkey,
+which only an ack carries) — so rung 2 (re-fire + re-ack) remains the primary lost-ack fix.
+
 First-pass same-device handshakes will still sometimes lose the ack — accepted, not solved: the
 cost is one extra tap and a ~2s Clave flash, never a dead session, and nothing after the
 handshake depends on the fragile direction again.
@@ -298,6 +311,81 @@ Store build with zero iOS diffs; run it before writing any Phase-1 code.
    flips to true immediately post-install without relaunching the partner app; EU-storefront
    fallback.
 4. Smart App Banner OPEN-with-`app-argument` behavior on the real fallback page.
+
+### Results — 2026-09-02 (laptop + iPhone, shipped App Store build 102)
+
+**Test 1 — relay ephemeral probe (`relay-ephemeral-probe.mjs`). RESULT: kind:24133 is STORED,
+not ephemeral, on the tested relays. Contradicts the spec's original ephemeral assumption.**
+
+Raw (two runs; the harness prints one JSON block per relay):
+
+```
+# run A
+relay.powr.build : accepted24133=true,  stored24133=true,  stored1=false (okMsg1="blocked: kind 1 is not supported on this relay"), liveForwarded24133=false
+relay.damus.io   : accepted24133=true,  stored24133=true,  stored1=true,  liveForwarded24133=false
+relay.nsec.app   : error "connect: read ECONNRESET"
+# run B (reproduce)
+relay.powr.build : accepted24133="no OK received", stored24133=true, stored1=false
+relay.damus.io   : error "connect: Unexpected server response: 503"
+relay.nsec.app   : error "connect: read ECONNRESET"
+```
+
+Interpretation: `stored24133=true` reproduced on `relay.powr.build` and confirmed on
+`relay.damus.io`. The kind:1 control is invalid on `relay.powr.build` specifically (it *blocks*
+kind:1 — see okMsg), but a positive 24133 replay needs no control: the event came back via a
+`since` query, which conclusively proves both that since-queries work there and that 24133 is
+retained. `relay.damus.io` supplies a valid control (`stored1=true`). `relay.nsec.app` was
+unreachable both runs (inconclusive). **Action taken:** non-goal "no relay-stored-ack
+assumption" struck; relay replay added as a bonus recovery rung (both edits above).
+
+**Test 2 (client half + probe regression) — partner simulator (`partner-sim.mjs`),
+cross-device (laptop sim ↔ iPhone). RESULT: PASS on all three sub-checks.**
+
+- **Handshake ack:** received across every run (e.g. `✓ connect ack #1 … signer=0b0523ddf33d…`).
+- **Resume probe promptless — PASS, strongest form.** `get_public_key` answered in 1.4–2.3s
+  with **no prompt on the phone**. Proven with the phone *locked* (low-trust account, so no
+  auto-sign, and no foreground UI was even possible): the `LightSigner.swift:397` always-allow
+  invariant for `get_public_key` holds on the shipped build. **The STOP condition (probe
+  prompts) did NOT occur — STEP 2 is unblocked.**
+- **Lock-screen signing leg — PASS.** `sign_event` kind:1 returned a locally **verified**
+  signature (event never published) after the request was approved from the **lock-screen
+  notification banner** (long-press → Approve, Clave never foregrounded), 6.8s round-trip. A
+  separate low-trust run independently exercised banner *delivery + interactive actions +
+  response round-trip* via a lock-screen **Deny** (signer returned "user rejected" to the
+  laptop), corroborating the push→NSE→banner path regardless of the approve/deny branch.
+
+Operator notes that cost several takes (worth capturing for the next device session): (a) the
+in-app Connect-tab scanner accepts only the raw `nostrconnect://` URI, not the
+`clave.casa/connect/?uri=` Universal Link, so pass the raw URI when driving the simulator by
+scan/paste; (b) when Clave is **foregrounded**, iOS routes the request to the in-app approval
+popup, NOT a banner — the phone must be locked/backgrounded *before* `sign_event` arrives to
+exercise the lock-screen leg; (c) the proxy on the Dell was verified healthy during the runs
+(`clave-proxy` up, every push `[APNs] 200 OK`), ruling the push pipeline out as a cause.
+
+**NEW on-device finding (contradicts the spec's "zero iOS diffs" premise for existing-user
+Flow A) — the Universal Link entry path does not surface the approval on the shipped build.**
+Tapping `https://clave.casa/connect/?uri=<nc>` (from the Camera app) **opened Clave but no
+approval sheet appeared and the bell inbox stayed empty** — reproduced both cold-launch and
+warm (Clave backgrounded). The *same* inner `nostrconnect://` URI, scanned via Clave's in-app
+Connect scanner, completes the full handshake (that is how test 2 passed). The pure routing +
+parser handle the exact link correctly when exercised directly (compiled `DeeplinkRouter` +
+`NostrConnectParser` off the branch: `accountCount=1 → .approve`, `2 → .pickAccount`,
+`0 → .ignore`; parser returns all fields). So the defect is in the **on-device delivery of the
+Universal Link into the routing chain** (`onOpenURL` → `.deeplinkReceived` post → AppState
+observer → `pendingNostrconnectURI` → HomeView `.onChange` → sheet), **not** in the parser or
+router. Root cause not yet isolated on-device (candidates: AASA association for `/connect` on
+the deployed clave.casa vs. the `onOpenURL`/NotificationCenter delivery chain). **Impact:** the
+May-2026 "Universal Link handoff" that Flow A step 1 and Flow C step 2 both depend on appears
+broken in production; the DeeplinkRouter stash-and-replay work (Phase 1) shares this exact
+delivery chain and must root-cause it (capture the `[Deeplink] received` os_log line on device,
+or reproduce via the iOS Simulator with `xcrun simctl openurl`). This is a **repair**, not a
+fork, and does **not** block STEP 2 (the probe did not prompt), but it is now the top on-device
+gate for Phase 1. Filed as a distinct BACKLOG item under the gates entry.
+
+Remaining device gates (unchanged, still open): test 2's zero-account stash→generate/import→
+replay path (needs the Phase-1 iOS diff), partner-killed-during-install + re-fire re-ack timing
+vs. the socket grace window, test 3 (SKOverlay + `canOpenURL` from a scratch partner app), and
+test 4 (Smart-Banner OPEN `app-argument` on the real page).
 
 ## Risks
 
