@@ -10,8 +10,13 @@ enum DeeplinkRouter {
         case approve(NostrConnectParser.ParsedURI)
         /// Multi-account: route to ConnectAccountPicker first.
         case pickAccount(NostrConnectParser.ParsedURI)
-        /// No-op (clave:// reserved, malformed URIs, unsupported schemes,
-        /// or zero-account defensive case).
+        /// Zero accounts: stash the parsed URI through onboarding so a
+        /// brand-new user (deep-linked from a partner "Sign in with Clave"
+        /// button) keeps the connect request across key creation/import,
+        /// instead of it being dropped.
+        case stashForOnboarding(NostrConnectParser.ParsedURI)
+        /// No-op (clave:// without connect?uri=, malformed URIs, unsupported
+        /// schemes, non-clave.casa hosts).
         case ignore
 
         static func == (lhs: Outcome, rhs: Outcome) -> Bool {
@@ -19,6 +24,7 @@ enum DeeplinkRouter {
             case (.ignore, .ignore): return true
             case (.approve(let a), .approve(let b)): return a.id == b.id
             case (.pickAccount(let a), .pickAccount(let b)): return a.id == b.id
+            case (.stashForOnboarding(let a), .stashForOnboarding(let b)): return a.id == b.id
             default: return false
             }
         }
@@ -43,8 +49,20 @@ enum DeeplinkRouter {
             return routeNostrconnect(parsed: try? NostrConnectParser.parse(uriParam),
                                      accountCount: accountCount)
         case "clave":
-            // Reserved namespace — no handlers yet.
-            return .ignore
+            // Reserved scheme. The ONLY handled form is
+            // clave://connect?uri=<encoded-nostrconnect> — the partner /connect
+            // fallback page's "Installed? Open Clave" re-fire button (same-domain
+            // Universal Links deliberately don't fire, and JS can't re-fire one).
+            // For a custom scheme, "connect" is the host, not a path. Anything
+            // else under clave:// stays a no-op.
+            guard url.host == "connect",
+                  let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+                  let uriParam = components.queryItems?.first(where: { $0.name == "uri" })?.value,
+                  !uriParam.isEmpty else {
+                return .ignore
+            }
+            return routeNostrconnect(parsed: try? NostrConnectParser.parse(uriParam),
+                                     accountCount: accountCount)
         default:
             return .ignore
         }
@@ -53,7 +71,7 @@ enum DeeplinkRouter {
     private static func routeNostrconnect(parsed: NostrConnectParser.ParsedURI?,
                                            accountCount: Int) -> Outcome {
         guard let parsed else { return .ignore }
-        if accountCount <= 0 { return .ignore }
+        if accountCount <= 0 { return .stashForOnboarding(parsed) }
         if accountCount == 1 { return .approve(parsed) }
         return .pickAccount(parsed)
     }

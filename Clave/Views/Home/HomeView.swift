@@ -120,6 +120,14 @@ struct HomeView: View {
             .onAppear {
                 refreshData()
                 appState.fetchProfilesForAllAccountsIfNeeded()
+                // Drain a connect URI that was set BEFORE this view mounted —
+                // the brand-new-user onboarding replay (promotion sets
+                // pendingNostrconnectURI as ContentView flips to MainTabView)
+                // and cold-launch deeplinks. `.onChange` never fires for a
+                // value already present at first mount, so without this the
+                // replay would be silently lost. Presenting clears the value,
+                // so the onChange path below can't double-present it.
+                presentPendingConnectIfNeeded()
             }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active { refreshData() }
@@ -140,10 +148,7 @@ struct HomeView: View {
                 }
             }
             .onChange(of: appState.pendingNostrconnectURI?.id) { _, _ in
-                if let uri = appState.pendingNostrconnectURI {
-                    deeplinkApprovalURI = uri
-                    appState.pendingNostrconnectURI = nil
-                }
+                presentPendingConnectIfNeeded()
             }
             .onChange(of: appState.pendingDeeplinkAccountChoice?.id) { _, _ in
                 if let uri = appState.pendingDeeplinkAccountChoice {
@@ -423,6 +428,18 @@ struct HomeView: View {
     }
 
     // MARK: - Helpers
+
+    /// Present ApprovalSheet for a pending nostrconnect replay, if one is set.
+    /// Called from both `.onAppear` (catches a value set before this view
+    /// mounted — the onboarding promotion / cold-launch race) and
+    /// `.onChange` (catches a value set while mounted). Presenting clears the
+    /// value so the two callers can never double-present the same URI.
+    private func presentPendingConnectIfNeeded() {
+        if let uri = appState.pendingNostrconnectURI {
+            deeplinkApprovalURI = uri
+            appState.pendingNostrconnectURI = nil
+        }
+    }
 
     private func refreshData() {
         SharedStorage.migrateIfNeeded()

@@ -10,7 +10,7 @@ enum NostrConnectParser {
         case invalidURL
     }
 
-    struct ParsedURI: Identifiable {
+    struct ParsedURI: Identifiable, Codable {
         var id: String { clientPubkey + secret }
         let clientPubkey: String
         let relays: [String]
@@ -21,6 +21,21 @@ enum NostrConnectParser {
         let imageURL: String?
         let suggestedTrustLevel: TrustLevel
         let isMultiAccount: Bool
+        /// Set at onboarding-promotion time on the in-memory replay payload
+        /// (true iff the key was Generated during a Sign-in-with-Clave flow;
+        /// false for import and every non-onboarding route). Deliberately
+        /// excluded from `CodingKeys` so it is NEVER persisted — it dies with
+        /// the replay, per the spec's data-integrity rule. Read by
+        /// ApprovalSheet (Phase 2 signup write-set consent).
+        var createdDuringFlow: Bool = false
+
+        /// Persistable fields only. `createdDuringFlow` is intentionally
+        /// omitted so a stashed URI can never carry a stale/forged consent
+        /// flag across the App Store round trip; `id` is computed.
+        enum CodingKeys: String, CodingKey {
+            case clientPubkey, relays, secret, requestedPerms
+            case name, url, imageURL, suggestedTrustLevel, isMultiAccount
+        }
     }
 
     static func parse(_ uri: String) throws -> ParsedURI {

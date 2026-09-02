@@ -16,13 +16,77 @@ struct OnboardingView: View {
                 }
             }
             .navigationBarHidden(true)
+            .onAppear { appState.refreshOnboardingBanner() }
         }
+    }
+
+    // MARK: - Caller banner (Sign in with Clave, brand-new-user path)
+
+    /// The "who is asking" banner shown when a partner connect URI was stashed
+    /// before the user had an account. Domain-first (the registrable domain is
+    /// the largest, most trustworthy element); the self-asserted name/icon are
+    /// rendered small and explicitly marked unverified — brand-new users are
+    /// the most phishable audience, so nothing self-asserted is given
+    /// authority. Same rendering posture as ApprovalSheet.
+    private func callerBanner(_ caller: NostrConnectParser.ParsedURI) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(callerDomain(caller))
+                .font(.headline)
+                .lineLimit(1)
+                .truncationMode(.middle)
+
+            Text("wants to connect")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            if let name = caller.name, !name.isEmpty {
+                Text("calls itself “\(name)” · unverified")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+
+            Text("Create or import your key to continue.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .padding(.top, 2)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color.accentColor.opacity(0.10))
+        )
+    }
+
+    /// Registrable domain of the caller's self-asserted `url`, for the
+    /// domain-first line. Strips a leading `www.`; falls back to the
+    /// self-asserted name (still unverified) or a generic label when no `url`
+    /// is present. Not a security boundary — a real verified-caller badge is a
+    /// later well-known-JSON feature.
+    private func callerDomain(_ caller: NostrConnectParser.ParsedURI) -> String {
+        if let urlString = caller.url,
+           let host = URL(string: urlString)?.host,
+           !host.isEmpty {
+            return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+        }
+        if let name = caller.name, !name.isEmpty {
+            return name
+        }
+        return "A Nostr app"
     }
 
     // MARK: - Step 1: Welcome
 
     private var welcomeStep: some View {
         VStack(spacing: 32) {
+            if let caller = appState.onboardingConnectBanner {
+                callerBanner(caller)
+                    .padding(.horizontal, 24)
+                    .padding(.top, 16)
+            }
+
             Spacer()
 
             VStack(spacing: 12) {
@@ -174,7 +238,7 @@ struct OnboardingView: View {
 
     private func importKey() {
         do {
-            try appState.importKey(nsec: nsecInput)
+            try appState.importKey(nsec: nsecInput, source: .onboardingImport)
             errorMessage = ""
             nsecInput = ""
             step = 2
@@ -185,7 +249,7 @@ struct OnboardingView: View {
 
     private func generateKey() {
         do {
-            try appState.generateKey()
+            try appState.generateKey(source: .onboardingGenerate)
             errorMessage = ""
             step = 2
         } catch {
