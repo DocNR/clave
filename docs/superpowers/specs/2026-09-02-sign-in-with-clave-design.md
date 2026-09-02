@@ -159,9 +159,11 @@ ApprovalSheet and the onboarding banner can show who is asking.
    accounts exist by replay time.
 5. Approve → callback (Phase 2) or swipe back → SDK resume probe → live session.
 6. **Profile leg, gated by how the key arrived** (see below).
-7. Degraded path (partner app killed during install, secret expired, user dawdled): the SDK
-   treats ack-timeout as *retry, not error* — the second tap re-mints and is now the fast
-   existing-user path (~10s). Idempotent retry is the designed failure mode.
+7. Degraded path: the SDK treats ack-timeout as *retry, not error*, per the recovery ladder
+   (below). Attempt still pending → the second tap re-fires the SAME URI and, if the pairing
+   actually completed, Clave's re-ack window answers silently with no second approval; window
+   expired, denied, or partner killed during install → re-mint, clean fast existing-user path
+   (~10s). Idempotent retry is the designed failure mode.
 
 ### The imported-nsec branch (data-integrity rule)
 
@@ -199,7 +201,7 @@ partner falls back to individual protected-kind prompts per the fetch-kind:0-fir
 | Caller banner on onboarding step 1 ("create or import your key to continue") — same domain-first + unverified-metadata rules as ApprovalSheet | `OnboardingView.swift` | S |
 | Domain-first ApprovalSheet rendering: registrable domain largest; self-asserted name/icon below with "unverified" treatment; short client-pubkey fingerprint | `ApprovalSheet.swift` | S |
 | `callback=` support: display target in ApprovalSheet; open only after foreground approval; https callbacks should match the metadata `url` registrable domain; never on denial; never from lock-screen signing | `NostrConnectParser.swift`, `ApprovalSheet.swift` | M |
-| Idempotent connect **re-ack window**: a connect re-sent with identical client pubkey + secret within ~10 min of successful pairing gets a silent duplicate ack (already-paired-only; exact match; no new prompt). Triggers only on same-URI redelivery — the `/connect` fallback page's stashed-URI "Open Clave" re-fire, OS redelivery of the same link, and non-SDK clients that re-send connect on reconnect. SDK clients never hit it (fresh secret per retry); their recovery is the resume probe alone | `LightSigner.swift` (+ NSE path) | M |
+| Idempotent connect **re-ack window**: a connect re-sent with identical client pubkey + secret within ~10 min of successful pairing gets a silent duplicate ack (already-paired-only; exact match; no new prompt). Triggers on same-URI redelivery: the SDK's own re-fire of a still-pending attempt (recovery ladder rung 2 — the fix for ack-never-received, which the resume probe cannot bootstrap), the `/connect` fallback page's stashed-URI "Open Clave" re-fire, OS redelivery of the same link, and non-SDK clients that re-send connect on reconnect | `LightSigner.swift` (+ NSE path) | M |
 | Signup write-set consent, gated on `createdDuringFlow`. The grant is **one-shot and bounded**: it authorizes at most one kind:0 and one kind:10002 publish within ~10 min of pairing; afterwards both kinds revert to protected/individual prompts for this session like any other | `ApprovalSheet.swift` | M |
 | `session_terminated` publish on unpair/delete (web receiver already shipped) | `LightSigner.swift` / unpair paths | M |
 
@@ -229,17 +231,43 @@ partner falls back to individual protected-kind prompts per the fetch-kind:0-fir
 
 ### SDK behavioral contract (documentation-level, v1)
 
-1. Persist the client keypair across retries; re-mint only the secret.
+1. Persist the client keypair across attempts. While an attempt is **pending** (no ack yet,
+   inside the ~10-min re-ack window) retain its secret; re-mint a fresh secret only after
+   denial, window expiry, or session establishment.
 2. On foreground/`visibilitychange`: reconnect, then **resume probe** — send `get_public_key`
    with the session keypair. Pairing was recorded signer-side during the background handshake,
    so the probe confirms the session even when the ack was lost; it needs no relay storage of
    ephemerals and no timing window, and it is **prompt-free**: `get_public_key` is always
    allowed for paired clients and never prompts (`LightSigner.swift:397-402`) — guard that
-   invariant in week-1 test 2. The signer-side re-ack window is the belt to these braces for
-   non-SDK/same-URI-redelivery cases; SDK clients (fresh secret per retry) rely on the probe.
+   invariant in week-1 test 2. **Bootstrap limitation:** the probe must be addressed to the
+   signer pubkey, which the client only learns *from an ack* (the nostrconnect URI carries
+   only the client's pubkey). It therefore confirms/repairs a session that acked at least
+   once; it cannot bootstrap an ack-never-received handshake — that case is rung 2 below.
 3. Ack/probe timeout → show "Tap Sign in again"; never surface a scary error for the retry case.
 4. Respect caps (4 accounts/device, 5 clients/account — proxy 409 `pairing_limit`) with
    funnel-friendly copy.
+
+### Same-device handshake recovery ladder
+
+The WebSocket freeze threatens exactly one message — the connect ack (published after
+human-speed approval, i.e. past the partner socket's ~5–10s post-backgrounding grace). Recovery,
+in order:
+
+1. **Catch the ack live** — cross-device always; same-device when approval lands inside the
+   grace window or the socket revives during Clave's ~15s listen / 3-attempt publish window.
+2. **Ack never received, attempt still pending** → the user's next Sign-in tap **re-fires the
+   SAME URI** (same secret — see contract item 1). Already-paired → Clave silently re-acks
+   ~1–2s after launch via the re-ack window — inside the *fresh* backgrounding grace this time,
+   because there is no approval sheet to read — then callback (Phase 2) or swipe-back.
+   Never-paired → normal ApprovalSheet. Native SDKs may open the Universal Link
+   programmatically but should keep the re-fire behind a user gesture. Cold-launch →
+   re-ack-publish latency vs. the grace window is a week-1 test-2 measurement.
+3. **Window expired or denied** → re-mint a fresh secret; clean new attempt (the fast
+   existing-user path).
+
+First-pass same-device handshakes will still sometimes lose the ack — accepted, not solved: the
+cost is one extra tap and a ~2s Clave flash, never a dead session, and nothing after the
+handshake depends on the fragile direction again.
 
 ## Protocol extensions (Phase-2 NIP drafts; ship first, spec after, per house practice)
 
@@ -263,7 +291,9 @@ Store build with zero iOS diffs; run it before writing any Phase-1 code.
    resume probe must carry.) → `scripts/signin-poc/relay-ephemeral-probe.mjs`
 2. On-device: `clave://connect?uri=` cold-launch → stash → generate/import → replay → approve,
    including partner-app-killed-during-install; regression-check that `get_public_key` from the
-   fresh pairing signs with no prompt (the resume probe depends on it).
+   fresh pairing signs with no prompt (the resume probe depends on it); measure cold-launch →
+   re-ack-publish latency for a re-fired pending URI vs. the partner socket's ~5–10s grace
+   window (recovery ladder rung 2 depends on it).
 3. SKOverlay from a scratch partner app + `canOpenURL` detection, including whether the probe
    flips to true immediately post-install without relaunching the partner app; EU-storefront
    fallback.
