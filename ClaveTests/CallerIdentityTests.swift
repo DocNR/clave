@@ -23,71 +23,98 @@ final class CallerIdentityTests: XCTestCase {
         )
     }
 
-    // MARK: - registrableDomain(fromURL:)
+    // MARK: - domain(fromURL:)
 
     func testPlainHost() {
-        XCTAssertEqual(CallerIdentity.registrableDomain(fromURL: "https://clave.casa"), "clave.casa")
-        XCTAssertEqual(CallerIdentity.registrableDomain(fromURL: "https://clave.casa/connect?x=1"), "clave.casa")
+        XCTAssertEqual(CallerIdentity.domain(fromURL: "https://clave.casa"), "clave.casa")
+        XCTAssertEqual(CallerIdentity.domain(fromURL: "https://clave.casa/connect?x=1"), "clave.casa")
     }
 
-    func testStripsLeadingWWW() {
-        XCTAssertEqual(CallerIdentity.registrableDomain(fromURL: "https://www.clave.casa"), "clave.casa")
-        XCTAssertEqual(CallerIdentity.registrableDomain(fromURL: "https://www.conduit.market/shop"), "conduit.market")
+    func testStripsOneLeadingWWW() {
+        XCTAssertEqual(CallerIdentity.domain(fromURL: "https://www.clave.casa"), "clave.casa")
+        XCTAssertEqual(CallerIdentity.domain(fromURL: "https://www.conduit.market/shop"), "conduit.market")
+        // Exactly one "www." is stripped; anything left is part of the host.
+        XCTAssertEqual(CallerIdentity.domain(fromURL: "https://www.www.clave.casa"), "www.clave.casa")
     }
 
-    func testCollapsesSubdomainsToRegistrablePart() {
-        XCTAssertEqual(CallerIdentity.registrableDomain(fromURL: "https://shop.conduit.market"), "conduit.market")
-        XCTAssertEqual(CallerIdentity.registrableDomain(fromURL: "https://a.b.c.example.com"), "example.com")
+    func testKeepsFullHostWithoutCollapsingSubdomains() {
+        // No public-suffix collapse. A last-two-labels rule would launder
+        // attacker.github.io into "github.io" (and pages.dev, vercel.app,
+        // netlify.app, trycloudflare.com, …) — the full host is what the
+        // user must see.
+        XCTAssertEqual(CallerIdentity.domain(fromURL: "https://shop.conduit.market"), "shop.conduit.market")
+        XCTAssertEqual(CallerIdentity.domain(fromURL: "https://a.b.c.example.com"), "a.b.c.example.com")
+        XCTAssertEqual(CallerIdentity.domain(fromURL: "https://attacker.github.io"), "attacker.github.io")
+        XCTAssertEqual(CallerIdentity.domain(fromURL: "https://attacker.pages.dev"), "attacker.pages.dev")
     }
 
-    func testKeepsWellKnownSecondLevelSuffixUnderTwoLetterTLD() {
-        XCTAssertEqual(CallerIdentity.registrableDomain(fromURL: "https://app.example.co.uk"), "example.co.uk")
-        XCTAssertEqual(CallerIdentity.registrableDomain(fromURL: "https://example.co.uk"), "example.co.uk")
-        XCTAssertEqual(CallerIdentity.registrableDomain(fromURL: "https://www.shop.example.com.au"), "example.com.au")
-        // A 2-letter TLD whose second label is NOT a well-known suffix stays two labels.
-        XCTAssertEqual(CallerIdentity.registrableDomain(fromURL: "https://app.example.io"), "example.io")
-        // A well-known-looking second label under a long TLD is just a name.
-        XCTAssertEqual(CallerIdentity.registrableDomain(fromURL: "https://app.co.market"), "co.market")
+    func testKeepsFullHostUnderCountryCodeSuffixes() {
+        XCTAssertEqual(CallerIdentity.domain(fromURL: "https://app.example.co.uk"), "app.example.co.uk")
+        XCTAssertEqual(CallerIdentity.domain(fromURL: "https://example.co.uk"), "example.co.uk")
+        XCTAssertEqual(CallerIdentity.domain(fromURL: "https://www.shop.example.com.au"), "shop.example.com.au")
+        XCTAssertEqual(CallerIdentity.domain(fromURL: "https://app.example.io"), "app.example.io")
+        XCTAssertEqual(CallerIdentity.domain(fromURL: "https://attacker.nhs.uk"), "attacker.nhs.uk")
     }
 
     func testLowercasesHost() {
-        XCTAssertEqual(CallerIdentity.registrableDomain(fromURL: "HTTPS://Shop.Conduit.MARKET"), "conduit.market")
-        XCTAssertEqual(CallerIdentity.registrableDomain(fromURL: "https://WWW.Clave.Casa"), "clave.casa")
+        XCTAssertEqual(CallerIdentity.domain(fromURL: "HTTPS://Shop.Conduit.MARKET"), "shop.conduit.market")
+        XCTAssertEqual(CallerIdentity.domain(fromURL: "https://WWW.Clave.Casa"), "clave.casa")
+    }
+
+    // MARK: - IDN homograph hardening (ASCII-only host)
+
+    func testPunycodeHostIsShownLiterally() {
+        // Foundation IDNA-decodes an xn-- host to Unicode, which would render
+        // a Cyrillic "сӏаѵе.casa" pixel-identical to clave.casa. The literal
+        // punycode is visibly not the real domain.
+        XCTAssertEqual(CallerIdentity.domain(fromURL: "https://xn--80ak8a1oqq.casa"), "xn--80ak8a1oqq.casa")
+    }
+
+    func testRawUnicodeHostIsNil() {
+        XCTAssertNil(CallerIdentity.domain(fromURL: "https://сӏаѵе.casa"))          // Cyrillic homograph
+        XCTAssertNil(CallerIdentity.domain(fromURL: "https://cl\u{00AD}ave.casa"))   // soft hyphen
+        XCTAssertNil(CallerIdentity.domain(fromURL: "https://ＣＬＡＶＥ.casa"))          // fullwidth
+    }
+
+    func testPercentEscapedHostIsNil() {
+        XCTAssertNil(CallerIdentity.domain(fromURL: "https://clave.casa%E2%80%8Bevil.com"))  // ZWSP
+        XCTAssertNil(CallerIdentity.domain(fromURL: "https://clave%E2%80%AE.casa"))          // RLO
+        XCTAssertNil(CallerIdentity.domain(fromURL: "https://clave.casa%2Eevil.com"))
     }
 
     func testIgnoresPortAndTrailingDot() {
-        XCTAssertEqual(CallerIdentity.registrableDomain(fromURL: "https://clave.casa:8443/x"), "clave.casa")
-        XCTAssertEqual(CallerIdentity.registrableDomain(fromURL: "https://clave.casa."), "clave.casa")
+        XCTAssertEqual(CallerIdentity.domain(fromURL: "https://clave.casa:8443/x"), "clave.casa")
+        XCTAssertEqual(CallerIdentity.domain(fromURL: "https://clave.casa."), "clave.casa")
     }
 
     func testMissingURLIsNil() {
-        XCTAssertNil(CallerIdentity.registrableDomain(fromURL: nil))
-        XCTAssertNil(CallerIdentity.registrableDomain(fromURL: ""))
-        XCTAssertNil(CallerIdentity.registrableDomain(fromURL: "   "))
+        XCTAssertNil(CallerIdentity.domain(fromURL: nil))
+        XCTAssertNil(CallerIdentity.domain(fromURL: ""))
+        XCTAssertNil(CallerIdentity.domain(fromURL: "   "))
     }
 
     func testInvalidURLIsNil() {
-        XCTAssertNil(CallerIdentity.registrableDomain(fromURL: "not a url"))
-        XCTAssertNil(CallerIdentity.registrableDomain(fromURL: "https://"))
-        XCTAssertNil(CallerIdentity.registrableDomain(fromURL: "clave.casa"))          // no scheme
-        XCTAssertNil(CallerIdentity.registrableDomain(fromURL: "https://intranet"))    // single label, no public suffix
+        XCTAssertNil(CallerIdentity.domain(fromURL: "not a url"))
+        XCTAssertNil(CallerIdentity.domain(fromURL: "https://"))
+        XCTAssertNil(CallerIdentity.domain(fromURL: "clave.casa"))          // no scheme
+        XCTAssertNil(CallerIdentity.domain(fromURL: "https://intranet"))    // single label, no public suffix
     }
 
     func testNonHTTPSchemeIsNil() {
-        XCTAssertNil(CallerIdentity.registrableDomain(fromURL: "ftp://clave.casa"))
-        XCTAssertNil(CallerIdentity.registrableDomain(fromURL: "clave://connect"))
-        XCTAssertNil(CallerIdentity.registrableDomain(fromURL: "javascript:alert(1)"))
-        XCTAssertNil(CallerIdentity.registrableDomain(fromURL: "nostr:npub1abc"))
+        XCTAssertNil(CallerIdentity.domain(fromURL: "ftp://clave.casa"))
+        XCTAssertNil(CallerIdentity.domain(fromURL: "clave://connect"))
+        XCTAssertNil(CallerIdentity.domain(fromURL: "javascript:alert(1)"))
+        XCTAssertNil(CallerIdentity.domain(fromURL: "nostr:npub1abc"))
         // Plain http is still a web origin and is accepted.
-        XCTAssertEqual(CallerIdentity.registrableDomain(fromURL: "http://clave.casa"), "clave.casa")
+        XCTAssertEqual(CallerIdentity.domain(fromURL: "http://clave.casa"), "clave.casa")
     }
 
     func testIPLiteralAndLocalhostAreNil() {
-        XCTAssertNil(CallerIdentity.registrableDomain(fromURL: "https://192.168.1.10"))
-        XCTAssertNil(CallerIdentity.registrableDomain(fromURL: "http://127.0.0.1:3000/cb"))
-        XCTAssertNil(CallerIdentity.registrableDomain(fromURL: "http://[::1]/"))
-        XCTAssertNil(CallerIdentity.registrableDomain(fromURL: "http://localhost"))
-        XCTAssertNil(CallerIdentity.registrableDomain(fromURL: "http://LOCALHOST:5173"))
+        XCTAssertNil(CallerIdentity.domain(fromURL: "https://192.168.1.10"))
+        XCTAssertNil(CallerIdentity.domain(fromURL: "http://127.0.0.1:3000/cb"))
+        XCTAssertNil(CallerIdentity.domain(fromURL: "http://[::1]/"))
+        XCTAssertNil(CallerIdentity.domain(fromURL: "http://localhost"))
+        XCTAssertNil(CallerIdentity.domain(fromURL: "http://LOCALHOST:5173"))
     }
 
     // MARK: - fingerprint(_:)
@@ -106,24 +133,56 @@ final class CallerIdentityTests: XCTestCase {
         XCTAssertEqual(CallerIdentity.fingerprint("1234567890123"), "12345678…0123")
     }
 
-    // MARK: - displayDomain(for:)
+    // MARK: - headline(url:pubkey:)
 
-    func testDisplayDomainPrefersDomainOverName() {
-        XCTAssertEqual(
-            CallerIdentity.displayDomain(for: uri(name: "Signin PoC", url: "https://clave.casa")),
-            "clave.casa"
-        )
+    func testHeadlinePrefersDomain() {
+        XCTAssertEqual(CallerIdentity.headline(url: "https://clave.casa", pubkey: pubkey), "clave.casa")
+        XCTAssertEqual(CallerIdentity.headline(url: "https://shop.conduit.market", pubkey: pubkey), "shop.conduit.market")
     }
 
-    func testDisplayDomainFallsBackToNameWhenNoUsableURL() {
-        XCTAssertEqual(CallerIdentity.displayDomain(for: uri(name: "Signin PoC", url: nil)), "Signin PoC")
-        XCTAssertEqual(CallerIdentity.displayDomain(for: uri(name: "Signin PoC", url: "not a url")), "Signin PoC")
-        XCTAssertEqual(CallerIdentity.displayDomain(for: uri(name: "Signin PoC", url: "http://localhost")), "Signin PoC")
+    func testHeadlineFallsBackToFingerprintWhenNoUsableURL() {
+        XCTAssertEqual(CallerIdentity.headline(url: nil, pubkey: pubkey), "0f3c8b1a…e7f8")
+        XCTAssertEqual(CallerIdentity.headline(url: "not a url", pubkey: pubkey), "0f3c8b1a…e7f8")
+        XCTAssertEqual(CallerIdentity.headline(url: "http://localhost", pubkey: pubkey), "0f3c8b1a…e7f8")
     }
 
-    func testDisplayDomainFallsBackToFingerprintWhenNoURLAndNoName() {
-        XCTAssertEqual(CallerIdentity.displayDomain(for: uri(name: nil, url: nil)), "0f3c8b1a…e7f8")
-        // An empty name is treated as absent.
-        XCTAssertEqual(CallerIdentity.displayDomain(for: uri(name: "", url: nil)), "0f3c8b1a…e7f8")
+    func testHeadlineNeverUsesSelfAssertedName() {
+        // The name is not even an input: a caller with no url and
+        // name="clave.casa" gets the fingerprint, not "clave.casa".
+        let caller = uri(name: "clave.casa", url: nil)
+        XCTAssertEqual(CallerIdentity.headline(url: caller.url, pubkey: caller.clientPubkey), "0f3c8b1a…e7f8")
+    }
+
+    // MARK: - name(_:) / unverifiedClaim(name:imageURL:)
+
+    func testNameTrimsAndTreatsBlankAsAbsent() {
+        XCTAssertEqual(CallerIdentity.name("  Signin PoC \n"), "Signin PoC")
+        XCTAssertNil(CallerIdentity.name(nil))
+        XCTAssertNil(CallerIdentity.name(""))
+        XCTAssertNil(CallerIdentity.name("   "))
+        XCTAssertNil(CallerIdentity.name("\n\t"))
+    }
+
+    func testUnverifiedClaimForName() {
+        XCTAssertEqual(CallerIdentity.unverifiedClaim(name: "Signin PoC", imageURL: nil),
+                       "calls itself “Signin PoC”")
+        // A name wins over an image, and is trimmed.
+        XCTAssertEqual(CallerIdentity.unverifiedClaim(name: " Signin PoC ", imageURL: "https://clave.casa/i.png"),
+                       "calls itself “Signin PoC”")
+    }
+
+    func testUnverifiedClaimForIconOnlyCaller() {
+        XCTAssertEqual(CallerIdentity.unverifiedClaim(name: nil, imageURL: "https://clave.casa/i.png"), "icon")
+        XCTAssertEqual(CallerIdentity.unverifiedClaim(name: "   ", imageURL: "https://clave.casa/i.png"), "icon")
+    }
+
+    func testUnverifiedClaimIsNilWhenNothingSelfAsserted() {
+        XCTAssertNil(CallerIdentity.unverifiedClaim(name: nil, imageURL: nil))
+        XCTAssertNil(CallerIdentity.unverifiedClaim(name: "", imageURL: ""))
+        XCTAssertNil(CallerIdentity.unverifiedClaim(name: "  ", imageURL: "  "))
+    }
+
+    func testUnverifiedMarkerIsFixedText() {
+        XCTAssertEqual(CallerIdentity.unverifiedMarker, "· unverified")
     }
 }

@@ -23,11 +23,12 @@ struct OnboardingView: View {
     // MARK: - Caller banner (Sign in with Clave, brand-new-user path)
 
     /// The "who is asking" banner shown when a partner connect URI was stashed
-    /// before the user had an account. Domain-first (the registrable domain is
-    /// the largest, most trustworthy element); the self-asserted name/icon are
-    /// rendered small and explicitly marked unverified — brand-new users are
-    /// the most phishable audience, so nothing self-asserted is given
-    /// authority. Same rendering posture as ApprovalSheet.
+    /// before the user had an account. Domain-first (the url's host is the
+    /// largest, most trustworthy element; else the pubkey fingerprint — never
+    /// the self-asserted name); the self-asserted name/icon are rendered small
+    /// and explicitly marked unverified — brand-new users are the most
+    /// phishable audience, so nothing self-asserted is given authority. Same
+    /// rendering rules and strings as ApprovalSheet, via `CallerIdentity`.
     private func callerBanner(_ caller: NostrConnectParser.ParsedURI) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             // Same identity grammar as ClientIdentityHeader / ApprovalSheet:
@@ -38,23 +39,34 @@ struct OnboardingView: View {
                 callerAvatar(caller)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(callerDomain(caller))
-                        .font(.headline)
+                    Text(callerHeadline(caller))
+                        .font(callerHeadlineIsFingerprint(caller) ? .headline.monospaced() : .headline)
                         .lineLimit(1)
                         .truncationMode(.middle)
                     Text("wants to connect")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
-                    if let name = caller.name, !name.isEmpty {
-                        Text("calls itself “\(name)” · unverified")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
+                    // The claim truncates; the marker is a fixed sibling so
+                    // a long name can never push "unverified" off screen.
+                    if let claim = CallerIdentity.unverifiedClaim(name: caller.name, imageURL: caller.imageURL) {
+                        HStack(spacing: 4) {
+                            Text(claim)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                            Text(CallerIdentity.unverifiedMarker)
+                                .fixedSize()
+                                .layoutPriority(1)
+                        }
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
                     }
-                    Text(truncatedPubkey(caller.clientPubkey))
-                        .font(.caption.monospaced())
-                        .foregroundStyle(.secondary)
+                    // The fingerprint is already the headline when the caller
+                    // gave no usable url — don't repeat it.
+                    if !callerHeadlineIsFingerprint(caller) {
+                        Text(truncatedPubkey(caller.clientPubkey))
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
 
@@ -84,11 +96,11 @@ struct OnboardingView: View {
                         .frame(width: 44, height: 44)
                         .clipShape(Circle())
                 default:
-                    AvatarView(pubkeyHex: caller.clientPubkey, name: caller.name, size: 44)
+                    AvatarView(pubkeyHex: caller.clientPubkey, name: CallerIdentity.name(caller.name), size: 44)
                 }
             }
         } else {
-            AvatarView(pubkeyHex: caller.clientPubkey, name: caller.name, size: 44)
+            AvatarView(pubkeyHex: caller.clientPubkey, name: CallerIdentity.name(caller.name), size: 44)
         }
     }
 
@@ -99,15 +111,20 @@ struct OnboardingView: View {
         CallerIdentity.fingerprint(pubkey)
     }
 
-    /// Registrable domain of the caller's self-asserted `url`, for the
-    /// domain-first line (subdomains collapsed, `www.` stripped); falls back
-    /// to the self-asserted name (still unverified) or the pubkey fingerprint
-    /// when no usable `url` is present. Shared with ApprovalSheet via
-    /// `CallerIdentity` so both surfaces render the same headline. Not a
+    /// Headline for the caller: the display host of its self-asserted `url`
+    /// (full host minus a leading `www.`, ASCII-only), else the pubkey
+    /// fingerprint — never the self-asserted name. Shared with ApprovalSheet
+    /// via `CallerIdentity` so both surfaces render the same headline. Not a
     /// security boundary — a real verified-caller badge is a later
     /// well-known-JSON feature.
-    private func callerDomain(_ caller: NostrConnectParser.ParsedURI) -> String {
-        CallerIdentity.displayDomain(for: caller)
+    private func callerHeadline(_ caller: NostrConnectParser.ParsedURI) -> String {
+        CallerIdentity.headline(url: caller.url, pubkey: caller.clientPubkey)
+    }
+
+    /// Mirrors `ApprovalSheet.callerHeadlineIsFingerprint`: true when there is
+    /// no usable url, so the separate fingerprint line is suppressed.
+    private func callerHeadlineIsFingerprint(_ caller: NostrConnectParser.ParsedURI) -> Bool {
+        CallerIdentity.domain(fromURL: caller.url) == nil
     }
 
     // MARK: - Step 1: Welcome

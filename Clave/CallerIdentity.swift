@@ -5,11 +5,13 @@ import Foundation
 /// (`OnboardingView.callerBanner`). From the Sign in with Clave spec,
 /// "Domain-first ApprovalSheet rendering":
 ///
-/// - the registrable domain of the caller's self-asserted `url` is the
-///   largest, most prominent element;
-/// - the self-asserted `name` / `image` are rendered smaller, below, and
-///   explicitly marked unverified;
-/// - a short client-pubkey fingerprint is always available.
+/// - the host of the caller's self-asserted `url` is the largest, most
+///   prominent element — shown in full (minus a leading `www.`), ASCII-only,
+///   never collapsed to a "registrable" part;
+/// - the self-asserted `name` / `image` never take the headline: they are
+///   rendered smaller, below, and explicitly marked unverified;
+/// - when there is no usable url the headline is the client-pubkey
+///   fingerprint, never the name.
 ///
 /// Nothing self-asserted is given authority — brand-new users are the most
 /// phishable audience. This is NOT a security boundary: the `url` is itself
@@ -17,53 +19,69 @@ import Foundation
 /// well-known-JSON feature. These helpers only decide *what to make big*.
 enum CallerIdentity {
 
-    /// Second-level labels that are themselves public suffixes under a
-    /// 2-letter country TLD ("co.uk", "com.au", "ac.jp", "gov.br", …).
-    /// Deliberately small and conservative — this is not the Public Suffix
-    /// List, just enough to keep "example.co.uk" from collapsing to "co.uk".
-    private static let wellKnownSecondLevelSuffixes: Set<String> = [
-        "co", "com", "org", "net", "gov", "ac", "edu", "mil",
-    ]
+    /// The fixed marker that follows every self-asserted claim ("calls itself
+    /// “…”", "icon"). Rendered as its own sibling Text so a long name can be
+    /// tail-truncated without pushing this off screen.
+    static let unverifiedMarker = "· unverified"
 
-    /// Registrable domain of a self-asserted `url`, or nil when there is no
-    /// domain worth showing: missing/blank/unparseable URL, non-http(s)
-    /// scheme, IP literal, `localhost`, or a single-label host (no public
-    /// suffix — LAN/intranet names).
+    /// Characters a displayable host may contain, after lowercasing. Anything
+    /// else — raw Unicode, percent-escapes, brackets, colons — yields nil.
+    private static let hostCharacters = Set("abcdefghijklmnopqrstuvwxyz0123456789.-")
+
+    /// Display host of a self-asserted `url`, or nil when there is no host
+    /// worth showing: missing/blank/unparseable URL, non-http(s) scheme, IP
+    /// literal, `localhost`, single-label host (LAN/intranet names), or any
+    /// host that is not plain ASCII `[a-z0-9.-]`.
     ///
-    /// Host handling: lowercase; drop a trailing dot; strip one leading
-    /// `www.`; collapse subdomains to the last two labels, or the last three
-    /// when the second-to-last label is a well-known second-level suffix
-    /// under a 2-letter TLD ("app.example.co.uk" → "example.co.uk",
-    /// "shop.conduit.market" → "conduit.market"). Ports and paths are
-    /// ignored.
-    static func registrableDomain(fromURL urlString: String?) -> String? {
+    /// The host is taken from the URL string *as written* — not from
+    /// `URLComponents.host` / `.percentEncodedHost`, which IDNA-decode a
+    /// punycode `xn--80ak8a1oqq.casa` into a Cyrillic "сӏаѵе.casa" that is
+    /// pixel-identical to clave.casa, and let zero-width / bidi-override /
+    /// soft-hyphen characters through. Punycode is shown literally (visibly
+    /// not the real domain); raw Unicode and percent-escapes are rejected.
+    ///
+    /// Host handling: lowercase; drop a trailing dot; strip exactly one
+    /// leading `www.`; keep every other label — a last-two-labels collapse
+    /// would launder `attacker.github.io` into "github.io" (likewise
+    /// pages.dev, vercel.app, netlify.app, trycloudflare.com, ne.jp, nhs.uk…).
+    /// Userinfo, ports, paths, queries and fragments are ignored.
+    static func domain(fromURL urlString: String?) -> String? {
         guard let urlString,
-              !urlString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               let components = URLComponents(string: urlString),
               let scheme = components.scheme?.lowercased(),
               scheme == "http" || scheme == "https",
-              let rawHost = components.host, !rawHost.isEmpty else {
+              let schemeEnd = urlString.range(of: "://") else {
             return nil
         }
 
-        var host = rawHost.lowercased()
-        // Some Foundation versions keep IPv6 brackets in `host`; normalise
-        // before the IP-literal check.
-        host = host.trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+        // Authority = everything after "://" up to the first "/", "?" or "#";
+        // then drop userinfo (through the last "@") and the port (from the
+        // first ":" — an IPv6 literal's "[" fails the character check below).
+        var authority = urlString[schemeEnd.upperBound...]
+        if let end = authority.firstIndex(where: { $0 == "/" || $0 == "?" || $0 == "#" }) {
+            authority = authority[..<end]
+        }
+        if let at = authority.lastIndex(of: "@") {
+            authority = authority[authority.index(after: at)...]
+        }
+        if let colon = authority.firstIndex(of: ":") {
+            authority = authority[..<colon]
+        }
+
+        // ASCII check BEFORE lowercasing: a few non-ASCII letters (the Kelvin
+        // sign, for one) lowercase to ASCII.
+        guard authority.utf8.allSatisfy({ $0 < 128 }) else { return nil }
+        var host = authority.lowercased()
+        guard !host.isEmpty, host.allSatisfy(hostCharacters.contains) else { return nil }
+
         if host.hasSuffix(".") { host.removeLast() }
         if host.hasPrefix("www.") { host.removeFirst(4) }
 
-        guard host != "localhost", !isIPLiteral(host) else { return nil }
+        guard host != "localhost", !isIPv4Literal(host) else { return nil }
 
-        let labels = host.split(separator: ".", omittingEmptySubsequences: false).map(String.init)
+        let labels = host.split(separator: ".", omittingEmptySubsequences: false)
         guard labels.count >= 2, labels.allSatisfy({ !$0.isEmpty }) else { return nil }
-
-        let tld = labels[labels.count - 1]
-        let secondLevel = labels[labels.count - 2]
-        let keepThree = labels.count >= 3
-            && tld.count == 2
-            && wellKnownSecondLevelSuffixes.contains(secondLevel)
-        return labels.suffix(keepThree ? 3 : 2).joined(separator: ".")
+        return host
     }
 
     /// Short client-pubkey fingerprint, same shape as `ClientIdentityHeader`:
@@ -74,26 +92,42 @@ enum CallerIdentity {
         return String(pubkey.prefix(8)) + "…" + String(pubkey.suffix(4))
     }
 
-    /// The headline for the caller: the registrable domain when the `url`
-    /// yields one; else the self-asserted name (still unverified — callers
-    /// must keep the "unverified" caption visible); else the pubkey
-    /// fingerprint. An empty name is treated as absent.
-    static func displayDomain(for uri: NostrConnectParser.ParsedURI) -> String {
-        if let domain = registrableDomain(fromURL: uri.url) {
-            return domain
+    /// The headline for the caller: the display host when the `url` yields
+    /// one, else the pubkey fingerprint. The self-asserted name is not an
+    /// input — it must never occupy the headline slot.
+    static func headline(url: String?, pubkey: String) -> String {
+        domain(fromURL: url) ?? fingerprint(pubkey)
+    }
+
+    /// The self-asserted name with surrounding whitespace trimmed; nil when
+    /// absent or whitespace-only. Every surface goes through this so a blank
+    /// name is "no name" everywhere.
+    static func name(_ raw: String?) -> String? {
+        guard let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !trimmed.isEmpty else { return nil }
+        return trimmed
+    }
+
+    /// The self-asserted claim shown beneath the headline, always followed by
+    /// `unverifiedMarker`: 'calls itself “name”' when a name is present; else
+    /// "icon" when only an image is (an icon-only caller is still making a
+    /// claim); else nil (nothing self-asserted to flag). Shared by both
+    /// surfaces so identical inputs produce identical strings.
+    static func unverifiedClaim(name rawName: String?, imageURL: String?) -> String? {
+        if let name = name(rawName) {
+            return "calls itself “\(name)”"
         }
-        if let name = uri.name, !name.isEmpty {
-            return name
+        if let imageURL, !imageURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "icon"
         }
-        return fingerprint(uri.clientPubkey)
+        return nil
     }
 
     // MARK: - Private
 
-    /// IPv6 literals contain ":"; IPv4 literals are exactly four all-digit
-    /// labels. Anything else is treated as a hostname.
-    private static func isIPLiteral(_ host: String) -> Bool {
-        if host.contains(":") { return true }
+    /// Exactly four all-digit labels. (IPv6 literals never reach here — their
+    /// brackets and colons fail the host character check.)
+    private static func isIPv4Literal(_ host: String) -> Bool {
         let parts = host.split(separator: ".", omittingEmptySubsequences: false)
         return parts.count == 4 && parts.allSatisfy { !$0.isEmpty && $0.allSatisfy(\.isNumber) }
     }

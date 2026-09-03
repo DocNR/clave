@@ -143,7 +143,7 @@ struct ApprovalSheet: View {
 
     private var multiHeader: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("\(clientDisplayName) is requesting to sign for \(boundAccountPubkeys.count) accounts")
+            Text("\(callerHeadline) is requesting to sign for \(boundAccountPubkeys.count) accounts")
                 .font(.title3.weight(.semibold))
                 .frame(maxWidth: .infinity, alignment: .leading)
             selectedAccountsInlineList
@@ -178,20 +178,17 @@ struct ApprovalSheet: View {
         .background(Color(.tertiarySystemGroupedBackground), in: Capsule())
     }
 
-    private var clientDisplayName: String {
-        parsedURI.name ?? "This app"
-    }
-
     // MARK: - Client Identity Header
 
-    /// Domain-first caller rendering (Sign in with Clave spec): the
-    /// registrable domain of the self-asserted `url` is the largest, most
-    /// prominent element; the self-asserted name and icon sit below it,
-    /// small and explicitly marked unverified; the client-pubkey fingerprint
-    /// is always shown. Nothing self-asserted is given authority — brand-new
-    /// users are the most phishable audience. Same posture and wording as the
-    /// onboarding caller banner (`OnboardingView.callerBanner`); the shared
-    /// rules live in `CallerIdentity`.
+    /// Domain-first caller rendering (Sign in with Clave spec): the host of
+    /// the self-asserted `url` is the largest, most prominent element (else
+    /// the pubkey fingerprint — never the self-asserted name); the
+    /// self-asserted name and icon sit below it, small and explicitly marked
+    /// unverified; the client-pubkey fingerprint is always shown. Nothing
+    /// self-asserted is given authority — brand-new users are the most
+    /// phishable audience. Same posture and wording as the onboarding caller
+    /// banner (`OnboardingView.callerBanner`); the shared rules live in
+    /// `CallerIdentity`.
     private var clientHeader: some View {
         VStack(spacing: 12) {
             Text(callerHeadline)
@@ -208,15 +205,22 @@ struct ApprovalSheet: View {
                     Text("wants to connect")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
-                    if let caption = callerUnverifiedCaption {
-                        Text(caption)
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
+                    // The claim truncates; the marker is a fixed sibling so
+                    // a long name can never push "unverified" off screen.
+                    if let claim = callerUnverifiedClaim {
+                        HStack(spacing: 4) {
+                            Text(claim)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                            Text(CallerIdentity.unverifiedMarker)
+                                .fixedSize()
+                                .layoutPriority(1)
+                        }
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
                     }
                     // The fingerprint is already the headline when the caller
-                    // gave neither a usable url nor a name — don't repeat it.
+                    // gave no usable url — don't repeat it.
                     if !callerHeadlineIsFingerprint {
                         Text(clientFingerprint)
                             .font(.caption.monospaced())
@@ -246,50 +250,45 @@ struct ApprovalSheet: View {
                         .frame(width: 32, height: 32)
                         .clipShape(Circle())
                 default:
-                    AvatarView(pubkeyHex: parsedURI.clientPubkey, name: parsedURI.name, size: 32)
+                    AvatarView(pubkeyHex: parsedURI.clientPubkey, name: callerName, size: 32)
                 }
             }
         } else {
-            AvatarView(pubkeyHex: parsedURI.clientPubkey, name: parsedURI.name, size: 32)
+            AvatarView(pubkeyHex: parsedURI.clientPubkey, name: callerName, size: 32)
         }
     }
 
-    /// Registrable domain of the self-asserted `url`; nil when there is none
-    /// worth showing (no url, non-http(s), IP literal, localhost, …).
+    /// Display host of the self-asserted `url`; nil when there is none worth
+    /// showing (no url, non-http(s), non-ASCII, IP literal, localhost, …).
     private var callerDomain: String? {
-        CallerIdentity.registrableDomain(fromURL: parsedURI.url)
+        CallerIdentity.domain(fromURL: parsedURI.url)
     }
 
-    /// Self-asserted name, with empty treated as absent.
+    /// Self-asserted name, trimmed, with blank treated as absent.
     private var callerName: String? {
-        guard let name = parsedURI.name, !name.isEmpty else { return nil }
-        return name
+        CallerIdentity.name(parsedURI.name)
     }
 
-    /// Top line: domain → name → fingerprint (`CallerIdentity.displayDomain`).
+    /// Top line: domain, else the pubkey fingerprint — never the name
+    /// (`CallerIdentity.headline`). Also the caller's name in the
+    /// multi-account header and the success message.
     private var callerHeadline: String {
-        CallerIdentity.displayDomain(for: parsedURI)
+        CallerIdentity.headline(url: parsedURI.url, pubkey: parsedURI.clientPubkey)
     }
 
     private var callerHeadlineIsFingerprint: Bool {
-        callerDomain == nil && callerName == nil
+        callerDomain == nil
     }
 
     private var clientFingerprint: String {
         CallerIdentity.fingerprint(parsedURI.clientPubkey)
     }
 
-    /// The explicit "unverified" treatment for the self-asserted name. When
-    /// the domain is the headline, the name is quoted here so it reads as a
-    /// claim ("calls itself …"); when the name itself had to take the
-    /// headline (no usable url), it is still flagged as self-asserted rather
-    /// than repeated. Nil only when the caller supplied no name at all.
-    private var callerUnverifiedCaption: String? {
-        guard let name = callerName else { return nil }
-        if callerDomain == nil {
-            return "self-asserted name · unverified"
-        }
-        return "calls itself “\(name)” · unverified"
+    /// The self-asserted claim beneath the headline — 'calls itself “name”',
+    /// or "icon" for an icon-only caller — always followed by the fixed
+    /// `CallerIdentity.unverifiedMarker`. Nil when nothing was self-asserted.
+    private var callerUnverifiedClaim: String? {
+        CallerIdentity.unverifiedClaim(name: parsedURI.name, imageURL: parsedURI.imageURL)
     }
 
     // MARK: - Trust Level Cards
@@ -577,7 +576,7 @@ struct ApprovalSheet: View {
             appState.accounts.first(where: { $0.pubkeyHex == pubkey })?.displayLabel
                 ?? String(pubkey.prefix(8))
         }.joined(separator: ", ")
-        return "\(clientDisplayName) is now signed in for \(names)"
+        return "\(callerHeadline) is now signed in for \(names)"
     }
 
     /// Partial-failure result view — the user sees which signers succeeded
