@@ -128,9 +128,21 @@ struct OnboardingView: View {
             Spacer()
 
             VStack(spacing: 12) {
-                Image(systemName: "key.fill")
-                    .font(.system(size: 64))
-                    .foregroundStyle(Color.accentColor)
+                // The app-icon mark, presented as an icon tile — the asset is
+                // an opaque square, so it needs the rounded clip. Decorative:
+                // the "Clave" wordmark right below carries the name.
+                Image("ClaveLogo")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 112, height: 112)
+                    .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 26, style: .continuous)
+                            .strokeBorder(.white.opacity(0.12), lineWidth: 0.5)
+                    )
+                    .shadow(color: .black.opacity(0.22), radius: 18, y: 10)
+                    .accessibilityHidden(true)
+                    .padding(.bottom, 8)
 
                 Text("Clave")
                     .font(.largeTitle.bold())
@@ -150,12 +162,20 @@ struct OnboardingView: View {
 
             VStack(spacing: 16) {
                 VStack(spacing: 8) {
-                    TextField("nsec1... or hex secret key", text: $nsecInput)
-                        .textFieldStyle(.roundedBorder)
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
-                        .font(.system(.body, design: .monospaced))
-                        .padding(.horizontal, 24)
+                    // Same card grammar as Home's stat tiles and the caller
+                    // banner above: ultra-thin material in a 12pt rounded rect.
+                    HStack(spacing: 10) {
+                        Image(systemName: "key.fill")
+                            .foregroundStyle(.secondary)
+                        TextField("nsec1... or hex secret key", text: $nsecInput)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                            .font(.system(.body, design: .monospaced))
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                    .padding(.horizontal, 24)
 
                     if !errorMessage.isEmpty {
                         Text(errorMessage)
@@ -164,6 +184,8 @@ struct OnboardingView: View {
                     }
                 }
 
+                // Same pair as ApprovalSheet's action buttons: full-width
+                // prominent primary over a lighter secondary, both .large.
                 Button {
                     importKey()
                 } label: {
@@ -171,6 +193,8 @@ struct OnboardingView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .tint(.blue)
                 .disabled(nsecInput.trimmingCharacters(in: .whitespaces).isEmpty)
                 .padding(.horizontal, 24)
 
@@ -181,12 +205,33 @@ struct OnboardingView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
+                .controlSize(.large)
                 .padding(.horizontal, 24)
             }
 
             Spacer()
                 .frame(height: 48)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(welcomeBackgroundGradient.ignoresSafeArea())
+    }
+
+    /// Ambient gradient behind the welcome step — the same stop recipe as
+    /// HomeView's `homeBackgroundGradient`, so the first screen and Home read
+    /// as one app. There is no account yet to derive a theme from, so this
+    /// uses a fixed palette entry chosen to sit with the logo's deep blue.
+    private var welcomeBackgroundGradient: some View {
+        let theme = AccountTheme.palette[4]  // sky → navy
+        return LinearGradient(
+            stops: [
+                .init(color: theme.start.opacity(0.42), location: 0.0),
+                .init(color: theme.end.opacity(0.22), location: 0.35),
+                .init(color: theme.end.opacity(0.10), location: 0.70),
+                .init(color: theme.start.opacity(0.04), location: 1.0),
+            ],
+            startPoint: .top,
+            endPoint: .bottom
+        )
     }
 
     // MARK: - Step 2: Key Secured
