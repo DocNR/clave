@@ -325,6 +325,7 @@ struct ConnectNostrConnectSurface: View {
             switch error {
             case .invalidScheme: scanError = "Not a Nostrconnect code"
             case .missingPubkey: scanError = "Missing client public key"
+            case .invalidPubkey: scanError = "Invalid client public key"
             case .missingRelay:  scanError = "Missing relay parameter"
             case .missingSecret: scanError = "Missing secret parameter"
             case .invalidURL:    scanError = "Invalid URI format"

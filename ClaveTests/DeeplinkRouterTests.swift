@@ -224,6 +224,25 @@ final class DeeplinkRouterTests: XCTestCase {
         }
     }
 
+    /// clave://connect?uri= whose inner nostrconnect host is a domain name
+    /// rather than a 64-hex client pubkey → .ignore at every account count.
+    /// The host slot IS the client pubkey; a URI that smuggles "clave.casa"
+    /// there is malformed, and its well-formed relay + secret must not
+    /// rescue it. (Encoded the same way as the other clave://connect tests so
+    /// the inner URI reaches the parser intact — the only thing wrong with it
+    /// is the host.)
+    func testClaveConnect_nonHexPubkeyHost_routesToIgnore() throws {
+        let nostrconnect = "nostrconnect://clave.casa?relay=wss%3A%2F%2Fa&secret=s"
+        var allowed = CharacterSet.urlQueryAllowed
+        allowed.remove(charactersIn: "?&=#")
+        let encoded = nostrconnect.addingPercentEncoding(withAllowedCharacters: allowed)!
+        let url = URL(string: "clave://connect?uri=\(encoded)")!
+        for count in [0, 1, 3] {
+            XCTAssertEqual(DeeplinkRouter.route(url: url, accountCount: count), .ignore,
+                           "accountCount=\(count)")
+        }
+    }
+
     // MARK: - Fixtures
 
     private static let sampleClientPubkey =

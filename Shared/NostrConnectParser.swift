@@ -5,6 +5,7 @@ enum NostrConnectParser {
     enum ParseError: Error, Equatable {
         case invalidScheme
         case missingPubkey
+        case invalidPubkey
         case missingRelay
         case missingSecret
         case invalidURL
@@ -38,6 +39,8 @@ enum NostrConnectParser {
         }
     }
 
+    private static let hexDigits = Set("0123456789abcdef")
+
     static func parse(_ uri: String) throws -> ParsedURI {
         guard uri.hasPrefix("nostrconnect://") else {
             throw ParseError.invalidScheme
@@ -48,8 +51,15 @@ enum NostrConnectParser {
             throw ParseError.invalidURL
         }
 
-        let clientPubkey = components.host ?? ""
+        let clientPubkey = (components.host ?? "").lowercased()
         guard !clientPubkey.isEmpty else { throw ParseError.missingPubkey }
+        // The host IS the client pubkey: exactly 64 hex characters, stored
+        // lowercased. Anything else — a domain name, a short key, a non-hex
+        // character — is a malformed URI, however well-formed its relay and
+        // secret are.
+        guard clientPubkey.utf8.count == 64, clientPubkey.allSatisfy(hexDigits.contains) else {
+            throw ParseError.invalidPubkey
+        }
 
         let queryItems = components.queryItems ?? []
 

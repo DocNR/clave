@@ -3,6 +3,9 @@ import XCTest
 
 final class NostrConnectParserTests: XCTestCase {
 
+    /// The nostrconnect host is the client pubkey: exactly 64 hex characters.
+    private let pubkey = "83f3b2ae6aa368e8275397b9c26cf550101d63ebaab900d19dd4a4429f5ad8f5"
+
     func testParseValidURI() throws {
         let uri = "nostrconnect://83f3b2ae6aa368e8275397b9c26cf550101d63ebaab900d19dd4a4429f5ad8f5?relay=wss%3A%2F%2Frelay1.example.com&secret=abc123&name=TestClient&url=https%3A%2F%2Ftest.com&image=https%3A%2F%2Ftest.com%2Ficon.png"
         let result = try NostrConnectParser.parse(uri)
@@ -15,7 +18,7 @@ final class NostrConnectParserTests: XCTestCase {
     }
 
     func testParseMultipleRelays() throws {
-        let uri = "nostrconnect://aabbccdd?relay=wss%3A%2F%2Frelay1.com&relay=wss%3A%2F%2Frelay2.com&secret=xyz"
+        let uri = "nostrconnect://\(pubkey)?relay=wss%3A%2F%2Frelay1.com&relay=wss%3A%2F%2Frelay2.com&secret=xyz"
         let result = try NostrConnectParser.parse(uri)
         XCTAssertEqual(result.relays.count, 2)
         XCTAssertTrue(result.relays.contains("wss://relay1.com"))
@@ -23,23 +26,48 @@ final class NostrConnectParserTests: XCTestCase {
     }
 
     func testParsePermsParam() throws {
-        let uri = "nostrconnect://aabbccdd?relay=wss%3A%2F%2Frelay.com&secret=s&perms=sign_event%3A1%2Csign_event%3A1301%2Cnip44_encrypt"
+        let uri = "nostrconnect://\(pubkey)?relay=wss%3A%2F%2Frelay.com&secret=s&perms=sign_event%3A1%2Csign_event%3A1301%2Cnip44_encrypt"
         let result = try NostrConnectParser.parse(uri)
         XCTAssertEqual(result.requestedPerms, ["sign_event:1", "sign_event:1301", "nip44_encrypt"])
     }
 
     func testParseMissingSecretThrows() {
-        let uri = "nostrconnect://aabbccdd?relay=wss%3A%2F%2Frelay.com"
+        let uri = "nostrconnect://\(pubkey)?relay=wss%3A%2F%2Frelay.com"
         XCTAssertThrowsError(try NostrConnectParser.parse(uri)) { error in
             XCTAssertEqual(error as? NostrConnectParser.ParseError, .missingSecret)
         }
     }
 
     func testParseMissingRelayThrows() {
-        let uri = "nostrconnect://aabbccdd?secret=abc"
+        let uri = "nostrconnect://\(pubkey)?secret=abc"
         XCTAssertThrowsError(try NostrConnectParser.parse(uri)) { error in
             XCTAssertEqual(error as? NostrConnectParser.ParseError, .missingRelay)
         }
+    }
+
+    func testParseNonHexPubkeyThrows() {
+        // The host slot is the client pubkey. A domain name, a short/long
+        // key, or a non-hex character there is a malformed URI — a
+        // well-formed relay and secret must not rescue it.
+        let hosts = [
+            "clave.casa",
+            "aabbccdd",
+            String(pubkey.dropLast()),        // 63 chars
+            pubkey + "a",                     // 65 chars
+            "g" + pubkey.dropFirst(),         // non-hex character
+        ]
+        for host in hosts {
+            let uri = "nostrconnect://\(host)?relay=wss%3A%2F%2Frelay.com&secret=s"
+            XCTAssertThrowsError(try NostrConnectParser.parse(uri), host) { error in
+                XCTAssertEqual(error as? NostrConnectParser.ParseError, .invalidPubkey, host)
+            }
+        }
+    }
+
+    func testParseUppercasePubkeyIsStoredLowercased() throws {
+        let uri = "nostrconnect://\(pubkey.uppercased())?relay=wss%3A%2F%2Frelay.com&secret=s"
+        let result = try NostrConnectParser.parse(uri)
+        XCTAssertEqual(result.clientPubkey, pubkey)
     }
 
     func testParseInvalidSchemeThrows() {
@@ -50,13 +78,13 @@ final class NostrConnectParserTests: XCTestCase {
     }
 
     func testSuggestedTrustLevel_noPerms() throws {
-        let uri = "nostrconnect://aabbccdd?relay=wss%3A%2F%2Frelay.com&secret=s"
+        let uri = "nostrconnect://\(pubkey)?relay=wss%3A%2F%2Frelay.com&secret=s"
         let result = try NostrConnectParser.parse(uri)
         XCTAssertEqual(result.suggestedTrustLevel, .medium)
     }
 
     func testSuggestedTrustLevel_narrowPerms() throws {
-        let uri = "nostrconnect://aabbccdd?relay=wss%3A%2F%2Frelay.com&secret=s&perms=sign_event%3A1"
+        let uri = "nostrconnect://\(pubkey)?relay=wss%3A%2F%2Frelay.com&secret=s&perms=sign_event%3A1"
         let result = try NostrConnectParser.parse(uri)
         XCTAssertEqual(result.suggestedTrustLevel, .low)
     }
