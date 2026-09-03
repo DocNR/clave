@@ -50,7 +50,10 @@ enum CallerIdentity {
               let components = URLComponents(string: urlString),
               let scheme = components.scheme?.lowercased(),
               scheme == "http" || scheme == "https",
-              let schemeEnd = urlString.range(of: "://") else {
+              // The authority must follow the scheme directly. Matching the
+              // first "://" anywhere would let `https:evil://clave.casa`
+              // display "clave.casa" while Foundation sees no host at all.
+              let schemeEnd = urlString.range(of: scheme + "://", options: [.caseInsensitive, .anchored]) else {
             return nil
         }
 
@@ -77,10 +80,13 @@ enum CallerIdentity {
         if host.hasSuffix(".") { host.removeLast() }
         if host.hasPrefix("www.") { host.removeFirst(4) }
 
-        guard host != "localhost", !isIPv4Literal(host) else { return nil }
+        guard host != "localhost" else { return nil }
 
         let labels = host.split(separator: ".", omittingEmptySubsequences: false)
         guard labels.count >= 2, labels.allSatisfy({ !$0.isEmpty }) else { return nil }
+        // No TLD is numeric, so a numeric last label is an IP literal in some
+        // spelling (1.2.3.4, 127.1, 0x7f.0.0.1, 1.2.3.4.5) — never a domain.
+        guard let last = labels.last, !last.allSatisfy(\.isNumber) else { return nil }
         return host
     }
 
@@ -121,14 +127,5 @@ enum CallerIdentity {
             return "icon"
         }
         return nil
-    }
-
-    // MARK: - Private
-
-    /// Exactly four all-digit labels. (IPv6 literals never reach here — their
-    /// brackets and colons fail the host character check.)
-    private static func isIPv4Literal(_ host: String) -> Bool {
-        let parts = host.split(separator: ".", omittingEmptySubsequences: false)
-        return parts.count == 4 && parts.allSatisfy { !$0.isEmpty && $0.allSatisfy(\.isNumber) }
     }
 }

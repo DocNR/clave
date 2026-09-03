@@ -117,6 +117,27 @@ final class CallerIdentityTests: XCTestCase {
         XCTAssertNil(CallerIdentity.domain(fromURL: "http://LOCALHOST:5173"))
     }
 
+    func testIPv4ShorthandSpellingsAreNil() {
+        // No TLD is numeric, so any numeric last label is an IP literal in
+        // some spelling — never a domain.
+        XCTAssertNil(CallerIdentity.domain(fromURL: "https://127.1"))
+        XCTAssertNil(CallerIdentity.domain(fromURL: "https://0x7f.0.0.1"))
+        XCTAssertNil(CallerIdentity.domain(fromURL: "https://1.2.3.4.5"))
+        XCTAssertNil(CallerIdentity.domain(fromURL: "https://10.0.0.1:8080/"))
+    }
+
+    func testAuthorityMustFollowTheSchemeDirectly() {
+        // URLComponents accepts these with scheme "https" but no host; matching
+        // the first "://" anywhere in the string would display "clave.casa".
+        XCTAssertNil(CallerIdentity.domain(fromURL: "https:evil://clave.casa"))
+        XCTAssertNil(CallerIdentity.domain(fromURL: "https:/evil.com/x://clave.casa"))
+        XCTAssertNil(CallerIdentity.domain(fromURL: "HTTPS:x://clave.casa"))
+        XCTAssertNil(CallerIdentity.domain(fromURL: "https:?x://clave.casa"))
+        XCTAssertNil(CallerIdentity.domain(fromURL: "https:#x://clave.casa"))
+        // Case-insensitive scheme is still fine when the authority follows it.
+        XCTAssertEqual(CallerIdentity.domain(fromURL: "HTTPS://clave.casa"), "clave.casa")
+    }
+
     // MARK: - fingerprint(_:)
 
     func testFingerprintShape() {
