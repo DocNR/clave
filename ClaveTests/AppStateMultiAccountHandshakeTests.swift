@@ -11,7 +11,7 @@ final class AppStateMultiAccountHandshakeTests: XCTestCase {
     func testEmptyArrayThrowsAtBoundary() async throws {
         let appState = AppState()
         let dummyURI = try NostrConnectParser.parse(
-            "nostrconnect://aabbccdd?relay=wss%3A%2F%2Frelay.example.com&secret=s"
+            "nostrconnect://aabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccdd?relay=wss%3A%2F%2Frelay.example.com&secret=s"
         )
         let perms = ClientPermissions(
             pubkey: "aabbccdd",
@@ -43,7 +43,7 @@ final class AppStateMultiAccountHandshakeTests: XCTestCase {
         // HandshakeResult.failed with correct signerPubkey attribution.
         let appState = AppState()
         let dummyURI = try NostrConnectParser.parse(
-            "nostrconnect://aabbccdd?relay=wss%3A%2F%2Frelay.invalid.test&secret=s"
+            "nostrconnect://aabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccdd?relay=wss%3A%2F%2Frelay.invalid.test&secret=s"
         )
         let perms = ClientPermissions(
             pubkey: "aabbccdd",

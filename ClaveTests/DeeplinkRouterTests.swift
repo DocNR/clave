@@ -24,14 +24,17 @@ final class DeeplinkRouterTests: XCTestCase {
         }
     }
 
-    // Zero accounts → routes to .ignore (defensive — should never happen in practice)
-    func testNostrconnect_zeroAccounts_routesToIgnore() throws {
+    // Zero accounts + valid URI → .stashForOnboarding(parsed) (Sign in with
+    // Clave: a brand-new user deep-linked from a partner must have the connect
+    // URI stashed through onboarding, not dropped — replaces the old .ignore).
+    func testNostrconnect_zeroAccounts_routesToStashForOnboarding() throws {
         let validURI = "nostrconnect://abc123def456abc123def456abc123def456abc123def456abc123def456abcd?relay=wss%3A%2F%2Frelay.example.com&secret=topsecret"
         let url = URL(string: validURI)!
         let result = DeeplinkRouter.route(url: url, accountCount: 0)
-        guard case .ignore = result else {
-            return XCTFail("Expected .ignore, got \(result)")
+        guard case .stashForOnboarding(let parsed) = result else {
+            return XCTFail("Expected .stashForOnboarding, got \(result)")
         }
+        XCTAssertEqual(parsed.clientPubkey, "abc123def456abc123def456abc123def456abc123def456abc123def456abcd")
     }
 
     // Malformed nostrconnect:// URL → routes to .ignore
@@ -136,4 +139,122 @@ final class DeeplinkRouterTests: XCTestCase {
         XCTAssertEqual(DeeplinkRouter.route(url: editURL, accountCount: 1), .ignore)
         XCTAssertEqual(DeeplinkRouter.route(url: landingURL, accountCount: 1), .ignore)
     }
+
+    /// Universal Link with zero accounts + valid URI → .stashForOnboarding.
+    /// The brand-new-user Conduit path: the URI survives into onboarding
+    /// instead of being dropped.
+    func testUniversalLink_zeroAccounts_routesToStashForOnboarding() throws {
+        let url = URL(string: "https://clave.casa/connect/?uri=\(Self.encodedNostrconnect)")!
+        let result = DeeplinkRouter.route(url: url, accountCount: 0)
+        guard case .stashForOnboarding(let parsed) = result else {
+            return XCTFail("Expected .stashForOnboarding, got \(result)")
+        }
+        XCTAssertEqual(parsed.clientPubkey, Self.sampleClientPubkey)
+    }
+
+    // MARK: - clave://connect?uri=... (reserved scheme, first handler)
+
+    /// clave://connect?uri= with single account → .approve — byte-identical
+    /// routing to the nostrconnect:// and Universal Link forms.
+    func testClaveConnect_singleAccount_routesToApprove() throws {
+        let url = URL(string: "clave://connect?uri=\(Self.encodedNostrconnect)")!
+        let result = DeeplinkRouter.route(url: url, accountCount: 1)
+        guard case .approve(let parsed) = result else {
+            return XCTFail("Expected .approve, got \(result)")
+        }
+        XCTAssertEqual(parsed.clientPubkey, Self.sampleClientPubkey)
+    }
+
+    /// clave://connect?uri= with multiple accounts → .pickAccount.
+    func testClaveConnect_multiAccount_routesToPickAccount() throws {
+        let url = URL(string: "clave://connect?uri=\(Self.encodedNostrconnect)")!
+        let result = DeeplinkRouter.route(url: url, accountCount: 3)
+        guard case .pickAccount = result else {
+            return XCTFail("Expected .pickAccount, got \(result)")
+        }
+    }
+
+    /// clave://connect?uri= with zero accounts → .stashForOnboarding.
+    func testClaveConnect_zeroAccounts_routesToStashForOnboarding() throws {
+        let url = URL(string: "clave://connect?uri=\(Self.encodedNostrconnect)")!
+        let result = DeeplinkRouter.route(url: url, accountCount: 0)
+        guard case .stashForOnboarding(let parsed) = result else {
+            return XCTFail("Expected .stashForOnboarding, got \(result)")
+        }
+        XCTAssertEqual(parsed.clientPubkey, Self.sampleClientPubkey)
+    }
+
+    /// clave:// with a host other than `connect` → .ignore, even with a uri
+    /// param. The reserved scheme handles ONLY connect?uri= for now.
+    func testClaveScheme_nonConnectHost_routesToIgnore() throws {
+        let url = URL(string: "clave://settings?uri=\(Self.encodedNostrconnect)")!
+        let result = DeeplinkRouter.route(url: url, accountCount: 1)
+        guard case .ignore = result else {
+            return XCTFail("Expected .ignore for non-connect clave host, got \(result)")
+        }
+    }
+
+    /// clave://connect with no uri param → .ignore.
+    func testClaveConnect_missingURIParam_routesToIgnore() throws {
+        let url = URL(string: "clave://connect")!
+        let result = DeeplinkRouter.route(url: url, accountCount: 1)
+        guard case .ignore = result else {
+            return XCTFail("Expected .ignore, got \(result)")
+        }
+    }
+
+    /// clave://connect?uri= with present-but-empty value → .ignore.
+    func testClaveConnect_emptyURIValue_routesToIgnore() throws {
+        let url = URL(string: "clave://connect?uri=")!
+        let result = DeeplinkRouter.route(url: url, accountCount: 1)
+        guard case .ignore = result else {
+            return XCTFail("Expected .ignore, got \(result)")
+        }
+    }
+
+    /// clave://connect?uri= with a malformed inner URI → .ignore, at every
+    /// account count (parse failure dominates the account-count branch).
+    func testClaveConnect_malformedURI_routesToIgnore() throws {
+        let url = URL(string: "clave://connect?uri=garbage-not-a-nostrconnect-uri")!
+        for count in [0, 1, 3] {
+            let result = DeeplinkRouter.route(url: url, accountCount: count)
+            guard case .ignore = result else {
+                return XCTFail("Expected .ignore at accountCount=\(count), got \(result)")
+            }
+        }
+    }
+
+    /// clave://connect?uri= whose inner nostrconnect host is a domain name
+    /// rather than a 64-hex client pubkey → .ignore at every account count.
+    /// The host slot IS the client pubkey; a URI that smuggles "clave.casa"
+    /// there is malformed, and its well-formed relay + secret must not
+    /// rescue it. (Encoded the same way as the other clave://connect tests so
+    /// the inner URI reaches the parser intact — the only thing wrong with it
+    /// is the host.)
+    func testClaveConnect_nonHexPubkeyHost_routesToIgnore() throws {
+        let nostrconnect = "nostrconnect://clave.casa?relay=wss%3A%2F%2Fa&secret=s"
+        var allowed = CharacterSet.urlQueryAllowed
+        allowed.remove(charactersIn: "?&=#")
+        let encoded = nostrconnect.addingPercentEncoding(withAllowedCharacters: allowed)!
+        let url = URL(string: "clave://connect?uri=\(encoded)")!
+        for count in [0, 1, 3] {
+            XCTAssertEqual(DeeplinkRouter.route(url: url, accountCount: count), .ignore,
+                           "accountCount=\(count)")
+        }
+    }
+
+    // MARK: - Fixtures
+
+    private static let sampleClientPubkey =
+        "abc123def456abc123def456abc123def456abc123def456abc123def456abcd"
+
+    /// A valid `nostrconnect://` URI, percent-encoded for embedding in the
+    /// `uri` query parameter of a Universal Link or clave://connect URL.
+    private static let encodedNostrconnect: String = {
+        let nostrconnect =
+            "nostrconnect://\(sampleClientPubkey)?relay=wss%3A%2F%2Frelay.example.com&secret=topsecret"
+        var allowed = CharacterSet.urlQueryAllowed
+        allowed.remove(charactersIn: "?&=#")
+        return nostrconnect.addingPercentEncoding(withAllowedCharacters: allowed)!
+    }()
 }

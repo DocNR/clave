@@ -18,7 +18,7 @@ final class AppStateHandshakeSignatureTests: XCTestCase {
     func testEmptySignerPubkeysThrows() async throws {
         let appState = await AppState()
         let dummyURI = try NostrConnectParser.parse(
-            "nostrconnect://abc?relay=wss%3A%2F%2Frelay.example.com&secret=s"
+            "nostrconnect://abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabca?relay=wss%3A%2F%2Frelay.example.com&secret=s"
         )
         let perms = ClientPermissions(
             pubkey: "abc",

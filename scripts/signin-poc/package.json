@@ -1,0 +1,16 @@
+{
+  "name": "clave-signin-poc",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Proof-of-concept harness + relay probes for the Sign in with Clave spec (docs/superpowers/specs/2026-09-02-sign-in-with-clave-design.md)",
+  "scripts": {
+    "probe": "node relay-ephemeral-probe.mjs",
+    "partner": "node partner-sim.mjs"
+  },
+  "dependencies": {
+    "nostr-tools": "^2.10.0",
+    "qrcode-terminal": "^0.12.0",
+    "ws": "^8.18.0"
+  }
+}

@@ -194,6 +194,18 @@ final class AppState {
     /// accounts. HomeView observes this to present ConnectAccountPicker.
     var pendingDeeplinkAccountChoice: NostrConnectParser.ParsedURI?
 
+    /// Persisted single-slot stash for a connect URI that arrived while the
+    /// device had zero accounts (brand-new-user "Sign in with Clave" path).
+    /// Promoted into `pendingNostrconnectURI` when an account is created.
+    /// Non-observable (value-type UserDefaults wrapper).
+    let onboardingConnectStash = OnboardingConnectStash()
+
+    /// Caller metadata for the onboarding "X wants to connect" banner. Mirrors
+    /// the persisted stash so the view updates reactively; hydrated from the
+    /// persisted stash at launch to cover the killed-during-install cold-launch
+    /// case. Cleared at promotion or on expiry.
+    var onboardingConnectBanner: NostrConnectParser.ParsedURI?
+
     /// Pubkey of the account chosen by ConnectAccountPicker. Threaded
     /// through to ApprovalSheet via boundAccountPubkeys (wrapped in a
     /// 1-element array). Cleared after the connect completes or the
@@ -271,6 +283,12 @@ final class AppState {
                 self?.handleDeeplink(url: url)
             }
         }
+
+        // Hydrate the onboarding caller banner from any persisted stash — the
+        // killed-during-install cold-launch case, where the app relaunches to
+        // onboarding with a stashed URI but no in-memory state yet. peek()
+        // scrubs it if it has already expired.
+        onboardingConnectBanner = onboardingConnectStash.peek(now: Date().timeIntervalSince1970)
 
         // Lock-screen Approve / Deny actions are handled directly in
         // `AppDelegate.userNotificationCenter(_:didReceive:)` via

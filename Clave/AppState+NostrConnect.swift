@@ -12,9 +12,9 @@ import Foundation
 extension AppState {
 
     /// Routes an incoming URL deeplink. Called from ClaveApp.onOpenURL via
-    /// a NotificationCenter post. Mutates pendingNostrconnectURI or
-    /// pendingDeeplinkAccountChoice based on account count. clave:// and
-    /// malformed URIs are silently ignored.
+    /// a NotificationCenter post. Mutates pendingNostrconnectURI,
+    /// pendingDeeplinkAccountChoice, or the onboarding stash based on account
+    /// count. clave:// (except connect?uri=) and malformed URIs are ignored.
     @MainActor
     func handleDeeplink(url: URL) {
         let outcome = DeeplinkRouter.route(url: url, accountCount: accounts.count)
@@ -23,9 +23,25 @@ extension AppState {
             pendingNostrconnectURI = parsed
         case .pickAccount(let parsed):
             pendingDeeplinkAccountChoice = parsed
+        case .stashForOnboarding(let parsed):
+            // Brand-new user: no account to sign with yet. Persist the connect
+            // URI (single-slot, last-writer-wins) and surface the caller banner
+            // so onboarding can replay it once a key is created/imported.
+            let now = Date().timeIntervalSince1970
+            onboardingConnectStash.store(parsed, now: now)
+            onboardingConnectBanner = parsed
         case .ignore:
             break
         }
+    }
+
+    /// Re-peek the persisted onboarding stash and update the caller banner —
+    /// clears it if the stash has expired (user lingered past the 10-min TTL,
+    /// or the app returned to foreground after expiry). Called from
+    /// OnboardingView.onAppear.
+    @MainActor
+    func refreshOnboardingBanner() {
+        onboardingConnectBanner = onboardingConnectStash.peek(now: Date().timeIntervalSince1970)
     }
 
     /// Perform the nostrconnect:// handshake for each signer in `signerPubkeys`.

@@ -176,8 +176,12 @@ struct ConnectAccountPicker: View {
         }
     }
 
+    /// Domain-first, like ApprovalSheet and the onboarding banner: the host of
+    /// the self-asserted url, else the client-pubkey fingerprint — never the
+    /// self-asserted name, which this picker used to render in bold one screen
+    /// before the sheet's unverified treatment could apply (CallerIdentity).
     private var clientLabel: String {
-        parsedURI?.name ?? "this connection"
+        parsedURI.map { CallerIdentity.headline(url: $0.url, pubkey: $0.clientPubkey) } ?? "this connection"
     }
 
     @ViewBuilder

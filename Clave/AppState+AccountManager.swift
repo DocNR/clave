@@ -1,6 +1,18 @@
 import Foundation
 import NostrSDK
 
+/// Where an account creation originated. Drives `createdDuringFlow` on a
+/// promoted "Sign in with Clave" replay: only a key GENERATED during
+/// onboarding may later (Phase 2) be offered the partner signup write-set
+/// (kind:0 / kind:10002). Import and every non-onboarding route stay false —
+/// an imported identity likely has an existing kind:0 a partner must not
+/// clobber (same hazard class as the clave.casa kind:0 wipe hotfix).
+enum AccountCreationSource {
+    case onboardingGenerate
+    case onboardingImport
+    case other
+}
+
 /// Account management — extracted from AppState per the AppState god-object
 /// refactor (Stage 4a). Owns the account list lifecycle: hydration from
 /// UserDefaults, reinstall recovery, persistence, switch / add / generate /
@@ -142,7 +154,7 @@ extension AppState {
     /// is added twice, switches to the existing account and returns it
     /// (matches noauth's silent dedupe; Phase 2 UI surfaces a toast).
     @discardableResult
-    func addAccount(nsec: String) throws -> Account {
+    func addAccount(nsec: String, source: AccountCreationSource = .other) throws -> Account {
         let trimmed = nsec.trimmingCharacters(in: .whitespacesAndNewlines)
         let keys = try Keys.parse(secretKey: trimmed)
         let bech32 = try keys.secretKey().toBech32()
@@ -176,6 +188,13 @@ extension AppState {
         currentAccount = account
         persistCurrentAccountPubkey()
 
+        // Promote a stashed "Sign in with Clave" connect URI (brand-new-user
+        // path): if a connect URI was stashed while this device had zero
+        // accounts, replay it now against the just-created account. No-op on
+        // every non-onboarding add (the stash is empty when accounts already
+        // existed, since those deeplinks route to approve/pickAccount).
+        promoteStashedConnectURI(source: source)
+
         // Bug G fix: clear stale image from previous account so the UI
         // doesn't show the wrong avatar between switch and fetch completion.
         // The new account has no cached image yet (just created), so
@@ -193,10 +212,27 @@ extension AppState {
 
     /// Generate a fresh keypair as a new account.
     @discardableResult
-    func generateAccount() throws -> Account {
+    func generateAccount(source: AccountCreationSource = .other) throws -> Account {
         let keys = Keys.generate()
         let bech32 = try keys.secretKey().toBech32()
-        return try addAccount(nsec: bech32)
+        return try addAccount(nsec: bech32, source: source)
+    }
+
+    /// Promote a stashed onboarding connect URI onto the freshly-created
+    /// account. Sets `createdDuringFlow` on the in-memory replay payload iff
+    /// the key was Generated during onboarding (never for import). Deferred to
+    /// the next run loop so HomeView — mounted the instant `currentAccount`
+    /// landed — has registered its `pendingNostrconnectURI` observer before we
+    /// set it (mirrors the picker→approval sheet-chain defer in HomeView).
+    private func promoteStashedConnectURI(source: AccountCreationSource) {
+        onboardingConnectBanner = nil
+        guard var promoted = onboardingConnectStash.promote(now: Date().timeIntervalSince1970) else {
+            return
+        }
+        promoted.createdDuringFlow = (source == .onboardingGenerate)
+        DispatchQueue.main.async { [weak self] in
+            self?.pendingNostrconnectURI = promoted
+        }
     }
 
     /// Delete an account from this device. Audit 2026-04-30 finding A2:
@@ -347,12 +383,12 @@ extension AppState {
     // sites. Phase 2 UI will call addAccount/generateAccount/deleteAccount
     // directly.
 
-    func importKey(nsec: String) throws {
-        _ = try addAccount(nsec: nsec)
+    func importKey(nsec: String, source: AccountCreationSource = .other) throws {
+        _ = try addAccount(nsec: nsec, source: source)
     }
 
-    func generateKey() throws {
-        _ = try generateAccount()
+    func generateKey(source: AccountCreationSource = .other) throws {
+        _ = try generateAccount(source: source)
     }
 
     func deleteKey() {
