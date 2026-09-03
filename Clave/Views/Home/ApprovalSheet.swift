@@ -184,37 +184,112 @@ struct ApprovalSheet: View {
 
     // MARK: - Client Identity Header
 
+    /// Domain-first caller rendering (Sign in with Clave spec): the
+    /// registrable domain of the self-asserted `url` is the largest, most
+    /// prominent element; the self-asserted name and icon sit below it,
+    /// small and explicitly marked unverified; the client-pubkey fingerprint
+    /// is always shown. Nothing self-asserted is given authority — brand-new
+    /// users are the most phishable audience. Same posture and wording as the
+    /// onboarding caller banner (`OnboardingView.callerBanner`); the shared
+    /// rules live in `CallerIdentity`.
     private var clientHeader: some View {
         VStack(spacing: 12) {
-            if let imageURLString = parsedURI.imageURL,
-               let url = URL(string: imageURLString) {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .scaledToFill()
-                            .frame(width: 64, height: 64)
-                            .clipShape(Circle())
-                    default:
-                        AvatarView(pubkeyHex: parsedURI.clientPubkey, name: parsedURI.name, size: 64)
+            Text(callerHeadline)
+                .font(callerHeadlineIsFingerprint
+                      ? .title3.monospaced().weight(.semibold)
+                      : .title3.weight(.semibold))
+                .lineLimit(1)
+                .truncationMode(.middle)
+
+            HStack(alignment: .center, spacing: 10) {
+                callerAvatar
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("wants to connect")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    if let caption = callerUnverifiedCaption {
+                        Text(caption)
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                    // The fingerprint is already the headline when the caller
+                    // gave neither a usable url nor a name — don't repeat it.
+                    if !callerHeadlineIsFingerprint {
+                        Text(clientFingerprint)
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
                     }
                 }
-            } else {
-                AvatarView(pubkeyHex: parsedURI.clientPubkey, name: parsedURI.name, size: 64)
-            }
-
-            Text(parsedURI.name ?? truncatedPubkey)
-                .font(.title3.weight(.semibold))
-
-            if let url = parsedURI.url {
-                Text(url)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 8)
+    }
+
+    /// The partner's self-asserted `image` when the URI carries one, else the
+    /// deterministic avatar for its pubkey. Kept small (32pt, not a hero
+    /// image) and paired with the "unverified" caption — the icon is
+    /// self-asserted and carries no authority.
+    @ViewBuilder
+    private var callerAvatar: some View {
+        if let imageURLString = parsedURI.imageURL,
+           let url = URL(string: imageURLString) {
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .success(let image):
+                    image
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 32, height: 32)
+                        .clipShape(Circle())
+                default:
+                    AvatarView(pubkeyHex: parsedURI.clientPubkey, name: parsedURI.name, size: 32)
+                }
+            }
+        } else {
+            AvatarView(pubkeyHex: parsedURI.clientPubkey, name: parsedURI.name, size: 32)
+        }
+    }
+
+    /// Registrable domain of the self-asserted `url`; nil when there is none
+    /// worth showing (no url, non-http(s), IP literal, localhost, …).
+    private var callerDomain: String? {
+        CallerIdentity.registrableDomain(fromURL: parsedURI.url)
+    }
+
+    /// Self-asserted name, with empty treated as absent.
+    private var callerName: String? {
+        guard let name = parsedURI.name, !name.isEmpty else { return nil }
+        return name
+    }
+
+    /// Top line: domain → name → fingerprint (`CallerIdentity.displayDomain`).
+    private var callerHeadline: String {
+        CallerIdentity.displayDomain(for: parsedURI)
+    }
+
+    private var callerHeadlineIsFingerprint: Bool {
+        callerDomain == nil && callerName == nil
+    }
+
+    private var clientFingerprint: String {
+        CallerIdentity.fingerprint(parsedURI.clientPubkey)
+    }
+
+    /// The explicit "unverified" treatment for the self-asserted name. When
+    /// the domain is the headline, the name is quoted here so it reads as a
+    /// claim ("calls itself …"); when the name itself had to take the
+    /// headline (no usable url), it is still flagged as self-asserted rather
+    /// than repeated. Nil only when the caller supplied no name at all.
+    private var callerUnverifiedCaption: String? {
+        guard let name = callerName else { return nil }
+        if callerDomain == nil {
+            return "self-asserted name · unverified"
+        }
+        return "calls itself “\(name)” · unverified"
     }
 
     // MARK: - Trust Level Cards
@@ -728,14 +803,6 @@ struct ApprovalSheet: View {
         let pk = primarySignerPubkey
         return appState.accounts.first(where: { $0.pubkeyHex == pk })?.displayLabel
             ?? String(pk.prefix(8))
-    }
-
-    private var truncatedPubkey: String {
-        let pk = parsedURI.clientPubkey
-        if pk.count > 12 {
-            return String(pk.prefix(8)) + "..." + String(pk.suffix(4))
-        }
-        return pk
     }
 
     private var allKindsSorted: [Int] {

@@ -93,26 +93,21 @@ struct OnboardingView: View {
     }
 
     /// Short client-pubkey fingerprint, same shape as `ClientIdentityHeader`.
+    /// Delegates to `CallerIdentity` so this banner and ApprovalSheet share
+    /// one implementation.
     private func truncatedPubkey(_ pubkey: String) -> String {
-        guard pubkey.count > 12 else { return pubkey }
-        return String(pubkey.prefix(8)) + "…" + String(pubkey.suffix(4))
+        CallerIdentity.fingerprint(pubkey)
     }
 
     /// Registrable domain of the caller's self-asserted `url`, for the
-    /// domain-first line. Strips a leading `www.`; falls back to the
-    /// self-asserted name (still unverified) or a generic label when no `url`
-    /// is present. Not a security boundary — a real verified-caller badge is a
-    /// later well-known-JSON feature.
+    /// domain-first line (subdomains collapsed, `www.` stripped); falls back
+    /// to the self-asserted name (still unverified) or the pubkey fingerprint
+    /// when no usable `url` is present. Shared with ApprovalSheet via
+    /// `CallerIdentity` so both surfaces render the same headline. Not a
+    /// security boundary — a real verified-caller badge is a later
+    /// well-known-JSON feature.
     private func callerDomain(_ caller: NostrConnectParser.ParsedURI) -> String {
-        if let urlString = caller.url,
-           let host = URL(string: urlString)?.host,
-           !host.isEmpty {
-            return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
-        }
-        if let name = caller.name, !name.isEmpty {
-            return name
-        }
-        return "A Nostr app"
+        CallerIdentity.displayDomain(for: caller)
     }
 
     // MARK: - Step 1: Welcome
