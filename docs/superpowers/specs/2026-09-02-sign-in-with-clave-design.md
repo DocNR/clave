@@ -450,3 +450,43 @@ test 4 (Smart-Banner OPEN `app-argument` on the real page).
 3. EU merchants? (Decides how much the TestFlight fallback matters.)
 4. Will Conduit publish merchant kind:0/10002 through the session (preferred), or does the
    clave.casa/edit#bunker= handoff need to be the v1 profile path?
+
+**Answered 2026-09-02 by reading `github.com/Conduit-BTC/conduit-mono` @ `827ff43`** (Eric
+shared the repo and said they're "ready to move on an integration"):
+
+1. **Stack:** `nostr-tools` 2.25.0 for the NIP-46 transport (`BunkerSigner`,
+   `createNostrConnectURI`) wrapped in `@nostr-dev-kit/ndk` 3.0.3 as the signer abstraction
+   (`packages/core/src/protocol/remote-signer.ts`). **Not rust-nostr** — the ≤0.44.2
+   echoed-secret bug is irrelevant to them.
+2. **Web only.** Bun/TypeScript monorepo: React 19 + Vite + TanStack; merchant portal is a
+   standalone PWA (`apps/merchant/public/manifest.webmanifest`, deployed as a static SPA to
+   Cloudflare Pages). No Swift, Kotlin, React Native, Capacitor, or Expo anywhere. **This
+   decides the SDK priority: `clave-connect.js` first; the SwiftPM recipe and RN wrapper are
+   not needed for Conduit.**
+3. EU merchants — still unanswered (not derivable from the repo).
+4. Profile publish — still unanswered; note Conduit never holds or generates a merchant key
+   (keyless-merchant onboarding today is "go to nstart.me / install Alby, come back").
+
+Consequences for the SDK item, which are bigger than the stack answer:
+
+- **They already have a mature, hardened NIP-46 client** — both `bunker://` and
+  `nostrconnect://` flows, session persistence, a WebCrypto-wrapped client key in IndexedDB,
+  restore-on-load, an error taxonomy, tests and Playwright e2e — and they already link Clave
+  as a recommended signer (`packages/ui/src/components/SignerSwitch.tsx:103`) and treat
+  "Clave handoff and return work on iPhone" as a required mobile-QA lane. The value of
+  `clave-connect.js` for them is therefore **not** a NIP-46 client extraction; it is a thin
+  connect/handoff shim plus the documented iOS return path (Universal Link out, reliable
+  return-to-tab, resume probe, re-fire semantics), slotted behind their existing "Open in
+  signer" anchor (`SignerSwitch.tsx:365`). Rescope the `sdk.js` item accordingly.
+- **They send `clientMetadata = { name: "Conduit", url }` with no `image`** — the
+  onboarding banner and ApprovalSheet will show the deterministic avatar for Conduit until
+  they add one. Ask them to include `image` (cheap for them; big for the new-user banner).
+- **They deliberately never call `switch_relays`** (a documented nostr-tools + Primal hang,
+  `docs/knowledge/nip46-connected-relay-retention.md`) and pair over their own 2–3 canonical
+  relays (`NOSTR_CONNECT_RELAYS`). Clave's push-wake path relies on the proxy subscribing to
+  the *pair's* relays (`POST /pair-client` records `relayUrls[]`, ref-counted secondary pool).
+  **Integration checkpoint:** verify a Conduit pairing's relays are picked up by the proxy so
+  background/lock-screen signing works without `wss://relay.powr.build` in their set — or get
+  them to add it.
+- Perms they request on connect: `sign_event, get_public_key, nip44_encrypt, nip44_decrypt,
+  nip04_decrypt`. Pairing timeout 120s, per-op 30s.

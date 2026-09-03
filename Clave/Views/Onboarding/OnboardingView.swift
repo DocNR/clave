@@ -29,35 +29,73 @@ struct OnboardingView: View {
     /// the most phishable audience, so nothing self-asserted is given
     /// authority. Same rendering posture as ApprovalSheet.
     private func callerBanner(_ caller: NostrConnectParser.ParsedURI) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(callerDomain(caller))
-                .font(.headline)
-                .lineLimit(1)
-                .truncationMode(.middle)
+        VStack(alignment: .leading, spacing: 12) {
+            // Same identity grammar as ClientIdentityHeader / ApprovalSheet:
+            // the deterministic AvatarView for this client pubkey, so the
+            // partner the user sees here is visibly the same one on the
+            // ApprovalSheet a moment later.
+            HStack(alignment: .center, spacing: 12) {
+                callerAvatar(caller)
 
-            Text("wants to connect")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-
-            if let name = caller.name, !name.isEmpty {
-                Text("calls itself “\(name)” · unverified")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(callerDomain(caller))
+                        .font(.headline)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Text("wants to connect")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    if let name = caller.name, !name.isEmpty {
+                        Text("calls itself “\(name)” · unverified")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                    Text(truncatedPubkey(caller.clientPubkey))
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                }
             }
 
             Text("Create or import your key to continue.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
-                .padding(.top, 2)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color.accentColor.opacity(0.10))
-        )
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    /// Same rules as ApprovalSheet's client header: show the partner's
+    /// self-asserted `image` when the URI carries one, else the deterministic
+    /// avatar for its pubkey. Kept small and paired with the "unverified"
+    /// caption — the icon is self-asserted and carries no authority.
+    @ViewBuilder
+    private func callerAvatar(_ caller: NostrConnectParser.ParsedURI) -> some View {
+        if let imageURLString = caller.imageURL,
+           let url = URL(string: imageURLString) {
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .success(let image):
+                    image
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 44, height: 44)
+                        .clipShape(Circle())
+                default:
+                    AvatarView(pubkeyHex: caller.clientPubkey, name: caller.name, size: 44)
+                }
+            }
+        } else {
+            AvatarView(pubkeyHex: caller.clientPubkey, name: caller.name, size: 44)
+        }
+    }
+
+    /// Short client-pubkey fingerprint, same shape as `ClientIdentityHeader`.
+    private func truncatedPubkey(_ pubkey: String) -> String {
+        guard pubkey.count > 12 else { return pubkey }
+        return String(pubkey.prefix(8)) + "…" + String(pubkey.suffix(4))
     }
 
     /// Registrable domain of the caller's self-asserted `url`, for the
