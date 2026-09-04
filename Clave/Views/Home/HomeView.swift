@@ -76,11 +76,21 @@ struct HomeView: View {
                                 clientRow(client)
                             }
                             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                Button(role: .destructive) {
+                                // Plain button + red tint, NOT role: .destructive.
+                                // A destructive swipe-action button makes SwiftUI
+                                // animate the row out the moment it's tapped, on
+                                // the assumption the tap deleted the item. This
+                                // action only opens a confirmation alert, so the
+                                // row springs back — the user saw the connection
+                                // vanish, reappear, then vanish again on confirm.
+                                // The tint gives the same red without the
+                                // premature removal animation.
+                                Button {
                                     clientToUnpair = client
                                 } label: {
                                     Label("Unpair", systemImage: "trash")
                                 }
+                                .tint(.red)
                             }
                         }
                     }
