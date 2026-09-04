@@ -72,11 +72,18 @@ struct SettingsView: View {
                     }
                 }
                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                    Button(role: .destructive) {
+                    // Plain button + red tint, NOT role: .destructive — a
+                    // destructive swipe-action button makes SwiftUI animate
+                    // the row out on tap, assuming the tap deleted the item.
+                    // This one only opens a confirmation alert, so the row
+                    // would vanish and spring back. Same fix as HomeView's
+                    // unpair action.
+                    Button {
                         accountToDelete = account
                     } label: {
                         Label("Delete", systemImage: "trash")
                     }
+                    .tint(.red)
                 }
             }
             Button {
