@@ -122,6 +122,69 @@ final class NostrConnectParserCallbackTests: XCTestCase {
         XCTAssertNil(try parsedCallback("con duit://return"))
     }
 
+    // MARK: - Dropped: schemes the system itself acts on
+
+    /// `UIApplication.open` hands these to iOS, not to a partner app: the
+    /// dialler, Messages, Mail, FaceTime, the App Store and the enterprise
+    /// installer, Shortcuts, Settings. None is a place a partner returns to,
+    /// and several act on the user's behalf off the tail of an approval, so
+    /// they are never a callback — whatever the case of the scheme.
+    func testDropsSystemHandledSchemes() throws {
+        let rejected = [
+            "tel:+15555550100",
+            "sms:+15555550100&body=hi",
+            "mailto:someone@example.com",
+            "facetime:someone@example.com",
+            "facetime-audio:someone@example.com",
+            "itms-services://?action=download-manifest&url=https://evil.example/app.plist",
+            "itms-apps://apps.apple.com/app/id1",
+            "ITMS-APPS://apps.apple.com/app/id1",
+            "shortcuts://run-shortcut?name=x",
+            "app-settings:",
+            "prefs:root=General",
+            "App-Prefs:root=General",
+            "x-apple-health://",
+            "about:blank",
+            "blob:https://conduit.market/uuid",
+            "vbscript:msgbox(1)",
+        ]
+        for callback in rejected {
+            XCTAssertNil(try parsedCallback(callback), callback)
+        }
+    }
+
+    /// Clave's own schemes can never be a callback: opening one would route a
+    /// second connect request straight back into Clave off the tail of an
+    /// approval — a chained prompt the user never asked for.
+    func testDropsClavesOwnSchemes() throws {
+        XCTAssertNil(try parsedCallback("nostrconnect://\(pubkey)?relay=wss%3A%2F%2Fr.example&secret=x"))
+        XCTAssertNil(try parsedCallback("clave://connect?uri=nostrconnect%3A%2F%2Fx"))
+        XCTAssertNil(try parsedCallback("bunker://\(pubkey)?relay=wss%3A%2F%2Fr.example"))
+    }
+
+    /// Reverse-DNS app schemes are common and legitimate; the denylist must
+    /// not catch them.
+    func testKeepsReverseDNSCustomScheme() throws {
+        XCTAssertEqual(
+            try parsedCallback("com.example.app://clave-return?state=abc"),
+            "com.example.app://clave-return?state=abc"
+        )
+    }
+
+    // MARK: - Dropped: decoding edges
+
+    /// `URLComponents.queryItems` decodes the value exactly once before it is
+    /// validated. A double-encoded URL therefore arrives with no literal ":"
+    /// and is dropped as scheme-less rather than decoded again.
+    func testDoubleEncodedCallbackIsDropped() throws {
+        XCTAssertNil(try parsedCallback("https%3A%2F%2Fevil.example%2F"))
+    }
+
+    /// A fullwidth colon (U+FF1A) is not a scheme separator.
+    func testFullwidthColonIsNotAScheme() throws {
+        XCTAssertNil(try parsedCallback("https\u{FF1A}//evil.example"))
+    }
+
     // MARK: - Persistence
 
     /// `callback` rides the onboarding stash across the App Store round trip,
