@@ -132,6 +132,71 @@ final class CallbackTargetTests: XCTestCase {
         )
     }
 
+    // MARK: - resolved: normalisation edges
+
+    // The value reaches here percent-decoded once (`URLComponents.queryItems`),
+    // so a `%40` or a backslash is a literal in the string Foundation parses.
+    // Each of these is a host Foundation reads differently from how a human
+    // reads it; the as-written host rule in `CallerIdentity.domain` drops them.
+
+    /// Foundation parses this host as `conduit.market@evil.com` — i.e. evil.com.
+    func testEncodedUserinfoInAuthorityIsDropped() {
+        XCTAssertNil(CallbackTarget.resolved(
+            callback: "https://conduit.market%40evil.com/return",
+            callerURL: "https://conduit.market"
+        ))
+    }
+
+    /// Foundation parses `conduit.market\@evil.com` as host evil.com.
+    func testBackslashInAuthorityIsDropped() {
+        XCTAssertNil(CallbackTarget.resolved(
+            callback: "https://conduit.market\\@evil.com/return",
+            callerURL: "https://conduit.market"
+        ))
+        XCTAssertNil(CallbackTarget.resolved(
+            callback: "https://conduit.market\\evil.com/return",
+            callerURL: "https://conduit.market"
+        ))
+    }
+
+    /// Foundation IDNA-maps a zero-width space away and would see a plain
+    /// `conduit.market`; the as-written check sees a non-ASCII host.
+    func testInvisibleCharacterInHostIsDropped() {
+        XCTAssertNil(CallbackTarget.resolved(
+            callback: "https://conduit\u{200B}.market/return",
+            callerURL: "https://conduit.market"
+        ))
+    }
+
+    func testEmptyOrMisplacedAuthorityIsDropped() {
+        XCTAssertNil(CallbackTarget.resolved(
+            callback: "https:///conduit.market/return",
+            callerURL: "https://conduit.market"
+        ))
+        XCTAssertNil(CallbackTarget.resolved(
+            callback: "https:evil://conduit.market",
+            callerURL: "https://conduit.market"
+        ))
+    }
+
+    /// A port and a trailing dot name the same host; neither breaks the binding.
+    func testPortAndTrailingDotDoNotBreakTheBinding() {
+        XCTAssertEqual(
+            CallbackTarget.resolved(
+                callback: "https://conduit.market:8443/return",
+                callerURL: "https://conduit.market"
+            ),
+            "https://conduit.market:8443/return"
+        )
+        XCTAssertEqual(
+            CallbackTarget.resolved(
+                callback: "https://conduit.market./return",
+                callerURL: "https://conduit.market"
+            ),
+            "https://conduit.market./return"
+        )
+    }
+
     // MARK: - resolved: custom schemes
 
     /// Custom-scheme callbacks are opened as given — there is no host to
