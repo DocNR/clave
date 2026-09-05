@@ -50,8 +50,22 @@ enum NostrConnectParser {
     private static let hexDigits = Set("0123456789abcdef")
 
     /// Schemes never handed to `UIApplication.open`, whatever else is true of
-    /// the callback.
-    private static let rejectedCallbackSchemes: Set<String> = ["javascript", "data", "file"]
+    /// the callback. Three groups:
+    /// - script / data pseudo-schemes;
+    /// - schemes iOS itself acts on — the dialler, Messages, Mail, FaceTime,
+    ///   Shortcuts, Settings. None is a place a partner returns to, and
+    ///   several act for the user off the tail of an approval;
+    /// - Clave's own schemes, which would chain a second connect prompt onto
+    ///   this approval.
+    /// Apple's `itms*` (App Store, enterprise installer) and `x-apple-*`
+    /// families are matched by prefix in `rejectedCallbackSchemePrefixes`.
+    private static let rejectedCallbackSchemes: Set<String> = [
+        "javascript", "data", "file", "about", "blob", "vbscript",
+        "tel", "sms", "mms", "mailto", "facetime", "facetime-audio", "imessage",
+        "shortcuts", "workflow", "app-settings", "app-prefs", "prefs",
+        "nostrconnect", "clave", "bunker",
+    ]
+    private static let rejectedCallbackSchemePrefixes = ["itms", "x-apple"]
 
     /// Whitespace and control characters anywhere in a callback make it
     /// un-trustworthy to reason about (`java\u{0A}script:` and friends), so
@@ -62,10 +76,11 @@ enum NostrConnectParser {
     /// Scheme-level validation of a raw `callback=` value: returns the trimmed
     /// callback when it is *shaped* like something safe to open, else nil.
     ///
-    /// Kept: any RFC-3986-shaped scheme that is not `javascript:`, `data:` or
-    /// `file:`, carries no userinfo, and contains no whitespace or control
-    /// characters. Dropped: everything else, including a scheme-less value —
-    /// a bare `example.com/return` is too ambiguous to act on.
+    /// Kept: any RFC-3986-shaped scheme outside `rejectedCallbackSchemes` /
+    /// `rejectedCallbackSchemePrefixes`, carrying no userinfo, and containing
+    /// no whitespace or control characters. Dropped: everything else,
+    /// including a scheme-less value — a bare `example.com/return` is too
+    /// ambiguous to act on.
     ///
     /// This is deliberately only half the rule. The host-equality check for
     /// http(s) callbacks lives in `CallbackTarget` (app target); see the
@@ -83,7 +98,8 @@ enum NostrConnectParser {
         let scheme = trimmed[trimmed.startIndex..<colon].lowercased()
         guard let first = scheme.first, first.isASCII, first.isLetter,
               scheme.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "+" || $0 == "-" || $0 == ".") }),
-              !rejectedCallbackSchemes.contains(scheme) else {
+              !rejectedCallbackSchemes.contains(scheme),
+              !rejectedCallbackSchemePrefixes.contains(where: scheme.hasPrefix) else {
             return nil
         }
 
