@@ -16,6 +16,12 @@
 // Usage:
 //   npm install && node partner-sim.mjs [--relay wss://...]... [--perms sign_event:1]
 //                  [--multi] [--no-sign] [--print-only] [--window 300]
+//                  [--callback 'powr://clave-return?state={state}']
+//
+// --callback adds the Phase-2 `callback=` return leg. A literal "{state}" is
+// replaced with a fresh 16-hex nonce so the receiving app can be checked for
+// the exact value. Per the partner contract the callback carries ONLY that
+// opaque nonce — never the secret, never the signer pubkey.
 
 import WebSocket from 'ws';
 import qrcode from 'qrcode-terminal';
@@ -39,6 +45,7 @@ const MULTI = flag('multi');
 const NO_SIGN = flag('no-sign');
 const PRINT_ONLY = flag('print-only');
 const WINDOW_S = Number(vals('window')[0] || 300); // listen window; spec Phase-1 stash TTL is 10 min
+const CALLBACK_TEMPLATE = vals('callback')[0] || '';
 
 // ---------- session identity (the partner's ephemeral client keypair) ----------
 const clientSk = generateSecretKey();
@@ -53,12 +60,16 @@ kv.push(['secret', secret]);
 if (PERMS) kv.push(['perms', PERMS]);
 if (MULTI) kv.push(['accounts', 'multi']);
 kv.push(['name', 'Signin PoC'], ['url', 'https://clave.casa']);
+const callbackState = bytesToHex(randomBytes(8));
+const callback = CALLBACK_TEMPLATE.replace('{state}', callbackState);
+if (callback) kv.push(['callback', callback]);
 const query = kv.map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
 const ncUri = `nostrconnect://${clientPk}?${query}`;
 const universalLink = `https://clave.casa/connect/?uri=${encodeURIComponent(ncUri)}`;
 
 console.log('\n=== Sign in with Clave — partner simulator ===\n');
 console.log('nostrconnect URI:\n  ' + ncUri + '\n');
+if (callback) console.log(`callback= return leg:\n  ${callback}\n  (expect the receiving app to see state=${callbackState})\n`);
 console.log('Universal Link (tap on iPhone, or scan the QR with the Camera app):\n  ' + universalLink + '\n');
 qrcode.generate(universalLink, { small: true });
 if (PRINT_ONLY) process.exit(0);
