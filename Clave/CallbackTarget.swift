@@ -78,12 +78,23 @@ enum CallbackTarget {
         return scheme + "://"
     }
 
-    /// The line ApprovalSheet shows *before* approval, naming where approving
-    /// will send the user. Nil when there is no callback or it was dropped —
-    /// a refused callback is not surfaced at all.
+    /// The line ApprovalSheet shows *before* approval. Nil when there is no
+    /// callback or it was dropped — a refused callback is not surfaced at all.
+    ///
+    /// Worded from the outcome, not from the callback: only a custom scheme is
+    /// actually opened, so only that one may promise a return. Telling a web
+    /// user "returns you to conduit.market" when Clave will not take them
+    /// there is a promise the return leg cannot keep.
     static func sheetDisclosure(callback: String?, callerURL: String?) -> String? {
-        guard let target = displayTarget(callback: callback, callerURL: callerURL) else { return nil }
-        return "Returns you to \(target)"
+        switch outcome(callback: callback, callerURL: callerURL, approved: true, origin: .approvalSheet) {
+        case .noReturn:
+            return nil
+        case .hint(let host):
+            return "Afterwards, return to \(host)"
+        case .open(let url):
+            guard let target = displayTarget(callback: url, callerURL: callerURL) else { return nil }
+            return "Sends you back to \(target)"
+        }
     }
 
     /// The whole return decision, as one pure function.
