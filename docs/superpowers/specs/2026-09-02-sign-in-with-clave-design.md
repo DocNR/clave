@@ -421,6 +421,44 @@ replay path (needs the Phase-1 iOS diff), partner-killed-during-install + re-fir
 vs. the socket grace window, test 3 (SKOverlay + `canOpenURL` from a scratch partner app), and
 test 4 (Smart-Banner OPEN `app-argument` on the real page).
 
+### Results — 2026-09-05 (laptop + iOS 26.5 simulator, PR #98 branch, POWR rig)
+
+**Phase-2 `callback=` return leg, native partner (POWR). RESULT: fires. POWR was foregrounded
+with the nonce intact 9.0 s after Approve.**
+
+Rig: Clave `feat/callback-return-leg` (b68e72e) + POWR `feat/clave-callback-rig` (root-level
+`.onOpenURL` + `os.Logger`; `powr://` was already registered in `powr-ios/Info.plist`) on
+simulator 79487989 (iPhone 17 Pro Max, iOS 26.5), zero Clave accounts at start. Partner:
+`partner-sim.mjs --no-sign --callback 'powr://clave-return?state={state}'` from the laptop.
+Inbound leg via `xcrun simctl openurl … 'clave://connect?uri=<encoded>'` — the sim cannot fire a
+Universal Link, and the return leg is a plain `UIApplication.open`, so it needs none.
+
+Timeline (one wall clock, laptop = simulator):
+
+- 08:50:09.68 `openurl` fired → SpringBoard "Open in Clave?" → onboarding step 1 with the caller
+  banner ("clave.casa wants to connect · calls itself “Signin PoC” · unverified · Create or import
+  your key to continue") — flow C, stash taken.
+- Generate New Key → stash promoted → ApprovalSheet showing **"Sends you back to powr://"** —
+  `callback` survived the stash round trip on-device.
+- 08:51:18.57 Connect tapped.
+- 08:51:27.57 SpringBoard: `Handling OpenURL from Clave:31619: powr://clave-return?state=fd03a33a75457595`
+  (+9.0 s).
+- 08:51:28.09 powr-ios: `[app.powr.nostr:AppLaunch] Clave return leg received, state=fd03a33a75457595`
+  — POWR frontmost, "◀ Clave" back-chip in the status bar.
+- partner-sim: `✓ connect ack #1` then `✓ probe answered in 2307ms` (promptless).
+
+The 9 s is `runSingleConnect`'s publish-and-listen loop (3 × (2 s sleep + ≤3 s fetch)); the user
+reads "Taking you back to powr://…" for that long. The ack was on the wire before the open, as
+designed.
+
+**https callback (second run, 1 account): hint path. RESULT: not auto-opened; Clave stays
+frontmost.** `--callback 'https://clave.casa/return?state={state}'` (host equal to the caller's
+`url`) → sheet line **"Afterwards, return to clave.casa"**; after Connect the sheet completed and
+dismissed to Home; Safari was never launched. partner-sim: ack +54.8 s, probe 772 ms.
+
+Not exercised: a Universal Link inbound leg (simulator), a physical device, the lock-screen path,
+multi-account.
+
 ## Risks
 
 - **Proxy scale**: one Node process, file-backed JSON re-read per op, co-located with
