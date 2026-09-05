@@ -19,7 +19,8 @@ final class CallerIdentityTests: XCTestCase {
             url: url,
             imageURL: imageURL,
             suggestedTrustLevel: .medium,
-            isMultiAccount: false
+            isMultiAccount: false,
+            callback: nil
         )
     }
 
