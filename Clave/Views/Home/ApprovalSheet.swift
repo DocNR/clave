@@ -228,9 +228,54 @@ struct ApprovalSheet: View {
                     }
                 }
             }
+
+            // Where approving will send you. Absent when the caller sent no
+            // callback, or sent one that was dropped — a refused callback is
+            // never surfaced, so it cannot be used to say anything to the user.
+            if let disclosure = callbackDisclosure {
+                Text(disclosure)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 8)
+    }
+
+    // MARK: - Return leg (`callback=`)
+
+    /// Fire the return leg, if this callback earns one. Only `.open` acts —
+    /// `.hint` is an https callback, which would open a *new* Safari tab
+    /// instead of the tab holding the pending pairing, so the user is pointed
+    /// back by copy rather than sent to a second, empty tab.
+    ///
+    /// Called only from the all-success branch of the handshake, so: after a
+    /// foreground approval, never on denial, never from the lock-screen path,
+    /// and never before the connect ack has been published.
+    private func openCallbackIfAny() {
+        guard case .open(let url) = callbackOutcome, let target = URL(string: url) else { return }
+        UIApplication.shared.open(target)
+    }
+
+    /// Pre-approval disclosure naming the return target, domain-first.
+    private var callbackDisclosure: String? {
+        CallbackTarget.sheetDisclosure(callback: parsedURI.callback, callerURL: parsedURI.url)
+    }
+
+    /// What the return leg does once this approval completes. Computed with
+    /// `approved: true` because the sheet only reaches the progress and
+    /// completion states by way of the user approving — denial dismisses it.
+    /// `.lockScreen` is not reachable from here: the NSE signing path has its
+    /// own code and never opens a callback.
+    private var callbackOutcome: CallbackTarget.Outcome {
+        CallbackTarget.outcome(
+            callback: parsedURI.callback,
+            callerURL: parsedURI.url,
+            approved: true,
+            origin: .approvalSheet
+        )
     }
 
     /// The partner's self-asserted `image` when the URI carries one, else the
@@ -450,13 +495,28 @@ struct ApprovalSheet: View {
         }
     }
 
+    /// The "what now" line under the spinner. A resolved callback lets us name
+    /// where the user is going instead of saying "your client app"; an https
+    /// one is a hint rather than an auto-open, because opening it would land
+    /// in a *new* Safari tab rather than the tab holding the pending pairing.
+    private var connectingSubtitle: String {
+        switch callbackOutcome {
+        case .hint(let host):
+            return "Return to \(host) to finish connecting. Clave keeps running in the background."
+        case .open(let url):
+            return "Taking you back to \(CallbackTarget.displayTarget(callback: url, callerURL: parsedURI.url) ?? "your client app")…"
+        case .noReturn:
+            return "Switch back to your client app to finish connecting. Clave keeps running in the background."
+        }
+    }
+
     private var singleProgressOverlay: some View {
         VStack(spacing: 16) {
             ProgressView().controlSize(.large)
             VStack(spacing: 6) {
                 Text("Connecting...")
                     .font(.headline)
-                Text("Switch back to your client app to finish connecting. Clave keeps running in the background.")
+                Text(connectingSubtitle)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -951,6 +1011,11 @@ struct ApprovalSheet: View {
                     isConnecting = false
                     handshakeCompleted = true
                     handshakeResult = result
+                    // Return leg before the parent dismisses us. Only on a
+                    // clean success — the ack is on the wire by now, so the
+                    // partner's socket wakes to a session that already
+                    // exists rather than racing the publish.
+                    if result.isAllSuccess { openCallbackIfAny() }
                     onCompletion(result)
                 }
             } catch {
