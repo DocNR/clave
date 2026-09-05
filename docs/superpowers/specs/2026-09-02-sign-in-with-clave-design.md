@@ -459,6 +459,31 @@ dismissed to Home; Safari was never launched. partner-sim: ack +54.8 s, probe 77
 Not exercised: a Universal Link inbound leg (simulator), a physical device, the lock-screen path,
 multi-account.
 
+**Installed home-screen web app (PWA) partner, same simulator, 1 account. RESULT: the
+"◀ *PWA name*" chip returns the user to the exact PWA window with page state intact; no Clave
+change needed.** Rig: a local page served from the laptop (`http://localhost:8765/pwa.html`,
+manifest `display: standalone`, added to the Home Screen with iOS 26's default "Open as Web App"
+on — web clip `FullScreen = true`), with a "Connect with Clave" button that fires
+`clave://connect?uri=<encoded>` via a same-tab anchor and logs `visibilitychange` while keeping
+a nonce in `sessionStorage`. Partner: `partner-sim.mjs --no-sign --callback
+'https://clave.casa/return?state={state}'`.
+
+- 12:48:33 tapped Connect inside the standalone PWA → Clave opened directly (no "Open in Clave?"
+  prompt from a web app), chip **"◀ PWA PoC"**, sheet line "Afterwards, return to clave.casa".
+  PWA logged `visibilitychange → hidden` at +1.4 s.
+- 12:48:55 Connect tapped in Clave → handshake → sheet dismissed to Home; chip still present.
+- 12:49:23 chip tapped (50 s after Clave opened) → 12:49:25 the **same** PWA window logged
+  `visibilitychange → visible`, nonce `a80ac833` intact, prior log lines still on screen (no
+  reload — same JS context). partner-sim: `✓ connect ack #1`, `✓ probe answered in 756ms`.
+
+Two more measurements from the same session, both relevant to the https-callback policy:
+- **External https opens land in a new Safari tab.** `simctl openurl https://clave.casa/` then
+  `…/connect/` → Safari's tab switcher read "2 Tabs"; the first tab untouched.
+- **External https opens do not route into an installed web app.** With `clave.casa/connect`
+  installed as a web app, `simctl openurl https://clave.casa/connect/` twice → SpringBoard
+  routed both to `com.apple.mobilesafari`, never to the web app. An https auto-open would
+  therefore strand installed-PWA users in Safari; the chip is the only way back into a PWA.
+
 ## Risks
 
 - **Proxy scale**: one Node process, file-backed JSON re-read per op, co-located with
