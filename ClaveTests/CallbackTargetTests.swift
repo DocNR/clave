@@ -108,6 +108,30 @@ final class CallbackTargetTests: XCTestCase {
         ))
     }
 
+    /// The rule is on the host alone, so a scheme spelled in caps still
+    /// resolves to the same host and still matches.
+    func testSchemeCaseDoesNotAffectHostMatching() {
+        XCTAssertEqual(
+            CallbackTarget.resolved(
+                callback: "HTTPS://conduit.market/return",
+                callerURL: "https://conduit.market"
+            ),
+            "HTTPS://conduit.market/return"
+        )
+    }
+
+    /// Host equality is the whole rule — the caller's metadata url and its
+    /// callback may differ in scheme without breaking the binding.
+    func testHttpCallbackMatchesHttpsCallerOnTheSameHost() {
+        XCTAssertEqual(
+            CallbackTarget.resolved(
+                callback: "http://conduit.market/return",
+                callerURL: "https://conduit.market"
+            ),
+            "http://conduit.market/return"
+        )
+    }
+
     // MARK: - resolved: custom schemes
 
     /// Custom-scheme callbacks are opened as given — there is no host to
@@ -160,22 +184,24 @@ final class CallbackTargetTests: XCTestCase {
 
     // MARK: - the ApprovalSheet disclosure line
 
-    /// Before approving, the sheet says where approving will send you. The
-    /// host is rendered domain-first, exactly as the caller headline is.
-    func testSheetDisclosureNamesTheHostForHttps() {
+    /// An https callback is only ever a hint — Clave does not open it — so the
+    /// line must not promise a return it will not perform. It names where to
+    /// go back to, domain-first, exactly as the caller headline is rendered.
+    func testSheetDisclosureForHttpsPointsBackWithoutPromisingAReturn() {
         XCTAssertEqual(
             CallbackTarget.sheetDisclosure(
                 callback: "https://www.conduit.market/return?state=abc",
                 callerURL: "https://conduit.market"
             ),
-            "Returns you to conduit.market"
+            "Afterwards, return to conduit.market"
         )
     }
 
-    func testSheetDisclosureNamesTheSchemeForCustomScheme() {
+    /// A custom scheme *is* opened, so here the promise is accurate.
+    func testSheetDisclosureForCustomSchemePromisesTheReturn() {
         XCTAssertEqual(
             CallbackTarget.sheetDisclosure(callback: "conduit://return", callerURL: nil),
-            "Returns you to conduit://"
+            "Sends you back to conduit://"
         )
     }
 

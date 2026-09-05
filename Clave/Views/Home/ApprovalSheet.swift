@@ -503,8 +503,9 @@ struct ApprovalSheet: View {
         switch callbackOutcome {
         case .hint(let host):
             return "Return to \(host) to finish connecting. Clave keeps running in the background."
-        case .open(let url):
-            return "Taking you back to \(CallbackTarget.displayTarget(callback: url, callerURL: parsedURI.url) ?? "your client app")…"
+        case .open:
+            let target = CallbackTarget.displayTarget(callback: parsedURI.callback, callerURL: parsedURI.url)
+            return "Taking you back to \(target ?? "your client app")…"
         case .noReturn:
             return "Switch back to your client app to finish connecting. Clave keeps running in the background."
         }
