@@ -771,8 +771,11 @@ struct ApprovalSheet: View {
                     // the sheet would sit at "M of M paired successfully"
                     // with no failures, which is a dead-end UX (Done
                     // works, but the all-success path should match the
-                    // initial-loop all-success path).
+                    // initial-loop all-success path) — including its
+                    // return leg: every account is paired and every ack
+                    // is on the wire, same as a clean first pass.
                     if updated.isAllSuccess {
+                        openCallbackIfAny()
                         onCompletion(updated)
                     }
                 } else {
