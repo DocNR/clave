@@ -21,7 +21,7 @@ The more consequential gaps are ones that audit did not reach. Two stand out:
 
 Neither exposes the nsec. Both undermine what the product promises.
 
-**Counts.** 30 findings confirmed by two independent reviewers each: 1 High, 6 Medium, 21 Low, 2 Informational. A further 22 candidates could not be verified before the audit run hit a spend limit; they are listed in §7 as leads, not findings, except the four I verified by hand.
+**Counts.** 31 findings: 1 High, 7 Medium, 21 Low, 2 Informational. Each was confirmed by two independent reviewers, except the dependency finding (M2), which I verified directly with `npm audit`. A further 21 candidates could not be verified before the audit run hit a spend limit; they are listed in §7 as leads, not findings, except the five I verified by hand.
 
 ---
 
@@ -95,7 +95,23 @@ I verified this one by hand after the assigned reviewers were cut off.
 
 **Fix.** Send each relay only the pubkeys of clients actually paired to it, not the global roster. Require the `/pair-client` signer to hold a current registration. Reject loopback, private, and link-local hosts. These are independent changes; the first alone removes the roster disclosure.
 
-### M2. Medium trust silently signs relay-auth and HTTP-auth events
+### M2. Vulnerable `ws` version, reachable from the relays any caller can add
+
+`relay-proxy/package.json:14` · `relay-proxy/relayPool.js:13`
+
+`npm audit` against the committed lockfile reports one vulnerability, and it is directly reachable:
+
+```
+ws  8.0.0 - 8.20.1   High (CVSS 7.5)
+GHSA-96hv-2xvq-fx4p — memory exhaustion DoS from tiny fragments and data chunks
+vulnerable range: >=8.0.0 <8.21.0     lockfile pins: 8.20.1
+```
+
+The proxy uses `ws` as a **client**, dialling out to relay URLs supplied through `/pair-client` (`relayPool.js:13`, `:161`). Chained with M1, where any throwaway keypair can add a relay, this becomes: anyone can point the proxy at a server they control and feed it fragmented frames until the process exhausts memory. That takes down push delivery for every Clave user, which is the mechanism the whole product depends on.
+
+**Fix.** `npm i ws@^8.21.3` in `relay-proxy/` and commit the updated lockfile. The current 8.x line is 8.21.3; the fix landed in 8.21.0. Then fix M1 so arbitrary hosts cannot be dialled in the first place. `@noble/curves` is clean.
+
+### M3. Medium trust silently signs relay-auth and HTTP-auth events
 
 `Shared/SharedStorage.swift:166` · `Shared/ClientPermissions.swift:149`
 
@@ -107,7 +123,7 @@ The code already treats kind 22242 signing as security-relevant: an earlier fix 
 
 **Fix.** Add 22242, 27235, and 24242 to the default protected set. At minimum always prompt for a 27235 whose `u` points at the proxy. Show the `u` or relay tag in the prompt.
 
-### M3. Signing prompts never show what is being signed
+### M4. Signing prompts never show what is being signed
 
 `Clave/Views/Inbox/PendingRequestDetailView.swift:431`
 
@@ -117,7 +133,7 @@ So the protected-kind gate delivers "which kind" consent, not "what" consent. A 
 
 **Fix.** Decrypt in the detail view and render kind-specific summaries. `ActivitySummary` already computes follow-list diffs after signing; the same code can run before.
 
-### M4. Attacker-chosen client name is injected line-first into approval prompts
+### M5. Attacker-chosen client name is injected line-first into approval prompts
 
 `Clave/Views/MainTabView.swift:228` · `Shared/PendingApprovalBanner.swift:141`
 
@@ -127,7 +143,7 @@ A client named `Damus\nKind 1: Short text note\n\n\n…` pushes the genuine kind
 
 **Fix.** Sanitize `name`, `url`, and `imageURL` at ingestion on both paths: strip control, bidi, and zero-width characters, collapse whitespace, cap length. Put the kind or method line first in both bodies. Cap `v3Scope` in the banner too.
 
-### M5. Bunker secrets are kept in the app-group plist, not the Keychain
+### M6. Bunker secrets are kept in the app-group plist, not the Keychain
 
 `Shared/SharedStorage.swift:264`
 
@@ -137,7 +153,7 @@ A valid bunker secret is a bearer credential. Presenting it yields a Medium-trus
 
 **Fix.** Move the secrets to the shared Keychain with the same accessibility class as the nsec. Give them a TTL, generate on bunker-URI display, and rotate on cap rejection.
 
-### M6. Text selection on the exported key bypasses the pasteboard mitigation
+### M7. Text selection on the exported key bypasses the pasteboard mitigation
 
 `Clave/Views/Settings/ExportKeySheet.swift:134`
 
@@ -210,7 +226,6 @@ Verified by hand and confirmed:
 Not verified — one reviewer only:
 - Proxy: no signature verification on incoming kind:24133 before dispatching a push, so any relay can wake any user's device (`relay-proxy/proxy.js:542`). I confirmed the absence of a verify call; the impact rating is unverified.
 - Proxy: `tokens.json` written non-atomically and treated as empty on a malformed entry; unbounded pre-auth request bodies; no rate limiting; NIP-98 events replayable within the 60-second window with no nonce cache; relay refcounts leaked on re-pair; pairing metadata in world-readable files.
-- Proxy: a reviewer cited a `ws` advisory with a 2026 identifier. The lockfile pins `ws@8.20.1`, which is past the known `ws` denial-of-service advisory affecting versions below 8.17.1. **I could not verify the claimed advisory exists.** Check it against the GitHub advisory database before acting on it.
 - App: relay frames parsed on the main actor; sockets left half-alive across `stop()`; `LightRelay` never invalidating its `URLSession`; the lock-screen banner never naming the signing account; non-atomic bunker connect across the two processes; per-pubkey residue left in the app group after `deleteAccount`; SwiftPM requirements being `upToNextMajor` rather than exact.
 
 ---
@@ -228,7 +243,7 @@ Worth recording, because these are the places a signer usually fails.
 - **NIP-44 v2 constant-time MAC comparison** and MAC-before-decrypt ordering are correct (`Shared/LightCrypto.swift:249`).
 - **No TLS override or ATS exception** anywhere in the project.
 - **The approval alert's Approve button is bound to the request being displayed** via the `presenting:` value, so in-place rotation cannot cause a tap to approve an unseen request.
-- **Pasteboard handling for the exported key** sets local-only and an expiry — the mitigation exists and works; only the selection path (M6) goes around it.
+- **Pasteboard handling for the exported key** sets local-only and an expiry — the mitigation exists and works; only the selection path (M7) goes around it.
 
 ---
 
@@ -236,12 +251,13 @@ Worth recording, because these are the places a signer usually fails.
 
 1. **H1** — derive decrypt permission from trust level, and disclose it on the pairing sheet. This is the one that contradicts what the UI promises.
 2. **M1** — stop sending the global pubkey roster to caller-supplied relays; require registration for `/pair-client`; block private hosts.
-3. **M2** — add the auth kinds to the protected set.
-4. **Prior finding 4** — restart the subscription on account switch; mark events processed only after a terminal outcome. This also closes `background-06`.
-5. **M5, M6, prior findings 1–3** — secret-handling hygiene; each is small and local.
-6. **M3, M4** — approval-surface integrity: show what is being signed, sanitize what the client asserts.
-7. **Cross-process writes** (`background-01`, `background-02`) — these need a real cross-process lock, so scope the work before starting.
-8. **Low crypto hardening** (`crypto-01` through `crypto-04`) — cheap, and `crypto-01` and `crypto-04` are one-line guards.
+3. **M2** — bump `ws`; it is a one-line dependency change against a reachable high-severity denial of service.
+4. **M3** — add the auth kinds to the protected set.
+5. **Prior finding 4** — restart the subscription on account switch; mark events processed only after a terminal outcome. This also closes `background-06`.
+6. **M6, M7, prior findings 1–3** — secret-handling hygiene; each is small and local.
+7. **M4, M5** — approval-surface integrity: show what is being signed, sanitize what the client asserts.
+8. **Cross-process writes** (`background-01`, `background-02`) — these need a real cross-process lock, so scope the work before starting.
+9. **Low crypto hardening** (`crypto-01` through `crypto-04`) — cheap, and `crypto-01` and `crypto-04` are one-line guards.
 
 Two things worth doing alongside the fixes, given how much of this audit rests on unexecuted code: add NIP-44 v2 known-answer vectors, and add offline tests for the enforcement branches in `handleRequest`. The v3 path already has spec vectors; the v2 path carries every request today and has none.
 
@@ -252,5 +268,5 @@ Two things worth doing alongside the fixes, given how much of this audit rests o
 - Source review only. Nothing was built, run, or tested on a device or simulator. Runtime behavior — actual snapshot timing, `OSLogStore` redaction of private interpolations, whether `CCCrypt` faults or silently over-reads on a short IV — is unconfirmed.
 - 44 of 124 review agents were cut off by a spend limit. The network, multi-account, and proxy lanes lost most of their verification passes. §7 records what that leaves unverified.
 - The completeness critic never ran, so there is no independent assessment of what all lanes missed together.
-- Third-party dependency advisories were not checked against a live database.
+- Dependency advisories were checked for the Node proxy with `npm audit` (one finding, M2). The Swift packages were not checked against an advisory database.
 - `relay-proxy/` was read but never executed, and no live instance was tested. `SECURITY.md` forbids testing against production, which is the right rule.
