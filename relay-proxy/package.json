@@ -11,6 +11,6 @@
   "description": "",
   "dependencies": {
     "@noble/curves": "^2.2.0",
-    "ws": "^8.20.1"
+    "ws": "^8.21.0"
   }
 }
