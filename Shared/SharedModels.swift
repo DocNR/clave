@@ -379,6 +379,7 @@ extension Account {
 enum AccountError: LocalizedError {
     case accountCapReached
     case connectionCapReached
+    case invalidNcryptsec
 
     var errorDescription: String? {
         switch self {
@@ -386,6 +387,8 @@ enum AccountError: LocalizedError {
             return "You can have up to \(Account.maxAccountsPerDevice) accounts on this device. More accounts will be available in the future."
         case .connectionCapReached:
             return "You can pair up to \(Account.maxClientsPerAccount) clients per account. Unpair one in Settings → Clients to continue. More connections will be available in the future."
+        case .invalidNcryptsec:
+            return "Couldn't decrypt this ncryptsec key. Check the password and that the key is a valid ncryptsec1… string."
         }
     }
 }

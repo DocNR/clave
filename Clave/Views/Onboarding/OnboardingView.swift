@@ -4,7 +4,31 @@ struct OnboardingView: View {
     @Environment(AppState.self) private var appState
     @State private var step = 1
     @State private var nsecInput = ""
+    @State private var passwordInput = ""
     @State private var errorMessage = ""
+    @State private var showScanner = false
+    @State private var scanPermissionDenied = false
+
+    /// True when the pasted/scanned secret is a NIP-49 encrypted key —
+    /// the password card shows and Import requires it.
+    private var isNcryptsecInput: Bool {
+        normalizedSecret.hasPrefix("ncryptsec1")
+    }
+
+    private var canImport: Bool {
+        if normalizedSecret.isEmpty { return false }
+        return !isNcryptsecInput || !passwordInput.isEmpty
+    }
+
+    /// Paste/scan normalization: NIP-19 URIs are often shared with a
+    /// `nostr:` prefix, which Keys.parse rejects.
+    private var normalizedSecret: String {
+        var value = nsecInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        if value.hasPrefix("nostr:") {
+            value = String(value.dropFirst("nostr:".count))
+        }
+        return value
+    }
 
     var body: some View {
         NavigationStack {
@@ -17,6 +41,30 @@ struct OnboardingView: View {
             }
             .navigationBarHidden(true)
             .onAppear { appState.refreshOnboardingBanner() }
+            .snapshotProtected()
+            .sheet(isPresented: $showScanner) {
+                NavigationStack {
+                    Group {
+                        if scanPermissionDenied {
+                            scanDeniedPlaceholder
+                        } else {
+                            QRScannerView(
+                                isScanning: true,
+                                onCode: handleScannedCode,
+                                onPermissionDenied: { scanPermissionDenied = true }
+                            )
+                        }
+                    }
+                    .navigationTitle("Scan Key QR Code")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Cancel") { showScanner = false }
+                        }
+                    }
+                }
+                .presentationDetents([.medium, .large])
+            }
         }
     }
 
@@ -176,18 +224,42 @@ struct OnboardingView: View {
                 VStack(spacing: 8) {
                     // Same card grammar as Home's stat tiles and the caller
                     // banner above: ultra-thin material in a 12pt rounded rect.
+                    // Trailing QR button scans nsec/ncryptsec/hex key QR codes.
                     HStack(spacing: 10) {
                         Image(systemName: "key.fill")
                             .foregroundStyle(.secondary)
-                        TextField("nsec1... or hex secret key", text: $nsecInput)
+                        TextField("nsec / ncryptsec / hex", text: $nsecInput)
                             .autocorrectionDisabled()
                             .textInputAutocapitalization(.never)
                             .font(.system(.body, design: .monospaced))
+                        Button {
+                            scanPermissionDenied = false
+                            showScanner = true
+                        } label: {
+                            Image(systemName: "qrcode.viewfinder")
+                                .font(.title3)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Scan QR Code")
                     }
                     .padding(.horizontal, 14)
                     .padding(.vertical, 12)
                     .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
                     .padding(.horizontal, 24)
+
+                    if isNcryptsecInput {
+                        HStack(spacing: 10) {
+                            Image(systemName: "lock.fill")
+                                .foregroundStyle(.secondary)
+                            SecureField("Password", text: $passwordInput)
+                                .autocorrectionDisabled()
+                                .textInputAutocapitalization(.never)
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 12)
+                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                        .padding(.horizontal, 24)
+                    }
 
                     if !errorMessage.isEmpty {
                         Text(errorMessage)
@@ -207,7 +279,7 @@ struct OnboardingView: View {
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
                 .tint(.blue)
-                .disabled(nsecInput.trimmingCharacters(in: .whitespaces).isEmpty)
+                .disabled(!canImport)
                 .padding(.horizontal, 24)
 
                 Button {
@@ -333,9 +405,16 @@ struct OnboardingView: View {
 
     private func importKey() {
         do {
-            try appState.importKey(nsec: nsecInput, source: .onboardingImport)
+            let secret = normalizedSecret
+            if secret.hasPrefix("ncryptsec1") {
+                // NIP-49 passwords are arbitrary strings — pass raw.
+                try appState.importKey(ncryptsec: secret, password: passwordInput, source: .onboardingImport)
+            } else {
+                try appState.importKey(nsec: secret, source: .onboardingImport)
+            }
             errorMessage = ""
             nsecInput = ""
+            passwordInput = ""
             step = 2
         } catch {
             errorMessage = "Invalid key: \(error.localizedDescription)"
@@ -350,5 +429,45 @@ struct OnboardingView: View {
         } catch {
             errorMessage = "Generation failed: \(error.localizedDescription)"
         }
+    }
+
+    /// Only accept QRs that carry a plausible secret key; anything else
+    /// (npub, nostrconnect, note URIs) is ignored and scanning continues.
+    private func handleScannedCode(_ code: String) {
+        var value = code.trimmingCharacters(in: .whitespacesAndNewlines)
+        if value.hasPrefix("nostr:") {
+            value = String(value.dropFirst("nostr:".count))
+        }
+        let isHexKey = value.count == 64 && value.allSatisfy { $0.isHexDigit }
+        guard value.hasPrefix("nsec1") || value.hasPrefix("ncryptsec1") || isHexKey else {
+            return
+        }
+        // Password card appears automatically when the value is an
+        // ncryptsec; a nsec/hex scan just fills the field.
+        nsecInput = value
+        showScanner = false
+    }
+
+    private var scanDeniedPlaceholder: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "camera.fill")
+                .font(.system(size: 36))
+                .foregroundStyle(.secondary)
+            Text("Camera access denied")
+                .font(.headline)
+                .foregroundStyle(.secondary)
+            Button {
+                if let url = URL(string: UIApplication.openSettingsURLString) {
+                    UIApplication.shared.open(url)
+                }
+            } label: {
+                Text("Open Settings")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+            }
+            .buttonStyle(.bordered)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 48)
     }
 }

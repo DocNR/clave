@@ -210,6 +210,26 @@ extension AppState {
         return account
     }
 
+    /// Add an account from a NIP-49 encrypted secret key (ncryptsec1…).
+    /// Decrypts with the user-supplied password and re-enters the nsec path
+    /// so dedupe, cap, Keychain, and proxy registration behave identically.
+    @discardableResult
+    func addAccount(ncryptsec: String, password: String, source: AccountCreationSource = .other) throws -> Account {
+        let trimmed = ncryptsec.trimmingCharacters(in: .whitespacesAndNewlines)
+        let nsec: String
+        do {
+            let encrypted = try EncryptedSecretKey.fromBech32(bech32: trimmed)
+            let secretKey = try encrypted.decrypt(password: password)
+            nsec = try secretKey.toBech32()
+        } catch {
+            // Both malformed bech32 and wrong password arrive from the FFI
+            // as NostrSdkError — surface one actionable error rather than
+            // echoing SDK internals.
+            throw AccountError.invalidNcryptsec
+        }
+        return try addAccount(nsec: nsec, source: source)
+    }
+
     /// Generate a fresh keypair as a new account.
     @discardableResult
     func generateAccount(source: AccountCreationSource = .other) throws -> Account {
@@ -385,6 +405,10 @@ extension AppState {
 
     func importKey(nsec: String, source: AccountCreationSource = .other) throws {
         _ = try addAccount(nsec: nsec, source: source)
+    }
+
+    func importKey(ncryptsec: String, password: String, source: AccountCreationSource = .other) throws {
+        _ = try addAccount(ncryptsec: ncryptsec, password: password, source: source)
     }
 
     func generateKey(source: AccountCreationSource = .other) throws {

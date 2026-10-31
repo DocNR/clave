@@ -141,7 +141,17 @@ class NotificationService: UNNotificationServiceExtension {
             content.relevanceScore = 0
             contentHandler?(content)
             if let id = requestIdentifier {
-                UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [id])
+                // Keep the NSE alive until the remove lands. The process
+                // usually exits right after contentHandler, so a bare
+                // `removeDeliveredNotifications` no-ops and the blank
+                // banner stays parked in Notification Center (the same
+                // keep-alive pattern sweepPriorBlankNotifications uses).
+                let center = UNUserNotificationCenter.current()
+                Task {
+                    _ = await center.deliveredNotifications()
+                    center.removeDeliveredNotifications(withIdentifiers: [id])
+                    _ = await center.deliveredNotifications()
+                }
             }
         }
     }
