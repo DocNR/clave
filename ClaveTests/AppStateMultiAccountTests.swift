@@ -1,4 +1,5 @@
 import XCTest
+import NostrSDK
 @testable import Clave
 
 /// AppState multi-account surface tests.
@@ -118,6 +119,52 @@ final class AppStateMultiAccountTests: XCTestCase {
         XCTAssertEqual(result.addedAt, firstAddedAt, "Re-add must return the existing row, not a fresh one")
         XCTAssertEqual(appState.accounts.count, 2, "Re-add must not duplicate the row")
         XCTAssertEqual(appState.currentAccount?.pubkeyHex, testPubkeyA, "Re-add must switch to existing")
+    }
+
+    // MARK: - addAccount(ncryptsec:)
+
+    func testAddAccount_ncryptsec_decryptsAndStoresNsec() throws {
+        let keys = Keys.generate()
+        let encrypted = try EncryptedSecretKey(
+            secretKey: try keys.secretKey(),
+            password: "correct horse",
+            logN: 1,
+            keySecurity: .weak
+        )
+        let ncryptsec = try encrypted.toBech32()
+        let pubkeyHex = keys.publicKey().toHex()
+        // Keychain writes here outlive tearDown's fixed A/B wipe list.
+        defer { SharedKeychain.deleteNsec(for: pubkeyHex) }
+
+        let result = try appState.addAccount(ncryptsec: ncryptsec, password: "correct horse")
+        XCTAssertEqual(result.pubkeyHex, pubkeyHex)
+        XCTAssertEqual(appState.currentAccount?.pubkeyHex, pubkeyHex)
+        // The decrypted nsec — not the ncryptsec — is what lands in the Keychain
+        let stored = try XCTUnwrap(SharedKeychain.loadNsec(for: pubkeyHex))
+        XCTAssertEqual(stored, try keys.secretKey().toBech32())
+    }
+
+    func testAddAccount_ncryptsec_wrongPassword_throwsInvalidNcryptsec() throws {
+        let keys = Keys.generate()
+        let encrypted = try EncryptedSecretKey(
+            secretKey: try keys.secretKey(),
+            password: "correct horse",
+            logN: 1,
+            keySecurity: .weak
+        )
+        let ncryptsec = try encrypted.toBech32()
+
+        XCTAssertThrowsError(try appState.addAccount(ncryptsec: ncryptsec, password: "wrong")) { error in
+            XCTAssertEqual(error as? AccountError, .invalidNcryptsec)
+        }
+        XCTAssertTrue(appState.accounts.isEmpty, "Failed decrypt must not leave an account row")
+    }
+
+    func testAddAccount_ncryptsec_malformed_throwsInvalidNcryptsec() throws {
+        XCTAssertThrowsError(try appState.addAccount(ncryptsec: "ncryptsec1notreal", password: "x")) { error in
+            XCTAssertEqual(error as? AccountError, .invalidNcryptsec)
+        }
+        XCTAssertTrue(appState.accounts.isEmpty)
     }
 
     // MARK: - switchToAccount

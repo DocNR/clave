@@ -9,7 +9,7 @@
 	<key>NSFaceIDUsageDescription</key>
 	<string>Authenticate to view or export your secret key</string>
 	<key>NSCameraUsageDescription</key>
-	<string>Clave uses the camera to scan Nostrconnect QR codes from web clients so you can sign events without typing long URLs.</string>
+	<string>Clave uses the camera to scan Nostrconnect QR codes from web clients so you can sign events without typing long URLs, and to scan key QR codes when adding an account.</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>CFBundleURLTypes</key>
