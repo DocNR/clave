@@ -12,13 +12,22 @@ struct OnboardingView: View {
     /// True when the pasted/scanned secret is a NIP-49 encrypted key —
     /// the password card shows and Import requires it.
     private var isNcryptsecInput: Bool {
-        nsecInput.trimmingCharacters(in: .whitespaces).hasPrefix("ncryptsec1")
+        normalizedSecret.hasPrefix("ncryptsec1")
     }
 
     private var canImport: Bool {
-        let trimmed = nsecInput.trimmingCharacters(in: .whitespaces)
-        if trimmed.isEmpty { return false }
-        return !isNcryptsecInput || !passwordInput.trimmingCharacters(in: .whitespaces).isEmpty
+        if normalizedSecret.isEmpty { return false }
+        return !isNcryptsecInput || !passwordInput.isEmpty
+    }
+
+    /// Paste/scan normalization: NIP-19 URIs are often shared with a
+    /// `nostr:` prefix, which Keys.parse rejects.
+    private var normalizedSecret: String {
+        var value = nsecInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        if value.hasPrefix("nostr:") {
+            value = String(value.dropFirst("nostr:".count))
+        }
+        return value
     }
 
     var body: some View {
@@ -32,6 +41,7 @@ struct OnboardingView: View {
             }
             .navigationBarHidden(true)
             .onAppear { appState.refreshOnboardingBanner() }
+            .snapshotProtected()
             .sheet(isPresented: $showScanner) {
                 NavigationStack {
                     Group {
@@ -395,11 +405,12 @@ struct OnboardingView: View {
 
     private func importKey() {
         do {
-            let trimmed = nsecInput.trimmingCharacters(in: .whitespaces)
-            if trimmed.hasPrefix("ncryptsec1") {
-                try appState.importKey(ncryptsec: trimmed, password: passwordInput, source: .onboardingImport)
+            let secret = normalizedSecret
+            if secret.hasPrefix("ncryptsec1") {
+                // NIP-49 passwords are arbitrary strings — pass raw.
+                try appState.importKey(ncryptsec: secret, password: passwordInput, source: .onboardingImport)
             } else {
-                try appState.importKey(nsec: nsecInput, source: .onboardingImport)
+                try appState.importKey(nsec: secret, source: .onboardingImport)
             }
             errorMessage = ""
             nsecInput = ""
@@ -420,10 +431,16 @@ struct OnboardingView: View {
         }
     }
 
+    /// Only accept QRs that carry a plausible secret key; anything else
+    /// (npub, nostrconnect, note URIs) is ignored and scanning continues.
     private func handleScannedCode(_ code: String) {
         var value = code.trimmingCharacters(in: .whitespacesAndNewlines)
         if value.hasPrefix("nostr:") {
             value = String(value.dropFirst("nostr:".count))
+        }
+        let isHexKey = value.count == 64 && value.allSatisfy { $0.isHexDigit }
+        guard value.hasPrefix("nsec1") || value.hasPrefix("ncryptsec1") || isHexKey else {
+            return
         }
         // Password card appears automatically when the value is an
         // ncryptsec; a nsec/hex scan just fills the field.

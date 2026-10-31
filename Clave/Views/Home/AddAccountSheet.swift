@@ -34,8 +34,14 @@ struct AddAccountSheet: View {
         nsecInput.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private var trimmedPassword: String {
-        password.trimmingCharacters(in: .whitespacesAndNewlines)
+    /// Paste/scan normalization: NIP-19 URIs are often shared with a
+    /// `nostr:` prefix, which Keys.parse rejects.
+    private var normalizedSecret: String {
+        var value = nsecInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        if value.hasPrefix("nostr:") {
+            value = String(value.dropFirst("nostr:".count))
+        }
+        return value
     }
 
     var body: some View {
@@ -95,7 +101,7 @@ struct AddAccountSheet: View {
                     }
                     .disabled(isWorking
                               || (mode != .generate && trimmedNsec.isEmpty)
-                              || (mode == .ncryptsec && trimmedPassword.isEmpty))
+                              || (mode == .ncryptsec && password.isEmpty))
                 }
             }
             .navigationTitle("Add Account")
@@ -161,10 +167,16 @@ struct AddAccountSheet: View {
         .padding(.vertical, 48)
     }
 
+    /// Only accept QRs that carry a plausible secret key; anything else
+    /// (npub, nostrconnect, note URIs) is ignored and scanning continues.
     private func handleScannedCode(_ code: String) {
         var value = code.trimmingCharacters(in: .whitespacesAndNewlines)
         if value.hasPrefix("nostr:") {
             value = String(value.dropFirst("nostr:".count))
+        }
+        let isHexKey = value.count == 64 && value.allSatisfy { $0.isHexDigit }
+        guard value.hasPrefix("nsec1") || value.hasPrefix("ncryptsec1") || isHexKey else {
+            return
         }
         // Auto-route by prefix so a scanned ncryptsec lands in the mode
         // that shows the password field.
@@ -184,8 +196,9 @@ struct AddAccountSheet: View {
         }
         // An ncryptsec pasted into the nsec/hex field: flip modes so the
         // password field appears instead of failing Keys.parse.
-        if mode == .paste, trimmedNsec.hasPrefix("ncryptsec1") {
+        if mode == .paste, normalizedSecret.hasPrefix("ncryptsec1") {
             mode = .ncryptsec
+            errorMessage = nil
             return
         }
         errorMessage = nil
@@ -196,9 +209,11 @@ struct AddAccountSheet: View {
             case .generate:
                 _ = try appState.generateAccount()
             case .paste:
-                _ = try appState.addAccount(nsec: trimmedNsec)
+                _ = try appState.addAccount(nsec: normalizedSecret)
             case .ncryptsec:
-                _ = try appState.addAccount(ncryptsec: trimmedNsec, password: trimmedPassword)
+                // NIP-49 passwords are arbitrary strings — pass raw, not
+                // whitespace-trimmed.
+                _ = try appState.addAccount(ncryptsec: normalizedSecret, password: password)
             }
             UINotificationFeedbackGenerator().notificationOccurred(.success)
             dismiss()

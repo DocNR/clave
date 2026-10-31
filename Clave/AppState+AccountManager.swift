@@ -222,8 +222,9 @@ extension AppState {
             let secretKey = try encrypted.decrypt(password: password)
             nsec = try secretKey.toBech32()
         } catch {
-            // Malformed bech32 and wrong password are indistinguishable from
-            // the caller's perspective — surface one actionable error.
+            // Both malformed bech32 and wrong password arrive from the FFI
+            // as NostrSdkError — surface one actionable error rather than
+            // echoing SDK internals.
             throw AccountError.invalidNcryptsec
         }
         return try addAccount(nsec: nsec, source: source)

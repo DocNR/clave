@@ -153,11 +153,64 @@ final class AppStateMultiAccountTests: XCTestCase {
             keySecurity: .weak
         )
         let ncryptsec = try encrypted.toBech32()
+        let pubkeyHex = keys.publicKey().toHex()
 
         XCTAssertThrowsError(try appState.addAccount(ncryptsec: ncryptsec, password: "wrong")) { error in
             XCTAssertEqual(error as? AccountError, .invalidNcryptsec)
         }
         XCTAssertTrue(appState.accounts.isEmpty, "Failed decrypt must not leave an account row")
+        // Keychain-first ordering: a failed decrypt writes no secret.
+        XCTAssertNil(SharedKeychain.loadNsec(for: pubkeyHex))
+    }
+
+    func testAddAccount_ncryptsec_duplicateKey_dedupes() throws {
+        let keys = Keys.generate()
+        let encrypted = try EncryptedSecretKey(
+            secretKey: try keys.secretKey(),
+            password: "pw",
+            logN: 1,
+            keySecurity: .weak
+        )
+        let ncryptsec = try encrypted.toBech32()
+        let pubkeyHex = keys.publicKey().toHex()
+        defer { SharedKeychain.deleteNsec(for: pubkeyHex) }
+
+        let first = try appState.addAccount(nsec: try keys.secretKey().toBech32())
+        // Re-importing the same key via ncryptsec must dedupe, not add.
+        let second = try appState.addAccount(ncryptsec: ncryptsec, password: "pw")
+        XCTAssertEqual(second.pubkeyHex, first.pubkeyHex)
+        XCTAssertEqual(second.addedAt, first.addedAt)
+        XCTAssertEqual(appState.accounts.count, 1)
+        XCTAssertEqual(appState.currentAccount?.pubkeyHex, pubkeyHex)
+    }
+
+    func testAddAccount_ncryptsec_capReached_throwsAndWritesNothing() throws {
+        var wipedPubkeys: [String] = []
+        for _ in 0..<Account.maxAccountsPerDevice {
+            let keys = Keys.generate()
+            let pubkeyHex = keys.publicKey().toHex()
+            wipedPubkeys.append(pubkeyHex)
+            _ = try appState.addAccount(nsec: try keys.secretKey().toBech32())
+        }
+        defer {
+            for pk in wipedPubkeys { SharedKeychain.deleteNsec(for: pk) }
+        }
+
+        let keys = Keys.generate()
+        let encrypted = try EncryptedSecretKey(
+            secretKey: try keys.secretKey(),
+            password: "pw",
+            logN: 1,
+            keySecurity: .weak
+        )
+        let ncryptsec = try encrypted.toBech32()
+        let overflowPubkey = keys.publicKey().toHex()
+
+        XCTAssertThrowsError(try appState.addAccount(ncryptsec: ncryptsec, password: "pw")) { error in
+            XCTAssertEqual(error as? AccountError, .accountCapReached)
+        }
+        XCTAssertEqual(appState.accounts.count, Account.maxAccountsPerDevice)
+        XCTAssertNil(SharedKeychain.loadNsec(for: overflowPubkey))
     }
 
     func testAddAccount_ncryptsec_malformed_throwsInvalidNcryptsec() throws {
